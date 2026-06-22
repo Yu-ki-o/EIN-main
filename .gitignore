@@ -1,0 +1,38 @@
+# Python/cache artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Local environments and editor state
+.env
+.env.*
+.venv/
+venv/
+env/
+.idea/
+.vscode/
+.agents/
+.codex/
+
+# Large local data/model artifacts
+dataset/
+word2vec/
+*.pt
+*.pth
+*.pth.*
+*.ckpt
+*.model
+*.npy
+
+# Experiment outputs: keep lightweight summaries/visualizations, ignore runs.
+experiments/**/seed_*/
+experiments/**/*.log
+experiments/**/best_model*
+
+# OS files
+.DS_Store
+Thumbs.db

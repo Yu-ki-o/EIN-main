@@ -1,0 +1,17 @@
+Experiment setting:
+Target dataset: Pheme
+Mode: id
+OOD source datasets: []
+Validation domain: source
+
+Seed results:
+Seed 0: Acc 0.8057 | AUC 0.7834 | F1 0.7244
+Seed 1: Acc 0.7901 | AUC 0.7981 | F1 0.7411
+Seed 2: Acc 0.7970 | AUC 0.7565 | F1 0.6864
+Seed 3: Acc 0.8214 | AUC 0.8175 | F1 0.7657
+Seed 4: Acc 0.8031 | AUC 0.7672 | F1 0.6979
+
+Average results over 5 runs:
+ACC: 80.35+/-1.05 (%)
+AUC: 78.45+/-2.17 (%)
+F1: 72.31+/-2.87 (%)

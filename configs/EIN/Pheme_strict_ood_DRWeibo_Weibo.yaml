@@ -1,0 +1,49 @@
+# model and data
+model_name: EIN
+dataset: Pheme
+num_classes: 2
+language: en # kept for word2vec fallback
+word_embedding: multilingual-e5-base # strict_ood requires a shared encoder
+e5_model_name: intfloat/multilingual-e5-base
+e5_max_length: 128
+e5_batch_size: 64
+e5_local_files_only: True
+result_name: strict_ood_pheme_from_drweibo_weibo
+experiment_mode: strict_ood
+ood_source_datasets:
+  - DRWeibo
+  - Weibo
+ood_val_domain: source # source for strict zero-shot, target for target-val upper bound
+debug: False
+
+# training parameters
+seed: 0
+device: cuda
+lr: 0.0005
+weight_decay: 0.0001
+patience: 10
+n_epochs: 100
+split: '622'
+
+# model parameters
+batch_size: 128
+hidden_dim: 64
+in_feats: 768
+tokenize_mode: nltk
+k: 10000
+vector_size: 200
+undirected: True
+n_layers_conv: 3
+n_layers_feat: 1
+n_layers_fc: 2
+skip_connection: True
+res_branch: BNConvReLU
+dropout: 0.1
+edge_norm: True
+global_pool: sum
+
+base_model: BiGCN
+max_hop: 72
+init_alpha: 1.0
+init_beta: 1.0
+lamda: 0.5

@@ -1,0 +1,17 @@
+Experiment setting:
+Target dataset: Weibo
+Mode: id
+OOD source datasets: []
+Validation domain: source
+
+Seed results:
+Seed 0: Acc 0.9475 | AUC 0.9476 | F1 0.9480
+Seed 1: Acc 0.9474 | AUC 0.9475 | F1 0.9466
+Seed 2: Acc 0.9378 | AUC 0.9377 | F1 0.9392
+Seed 3: Acc 0.9421 | AUC 0.9422 | F1 0.9427
+Seed 4: Acc 0.9421 | AUC 0.9417 | F1 0.9395
+
+Average results over 5 runs:
+ACC: 94.34+/-0.37 (%)
+AUC: 94.33+/-0.38 (%)
+F1: 94.32+/-0.36 (%)

@@ -1,0 +1,73 @@
+# model and data
+model_name: EIN
+dataset: Weibo
+num_classes: 2
+language: ch # en or ch
+word_embedding: word2vec # match original EIN Weibo runs
+result_name: null # set a name to save logs under experiments/EIN/Weibo/<result_name>
+experiment_mode: id # id or strict_ood
+ood_source_datasets: []
+ood_val_domain: source # source or target
+debug: False
+
+# training parameters
+seed: 0
+device: cuda
+lr: 0.0005
+weight_decay: 0.00001
+patience: 10
+n_epochs: 100
+selection_metric: val_acc # val_loss, val_acc, val_auc, or val_f1
+split: '622'
+
+# model parameters
+batch_size: 128
+hidden_dim: 128
+TDdroprate: 0.2
+BUdroprate: 0.2
+tokenize_mode: jieba
+k: 10000
+vector_size: 200
+in_feats: 200
+n_layers_conv: 3
+aug1: DropEdge,mean,0.2,0.7
+aug2: NodeDrop,0.2,0.7
+n_layers_feat: 1
+n_layers_fc: 2
+skip_connection: True
+res_branch: BNConvReLU
+dropout: 0.3
+edge_norm: True
+global_pool: sum
+undirected: False
+
+base_model: BiGCN_StateAuxSameDiff
+max_hop: 72
+init_alpha: 0.5
+init_beta: 0.5
+lamda: 0.0
+
+# state-supervised same/diff enhancement
+state_aux_dual_view: True
+state_aux_transition_attention: False
+state_aux_transition_attention_blend: 1.0
+state_aux_reply_target_attention: False
+state_aux_reply_target_attention_blend: 1.0
+state_aux_cross_view_attention: False
+state_aux_cross_view_attention_blend: 1.0
+state_aux_cross_view_topk_ratio: 0.3
+state_aux_cross_view_min_nodes: 1
+state_aux_edge_relation_routing: False
+state_aux_num_states: 2
+state_aux_temp: 1.0
+state_aux_detach_route: False
+lambda_node_state_aux: 0.1
+lambda_edge_same_aux: 0.1
+lambda_same_diff_sep: 0.01
+same_path_blend: 1.0
+diff_path_blend: 1.0
+same_diff_gate_blend: 1.0
+same_dulreg_blend: 1.0
+same_dulreg_logvar_min: -8.0
+same_dulreg_logvar_max: 8.0
+same_dulreg_precision_max: 10000.0

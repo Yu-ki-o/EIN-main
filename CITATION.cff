@@ -1,0 +1,17 @@
+cff-version: 1.0
+message: "If you use this code, please cite it as below."
+
+@article{jiang2024epidemiology,
+  title={Epidemiology-informed network for robust rumor detection},
+  author={Jiang, Wei and Chen, Tong and Gao, Xinyi and Zhang, Wentao and Cui, Lizhen and Yin, Hongzhi},
+  journal={arXiv preprint arXiv:2411.12949},
+  year={2024}
+}
+
+authors:
+- family-names: Jiang
+  given-names: Wei
+orcid: https://orcid.org/0000-0002-9821-2276
+title:
+version: v1.0
+date-released: 2025-02-15

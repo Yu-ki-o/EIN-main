@@ -1,0 +1,1790 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A0bZs2PuS (1)</title>
+<style>
+body {
+  margin: 0;
+  font-family: Arial, "Microsoft YaHei", sans-serif;
+  color: #1f2933;
+  background: #f6f8fb;
+}
+.app {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  height: 100vh;
+}
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #d9e2ec;
+  background: #ffffff;
+}
+.toolbar h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+.toolbar span {
+  color: #52616b;
+  font-size: 13px;
+}
+.graph-wrap {
+  overflow: auto;
+}
+svg {
+  display: block;
+  background: #fbfdff;
+}
+.edge {
+  fill: none;
+  stroke: #9fb3c8;
+  stroke-width: 1.4;
+}
+.node {
+  cursor: pointer;
+}
+.node rect {
+  fill: #ffffff;
+  stroke: #829ab1;
+  stroke-width: 1.2;
+}
+.node.source rect {
+  fill: #e3f8ff;
+  stroke: #2d9cdb;
+  stroke-width: 1.8;
+}
+.node:hover rect, .node.active rect {
+  stroke: #ef6c00;
+  stroke-width: 2.4;
+}
+.node-label {
+  font-size: 13px;
+  font-weight: 700;
+  fill: #102a43;
+}
+.node-text {
+  font-size: 12px;
+  fill: #334e68;
+}
+.side {
+  border-left: 1px solid #d9e2ec;
+  background: #ffffff;
+  min-width: 0;
+  overflow: auto;
+}
+.panel {
+  padding: 16px;
+}
+.panel h2 {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+.content {
+  white-space: pre-wrap;
+  line-height: 1.5;
+  padding: 12px;
+  background: #f6f8fb;
+  border: 1px solid #d9e2ec;
+  border-radius: 6px;
+}
+pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 12px;
+  background: #102a43;
+  color: #f0f4f8;
+  border-radius: 6px;
+  font-size: 12px;
+}
+@media (max-width: 900px) {
+  .app {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) 45vh;
+  }
+  .side {
+    border-left: 0;
+    border-top: 1px solid #d9e2ec;
+  }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <main class="graph-wrap">
+    <div class="toolbar">
+      <h1>A0bZs2PuS (1)</h1>
+      <span>nodes: 81 | comments: 80 | label: 1</span>
+    </div>
+    <svg width="900" height="7518" viewBox="-40 -40 900 7518">
+      <path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 39.0, 280 39.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 131.0, 280 131.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 223.0, 280 223.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 315.0, 280 315.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 407.0, 280 407.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 499.0, 280 499.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 591.0, 280 591.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 683.0, 280 683.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 775.0, 280 775.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 867.0, 280 867.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 959.0, 280 959.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 1051.0, 280 1051.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 1143.0, 280 1143.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 1235.0, 280 1235.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 1327.0, 280 1327.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 1419.0, 280 1419.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 1511.0, 280 1511.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 1603.0, 280 1603.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 1695.0, 280 1695.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 1787.0, 280 1787.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 1879.0, 280 1879.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 1971.0, 280 1971.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 2063.0, 280 2063.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 2155.0, 280 2155.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 2247.0, 280 2247.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 2339.0, 280 2339.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 2431.0, 280 2431.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 2523.0, 280 2523.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 2615.0, 280 2615.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 2707.0, 280 2707.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 2799.0, 280 2799.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 2891.0, 280 2891.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 2983.0, 280 2983.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 3075.0, 280 3075.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 3167.0, 280 3167.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 3259.0, 280 3259.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 3351.0, 280 3351.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 3443.0, 280 3443.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 3535.0, 280 3535.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 3627.0, 280 3627.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 3719.0, 280 3719.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 3811.0, 280 3811.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 3903.0, 280 3903.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 3995.0, 280 3995.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 4087.0, 280 4087.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 4179.0, 280 4179.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 4271.0, 280 4271.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 4363.0, 280 4363.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 4455.0, 280 4455.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 4547.0, 280 4547.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 4639.0, 280 4639.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 4731.0, 280 4731.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 4823.0, 280 4823.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 4915.0, 280 4915.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 5007.0, 280 5007.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 5099.0, 280 5099.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 5191.0, 280 5191.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 5283.0, 280 5283.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 5375.0, 280 5375.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 5467.0, 280 5467.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 5559.0, 280 5559.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 5651.0, 280 5651.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 5743.0, 280 5743.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 5835.0, 280 5835.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 5927.0, 280 5927.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 6019.0, 280 6019.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 6111.0, 280 6111.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 6203.0, 280 6203.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 6295.0, 280 6295.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 6387.0, 280 6387.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 6479.0, 280 6479.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 6571.0, 280 6571.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 6663.0, 280 6663.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 6755.0, 280 6755.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 6847.0, 280 6847.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 6939.0, 280 6939.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 7031.0, 280 7031.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 7123.0, 280 7123.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 7215.0, 280 7215.0" />
+<path class="edge" d="M 230 3673.0 C 255.0 3673.0, 255.0 7307.0, 280 7307.0" />
+<g class="node source" data-node-id="source" data-title="source" data-content="【幸运的狗狗 】佛罗里达Marco岛发生了一件感人的事件：一只狗掉进运河，一群海豚便担起了救狗的责任，附近的居民听见海豚的声音，超级大声，出来一看，原来海豚们正驼着狗狗往安全地带游，他们赶紧报警，花了近15个小时狗狗被消防人员拉出并与主人团聚。感谢附近的居民拍下这一张感人的照片@牛尔 " data-meta="{
+  &quot;content&quot;: &quot;【幸运的狗狗 】佛罗里达Marco岛发生了一件感人的事件：一只狗掉进运河，一群海豚便担起了救狗的责任，附近的居民听见海豚的声音，超级大声，出来一看，原来海豚们正驼着狗狗往安全地带游，他们赶紧报警，花了近15个小时狗狗被消防人员拉出并与主人团聚。感谢附近的居民拍下这一张感人的照片@牛尔 &quot;,
+  &quot;time&quot;: &quot;13-7-15 22:57&quot;,
+  &quot;user id&quot;: &quot;1314608344&quot;,
+  &quot;tweet id&quot;: &quot;A0bZs2PuS&quot;,
+  &quot;label&quot;: 1,
+  &quot;theme&quot;: &quot;社会生活&quot;,
+  &quot;node_kind&quot;: &quot;source&quot;,
+  &quot;node_label&quot;: &quot;source&quot;
+}" transform="translate(0 3634.0)">
+<title>source: 【幸运的狗狗 】佛罗里达Marco岛发生了一件感人的事件：一只狗掉进运河，一群海豚便担起了救狗的责任，附近的居民听见海豚的声音，超级大声，出来一看，原来海豚们正驼着狗狗往安全地带游，他们赶紧报警，花了近15个小时狗狗被消防人员拉出并与主人团聚。感谢附近的居民拍下这一张感人的照片@牛尔 </title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">source</text>
+<text class="node-text" x="10" y="40">【幸运的狗狗 】佛罗里达Marco岛发生了一件感</text>
+<text class="node-text" x="10" y="57">人的事件：一只狗掉进运河，一群海豚便担起了救狗的</text>
+</g>
+<g class="node comment" data-node-id="comment-0" data-title="c0" data-content="544444" data-meta="{
+  &quot;comment id&quot;: 0,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;3175650360&quot;,
+  &quot;user name&quot;: &quot;黑草默默&quot;,
+  &quot;content&quot;: &quot;544444&quot;,
+  &quot;time&quot;: &quot;13-7-18 12:12&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c0&quot;
+}" transform="translate(280 0)">
+<title>c0: 544444</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c0</text>
+<text class="node-text" x="10" y="40">544444</text>
+</g>
+<g class="node comment" data-node-id="comment-1" data-title="c1" data-content="确实嘛" data-meta="{
+  &quot;comment id&quot;: 1,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1850560365&quot;,
+  &quot;user name&quot;: &quot;奶茶宝J&quot;,
+  &quot;content&quot;: &quot;确实嘛&quot;,
+  &quot;time&quot;: &quot;13-7-17 18:23&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c1&quot;
+}" transform="translate(280 92)">
+<title>c1: 确实嘛</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c1</text>
+<text class="node-text" x="10" y="40">确实嘛</text>
+</g>
+<g class="node comment" data-node-id="comment-2" data-title="c2" data-content="这说明海豚很好" data-meta="{
+  &quot;comment id&quot;: 2,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1916804597&quot;,
+  &quot;user name&quot;: &quot;纳儿童仔&quot;,
+  &quot;content&quot;: &quot;这说明海豚很好&quot;,
+  &quot;time&quot;: &quot;13-7-17 13:41&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c2&quot;
+}" transform="translate(280 184)">
+<title>c2: 这说明海豚很好</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c2</text>
+<text class="node-text" x="10" y="40">这说明海豚很好</text>
+</g>
+<g class="node comment" data-node-id="comment-3" data-title="c3" data-content="善良的豚豚，爱你。。。。。" data-meta="{
+  &quot;comment id&quot;: 3,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1811509113&quot;,
+  &quot;user name&quot;: &quot;雨奏钢琴&quot;,
+  &quot;content&quot;: &quot;善良的豚豚，爱你。。。。。&quot;,
+  &quot;time&quot;: &quot;13-7-17 13:16&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c3&quot;
+}" transform="translate(280 276)">
+<title>c3: 善良的豚豚，爱你。。。。。</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c3</text>
+<text class="node-text" x="10" y="40">善良的豚豚，爱你。。。。。</text>
+</g>
+<g class="node comment" data-node-id="comment-4" data-title="c4" data-content="哈哈哈哈。也比你有爱哈哈哈" data-meta="{
+  &quot;comment id&quot;: 4,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1804787607&quot;,
+  &quot;user name&quot;: &quot;zhiiiii_宏&quot;,
+  &quot;content&quot;: &quot;哈哈哈哈。也比你有爱哈哈哈&quot;,
+  &quot;time&quot;: &quot;13-7-16 23:46&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c4&quot;
+}" transform="translate(280 368)">
+<title>c4: 哈哈哈哈。也比你有爱哈哈哈</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c4</text>
+<text class="node-text" x="10" y="40">哈哈哈哈。也比你有爱哈哈哈</text>
+</g>
+<g class="node comment" data-node-id="comment-5" data-title="c5" data-content="悲剧，刚看原微博下面一行高亮：此内容为不实消息，已处理。" data-meta="{
+  &quot;comment id&quot;: 5,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1559016662&quot;,
+  &quot;user name&quot;: &quot;大象伦敦&quot;,
+  &quot;content&quot;: &quot;悲剧，刚看原微博下面一行高亮：此内容为不实消息，已处理。&quot;,
+  &quot;time&quot;: &quot;13-7-16 22:00&quot;,
+  &quot;stance_label&quot;: 1,
+  &quot;state&quot;: 1,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c5&quot;
+}" transform="translate(280 460)">
+<title>c5: 悲剧，刚看原微博下面一行高亮：此内容为不实消息，已处理。</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c5</text>
+<text class="node-text" x="10" y="40">悲剧，刚看原微博下面一行高亮：此内容为不实消息，</text>
+<text class="node-text" x="10" y="57">已处理。</text>
+</g>
+<g class="node comment" data-node-id="comment-6" data-title="c6" data-content="哇〜so cool！" data-meta="{
+  &quot;comment id&quot;: 6,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2598799570&quot;,
+  &quot;user name&quot;: &quot;YCW_Jacky_548&quot;,
+  &quot;content&quot;: &quot;哇〜so cool！&quot;,
+  &quot;time&quot;: &quot;13-7-16 22:00&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c6&quot;
+}" transform="translate(280 552)">
+<title>c6: 哇〜so cool！</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c6</text>
+<text class="node-text" x="10" y="40">哇〜so cool！</text>
+</g>
+<g class="node comment" data-node-id="comment-7" data-title="c7" data-content="小动物们就是这么可爱" data-meta="{
+  &quot;comment id&quot;: 7,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1569676444&quot;,
+  &quot;user name&quot;: &quot;洒脱系的棍子君&quot;,
+  &quot;content&quot;: &quot;小动物们就是这么可爱&quot;,
+  &quot;time&quot;: &quot;13-7-16 20:58&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c7&quot;
+}" transform="translate(280 644)">
+<title>c7: 小动物们就是这么可爱</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c7</text>
+<text class="node-text" x="10" y="40">小动物们就是这么可爱</text>
+</g>
+<g class="node comment" data-node-id="comment-8" data-title="c8" data-content="睡你的觉去。哼。海豚比你可爱" data-meta="{
+  &quot;comment id&quot;: 8,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2947601142&quot;,
+  &quot;user name&quot;: &quot;肥兔纸de铲屎官&quot;,
+  &quot;content&quot;: &quot;睡你的觉去。哼。海豚比你可爱&quot;,
+  &quot;time&quot;: &quot;13-7-16 18:02&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c8&quot;
+}" transform="translate(280 736)">
+<title>c8: 睡你的觉去。哼。海豚比你可爱</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c8</text>
+<text class="node-text" x="10" y="40">睡你的觉去。哼。海豚比你可爱</text>
+</g>
+<g class="node comment" data-node-id="comment-9" data-title="c9" data-content="那个海豚是我不要夸我啦" data-meta="{
+  &quot;comment id&quot;: 9,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1804787607&quot;,
+  &quot;user name&quot;: &quot;zhiiiii_宏&quot;,
+  &quot;content&quot;: &quot;那个海豚是我不要夸我啦&quot;,
+  &quot;time&quot;: &quot;13-7-16 17:59&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c9&quot;
+}" transform="translate(280 828)">
+<title>c9: 那个海豚是我不要夸我啦</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c9</text>
+<text class="node-text" x="10" y="40">那个海豚是我不要夸我啦</text>
+</g>
+<g class="node comment" data-node-id="comment-10" data-title="c10" data-content="要是真的就好了" data-meta="{
+  &quot;comment id&quot;: 10,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1845254755&quot;,
+  &quot;user name&quot;: &quot;猫喵123&quot;,
+  &quot;content&quot;: &quot;要是真的就好了&quot;,
+  &quot;time&quot;: &quot;13-7-16 17:32&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c10&quot;
+}" transform="translate(280 920)">
+<title>c10: 要是真的就好了</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c10</text>
+<text class="node-text" x="10" y="40">要是真的就好了</text>
+</g>
+<g class="node comment" data-node-id="comment-11" data-title="c11" data-content="那你就是!" data-meta="{
+  &quot;comment id&quot;: 11,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1440199010&quot;,
+  &quot;user name&quot;: &quot;武小某&quot;,
+  &quot;content&quot;: &quot;那你就是!&quot;,
+  &quot;time&quot;: &quot;13-7-16 17:07&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c11&quot;
+}" transform="translate(280 1012)">
+<title>c11: 那你就是!</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c11</text>
+<text class="node-text" x="10" y="40">那你就是!</text>
+</g>
+<g class="node comment" data-node-id="comment-12" data-title="c12" data-content="这是假新闻！！" data-meta="{
+  &quot;comment id&quot;: 12,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2120998053&quot;,
+  &quot;user name&quot;: &quot;panapoo&quot;,
+  &quot;content&quot;: &quot;这是假新闻！！&quot;,
+  &quot;time&quot;: &quot;13-7-16 17:06&quot;,
+  &quot;stance_label&quot;: 1,
+  &quot;state&quot;: 1,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c12&quot;
+}" transform="translate(280 1104)">
+<title>c12: 这是假新闻！！</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c12</text>
+<text class="node-text" x="10" y="40">这是假新闻！！</text>
+</g>
+<g class="node comment" data-node-id="comment-13" data-title="c13" data-content="你适合跟小海王八冲浪[挖鼻屎]" data-meta="{
+  &quot;comment id&quot;: 13,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1776739695&quot;,
+  &quot;user name&quot;: &quot;13张CD&quot;,
+  &quot;content&quot;: &quot;你适合跟小海王八冲浪[挖鼻屎]&quot;,
+  &quot;time&quot;: &quot;13-7-16 16:39&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c13&quot;
+}" transform="translate(280 1196)">
+<title>c13: 你适合跟小海王八冲浪[挖鼻屎]</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c13</text>
+<text class="node-text" x="10" y="40">你适合跟小海王八冲浪[挖鼻屎]</text>
+</g>
+<g class="node comment" data-node-id="comment-14" data-title="c14" data-content="很多人吃的鱼翅里，海豚也有" data-meta="{
+  &quot;comment id&quot;: 14,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2165362103&quot;,
+  &quot;user name&quot;: &quot;one0onetow&quot;,
+  &quot;content&quot;: &quot;很多人吃的鱼翅里，海豚也有&quot;,
+  &quot;time&quot;: &quot;13-7-16 16:16&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c14&quot;
+}" transform="translate(280 1288)">
+<title>c14: 很多人吃的鱼翅里，海豚也有</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c14</text>
+<text class="node-text" x="10" y="40">很多人吃的鱼翅里，海豚也有</text>
+</g>
+<g class="node comment" data-node-id="comment-15" data-title="c15" data-content="真的假的啊？" data-meta="{
+  &quot;comment id&quot;: 15,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1915525283&quot;,
+  &quot;user name&quot;: &quot;大首龙吟&quot;,
+  &quot;content&quot;: &quot;真的假的啊？&quot;,
+  &quot;time&quot;: &quot;13-7-16 15:30&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c15&quot;
+}" transform="translate(280 1380)">
+<title>c15: 真的假的啊？</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c15</text>
+<text class="node-text" x="10" y="40">真的假的啊？</text>
+</g>
+<g class="node comment" data-node-id="comment-16" data-title="c16" data-content="人与自然本应和谐共处" data-meta="{
+  &quot;comment id&quot;: 16,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1574591340&quot;,
+  &quot;user name&quot;: &quot;哲溪77&quot;,
+  &quot;content&quot;: &quot;人与自然本应和谐共处&quot;,
+  &quot;time&quot;: &quot;13-7-16 14:34&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c16&quot;
+}" transform="translate(280 1472)">
+<title>c16: 人与自然本应和谐共处</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c16</text>
+<text class="node-text" x="10" y="40">人与自然本应和谐共处</text>
+</g>
+<g class="node comment" data-node-id="comment-17" data-title="c17" data-content="晕。。。" data-meta="{
+  &quot;comment id&quot;: 17,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;3182189257&quot;,
+  &quot;user name&quot;: &quot;思闻欧巴&quot;,
+  &quot;content&quot;: &quot;晕。。。&quot;,
+  &quot;time&quot;: &quot;13-7-16 14:12&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c17&quot;
+}" transform="translate(280 1564)">
+<title>c17: 晕。。。</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c17</text>
+<text class="node-text" x="10" y="40">晕。。。</text>
+</g>
+<g class="node comment" data-node-id="comment-18" data-title="c18" data-content="" data-meta="{
+  &quot;comment id&quot;: 18,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1870799805&quot;,
+  &quot;user name&quot;: &quot;____________末&quot;,
+  &quot;content&quot;: &quot;&quot;,
+  &quot;time&quot;: &quot;13-7-16 14:09&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c18&quot;
+}" transform="translate(280 1656)">
+<title>c18: </title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c18</text>
+<text class="node-text" x="10" y="40"></text>
+</g>
+<g class="node comment" data-node-id="comment-19" data-title="c19" data-content="像动画片里的一样啊" data-meta="{
+  &quot;comment id&quot;: 19,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2759313917&quot;,
+  &quot;user name&quot;: &quot;updatinglynn&quot;,
+  &quot;content&quot;: &quot;像动画片里的一样啊&quot;,
+  &quot;time&quot;: &quot;13-7-16 14:01&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c19&quot;
+}" transform="translate(280 1748)">
+<title>c19: 像动画片里的一样啊</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c19</text>
+<text class="node-text" x="10" y="40">像动画片里的一样啊</text>
+</g>
+<g class="node comment" data-node-id="comment-20" data-title="c20" data-content="动物都比人有爱。人类是不是该惭愧了？" data-meta="{
+  &quot;comment id&quot;: 20,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2804678157&quot;,
+  &quot;user name&quot;: &quot;凌磬-徐&quot;,
+  &quot;content&quot;: &quot;动物都比人有爱。人类是不是该惭愧了？&quot;,
+  &quot;time&quot;: &quot;13-7-16 13:25&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c20&quot;
+}" transform="translate(280 1840)">
+<title>c20: 动物都比人有爱。人类是不是该惭愧了？</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c20</text>
+<text class="node-text" x="10" y="40">动物都比人有爱。人类是不是该惭愧了？</text>
+</g>
+<g class="node comment" data-node-id="comment-21" data-title="c21" data-content="假的，已经被辟谣了，博主可以删除了。" data-meta="{
+  &quot;comment id&quot;: 21,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1712553673&quot;,
+  &quot;user name&quot;: &quot;亦幻亦美lx&quot;,
+  &quot;content&quot;: &quot;假的，已经被辟谣了，博主可以删除了。&quot;,
+  &quot;time&quot;: &quot;13-7-16 12:49&quot;,
+  &quot;stance_label&quot;: 1,
+  &quot;state&quot;: 1,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c21&quot;
+}" transform="translate(280 1932)">
+<title>c21: 假的，已经被辟谣了，博主可以删除了。</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c21</text>
+<text class="node-text" x="10" y="40">假的，已经被辟谣了，博主可以删除了。</text>
+</g>
+<g class="node comment" data-node-id="comment-22" data-title="c22" data-content="好温馨的薏米，善待动物吧，" data-meta="{
+  &quot;comment id&quot;: 22,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2946049261&quot;,
+  &quot;user name&quot;: &quot;荷梵Sherry&quot;,
+  &quot;content&quot;: &quot;好温馨的薏米，善待动物吧，&quot;,
+  &quot;time&quot;: &quot;13-7-16 12:47&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c22&quot;
+}" transform="translate(280 2024)">
+<title>c22: 好温馨的薏米，善待动物吧，</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c22</text>
+<text class="node-text" x="10" y="40">好温馨的薏米，善待动物吧，</text>
+</g>
+<g class="node comment" data-node-id="comment-23" data-title="c23" data-content="@花儿圃 " data-meta="{
+  &quot;comment id&quot;: 23,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2959400937&quot;,
+  &quot;user name&quot;: &quot;ojuejuno&quot;,
+  &quot;content&quot;: &quot;@花儿圃 &quot;,
+  &quot;time&quot;: &quot;13-7-16 12:24&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c23&quot;
+}" transform="translate(280 2116)">
+<title>c23: @花儿圃 </title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c23</text>
+<text class="node-text" x="10" y="40">@花儿圃</text>
+</g>
+<g class="node comment" data-node-id="comment-24" data-title="c24" data-content="善哉。" data-meta="{
+  &quot;comment id&quot;: 24,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2635597705&quot;,
+  &quot;user name&quot;: &quot;东方十四醛&quot;,
+  &quot;content&quot;: &quot;善哉。&quot;,
+  &quot;time&quot;: &quot;13-7-16 12:20&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c24&quot;
+}" transform="translate(280 2208)">
+<title>c24: 善哉。</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c24</text>
+<text class="node-text" x="10" y="40">善哉。</text>
+</g>
+<g class="node comment" data-node-id="comment-25" data-title="c25" data-content="动物有情人无情" data-meta="{
+  &quot;comment id&quot;: 25,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2029384717&quot;,
+  &quot;user name&quot;: &quot;TFBOYS-凯源玺W&quot;,
+  &quot;content&quot;: &quot;动物有情人无情&quot;,
+  &quot;time&quot;: &quot;13-7-16 11:51&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c25&quot;
+}" transform="translate(280 2300)">
+<title>c25: 动物有情人无情</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c25</text>
+<text class="node-text" x="10" y="40">动物有情人无情</text>
+</g>
+<g class="node comment" data-node-id="comment-26" data-title="c26" data-content="幸运的狗狗" data-meta="{
+  &quot;comment id&quot;: 26,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1631662805&quot;,
+  &quot;user name&quot;: &quot;魅力鹿&quot;,
+  &quot;content&quot;: &quot;幸运的狗狗&quot;,
+  &quot;time&quot;: &quot;13-7-16 11:40&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c26&quot;
+}" transform="translate(280 2392)">
+<title>c26: 幸运的狗狗</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c26</text>
+<text class="node-text" x="10" y="40">幸运的狗狗</text>
+</g>
+<g class="node comment" data-node-id="comment-27" data-title="c27" data-content="我发现国外消防救人不行，救狗啊猫之类的很是厉害  而且所有的报道都是怎么去解救的动物。国外消防难道是为动物准备的？" data-meta="{
+  &quot;comment id&quot;: 27,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;3173237763&quot;,
+  &quot;user name&quot;: &quot;Proudlittlemelon&quot;,
+  &quot;content&quot;: &quot;我发现国外消防救人不行，救狗啊猫之类的很是厉害  而且所有的报道都是怎么去解救的动物。国外消防难道是为动物准备的？&quot;,
+  &quot;time&quot;: &quot;13-7-16 11:39&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c27&quot;
+}" transform="translate(280 2484)">
+<title>c27: 我发现国外消防救人不行，救狗啊猫之类的很是厉害  而且所有的报道都是怎么去解救的动物。国外消防难道是为动物准备的？</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c27</text>
+<text class="node-text" x="10" y="40">我发现国外消防救人不行，救狗啊猫之类的很是厉害 </text>
+<text class="node-text" x="10" y="57">而且所有的报道都是怎么去解救的动物。国外消防难道</text>
+</g>
+<g class="node comment" data-node-id="comment-28" data-title="c28" data-content="好感动，海豚真的很有灵性！" data-meta="{
+  &quot;comment id&quot;: 28,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1661682830&quot;,
+  &quot;user name&quot;: &quot;心工画师&quot;,
+  &quot;content&quot;: &quot;好感动，海豚真的很有灵性！&quot;,
+  &quot;time&quot;: &quot;13-7-16 11:31&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c28&quot;
+}" transform="translate(280 2576)">
+<title>c28: 好感动，海豚真的很有灵性！</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c28</text>
+<text class="node-text" x="10" y="40">好感动，海豚真的很有灵性！</text>
+</g>
+<g class="node comment" data-node-id="comment-29" data-title="c29" data-content="已经有人证实这是一张剧照" data-meta="{
+  &quot;comment id&quot;: 29,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1854515994&quot;,
+  &quot;user name&quot;: &quot;FAT_Lily&quot;,
+  &quot;content&quot;: &quot;已经有人证实这是一张剧照&quot;,
+  &quot;time&quot;: &quot;13-7-16 11:29&quot;,
+  &quot;stance_label&quot;: 1,
+  &quot;state&quot;: 1,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c29&quot;
+}" transform="translate(280 2668)">
+<title>c29: 已经有人证实这是一张剧照</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c29</text>
+<text class="node-text" x="10" y="40">已经有人证实这是一张剧照</text>
+</g>
+<g class="node comment" data-node-id="comment-30" data-title="c30" data-content="运河里有海豚吗？海豚不是海里的吗" data-meta="{
+  &quot;comment id&quot;: 30,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1072458517&quot;,
+  &quot;user name&quot;: &quot;咩咩阳的翅膀&quot;,
+  &quot;content&quot;: &quot;运河里有海豚吗？海豚不是海里的吗&quot;,
+  &quot;time&quot;: &quot;13-7-16 11:12&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c30&quot;
+}" transform="translate(280 2760)">
+<title>c30: 运河里有海豚吗？海豚不是海里的吗</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c30</text>
+<text class="node-text" x="10" y="40">运河里有海豚吗？海豚不是海里的吗</text>
+</g>
+<g class="node comment" data-node-id="comment-31" data-title="c31" data-content="感动！它们心中只有爱和真诚！" data-meta="{
+  &quot;comment id&quot;: 31,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2134647545&quot;,
+  &quot;user name&quot;: &quot;卢湾诚诚&quot;,
+  &quot;content&quot;: &quot;感动！它们心中只有爱和真诚！&quot;,
+  &quot;time&quot;: &quot;13-7-16 11:11&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c31&quot;
+}" transform="translate(280 2852)">
+<title>c31: 感动！它们心中只有爱和真诚！</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c31</text>
+<text class="node-text" x="10" y="40">感动！它们心中只有爱和真诚！</text>
+</g>
+<g class="node comment" data-node-id="comment-32" data-title="c32" data-content="善待动物//@艾绿郑元英: 海豚和狗狗都是人类最忠实的朋友！@野生空间项目 //@小僧很环保: @苏北不在空城 //@空气净化网-微博://@335小宝: " data-meta="{
+  &quot;comment id&quot;: 32,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;3267379224&quot;,
+  &quot;user name&quot;: &quot;野生空间项目&quot;,
+  &quot;content&quot;: &quot;善待动物//@艾绿郑元英: 海豚和狗狗都是人类最忠实的朋友！@野生空间项目 //@小僧很环保: @苏北不在空城 //@空气净化网-微博://@335小宝: &quot;,
+  &quot;time&quot;: &quot;13-7-16 11:04&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c32&quot;
+}" transform="translate(280 2944)">
+<title>c32: 善待动物//@艾绿郑元英: 海豚和狗狗都是人类最忠实的朋友！@野生空间项目 //@小僧很环保: @苏北不在空城 //@空气净化网-微博://@335小宝: </title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c32</text>
+<text class="node-text" x="10" y="40">善待动物//@艾绿郑元英: 海豚和狗狗都是人类最</text>
+<text class="node-text" x="10" y="57">忠实的朋友！@野生空间项目 //@小僧很环保: </text>
+</g>
+<g class="node comment" data-node-id="comment-33" data-title="c33" data-content="动物都有爱，那些残害小动物的人深思吧，呼吁小动物保护法！！" data-meta="{
+  &quot;comment id&quot;: 33,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2749095941&quot;,
+  &quot;user name&quot;: &quot;大脸猫女赌侠&quot;,
+  &quot;content&quot;: &quot;动物都有爱，那些残害小动物的人深思吧，呼吁小动物保护法！！&quot;,
+  &quot;time&quot;: &quot;13-7-16 10:57&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c33&quot;
+}" transform="translate(280 3036)">
+<title>c33: 动物都有爱，那些残害小动物的人深思吧，呼吁小动物保护法！！</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c33</text>
+<text class="node-text" x="10" y="40">动物都有爱，那些残害小动物的人深思吧，呼吁小动物</text>
+<text class="node-text" x="10" y="57">保护法！！</text>
+</g>
+<g class="node comment" data-node-id="comment-34" data-title="c34" data-content="" data-meta="{
+  &quot;comment id&quot;: 34,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2809330234&quot;,
+  &quot;user name&quot;: &quot;江左萌小雅&quot;,
+  &quot;content&quot;: &quot;&quot;,
+  &quot;time&quot;: &quot;13-7-16 10:45&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c34&quot;
+}" transform="translate(280 3128)">
+<title>c34: </title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c34</text>
+<text class="node-text" x="10" y="40"></text>
+</g>
+<g class="node comment" data-node-id="comment-35" data-title="c35" data-content="" data-meta="{
+  &quot;comment id&quot;: 35,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2125194133&quot;,
+  &quot;user name&quot;: &quot;4O4Not_F0und&quot;,
+  &quot;content&quot;: &quot;&quot;,
+  &quot;time&quot;: &quot;13-7-16 10:41&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c35&quot;
+}" transform="translate(280 3220)">
+<title>c35: </title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c35</text>
+<text class="node-text" x="10" y="40"></text>
+</g>
+<g class="node comment" data-node-id="comment-36" data-title="c36" data-content="现在是畜生都知道相亲相爱，看到很感动" data-meta="{
+  &quot;comment id&quot;: 36,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2480219284&quot;,
+  &quot;user name&quot;: &quot;布布de布&quot;,
+  &quot;content&quot;: &quot;现在是畜生都知道相亲相爱，看到很感动&quot;,
+  &quot;time&quot;: &quot;13-7-16 10:35&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c36&quot;
+}" transform="translate(280 3312)">
+<title>c36: 现在是畜生都知道相亲相爱，看到很感动</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c36</text>
+<text class="node-text" x="10" y="40">现在是畜生都知道相亲相爱，看到很感动</text>
+</g>
+<g class="node comment" data-node-id="comment-37" data-title="c37" data-content="感动,好有爱" data-meta="{
+  &quot;comment id&quot;: 37,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2596728757&quot;,
+  &quot;user name&quot;: &quot;等你来看我啊&quot;,
+  &quot;content&quot;: &quot;感动,好有爱&quot;,
+  &quot;time&quot;: &quot;13-7-16 10:33&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c37&quot;
+}" transform="translate(280 3404)">
+<title>c37: 感动,好有爱</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c37</text>
+<text class="node-text" x="10" y="40">感动,好有爱</text>
+</g>
+<g class="node comment" data-node-id="comment-38" data-title="c38" data-content="海豚是有爱的动物，真不知道那些没良心失人心的为什么要伤害他们" data-meta="{
+  &quot;comment id&quot;: 38,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2735235282&quot;,
+  &quot;user name&quot;: &quot;甜甜的泥土不好吃&quot;,
+  &quot;content&quot;: &quot;海豚是有爱的动物，真不知道那些没良心失人心的为什么要伤害他们&quot;,
+  &quot;time&quot;: &quot;13-7-16 10:27&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c38&quot;
+}" transform="translate(280 3496)">
+<title>c38: 海豚是有爱的动物，真不知道那些没良心失人心的为什么要伤害他们</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c38</text>
+<text class="node-text" x="10" y="40">海豚是有爱的动物，真不知道那些没良心失人心的为什</text>
+<text class="node-text" x="10" y="57">么要伤害他们</text>
+</g>
+<g class="node comment" data-node-id="comment-39" data-title="c39" data-content="如果是在中国，这只海豚估计会被一起带上岸。或者就是照相完让其自生自灭。[挖鼻屎]" data-meta="{
+  &quot;comment id&quot;: 39,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1654282094&quot;,
+  &quot;user name&quot;: &quot;和波波波波丶Salute&quot;,
+  &quot;content&quot;: &quot;如果是在中国，这只海豚估计会被一起带上岸。或者就是照相完让其自生自灭。[挖鼻屎]&quot;,
+  &quot;time&quot;: &quot;13-7-16 10:25&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c39&quot;
+}" transform="translate(280 3588)">
+<title>c39: 如果是在中国，这只海豚估计会被一起带上岸。或者就是照相完让其自生自灭。[挖鼻屎]</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c39</text>
+<text class="node-text" x="10" y="40">如果是在中国，这只海豚估计会被一起带上岸。或者就</text>
+<text class="node-text" x="10" y="57">是照相完让其自生自灭。[挖鼻屎]</text>
+</g>
+<g class="node comment" data-node-id="comment-40" data-title="c40" data-content="真的好有爱@高天航vs津爷 " data-meta="{
+  &quot;comment id&quot;: 40,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1850560365&quot;,
+  &quot;user name&quot;: &quot;奶茶宝J&quot;,
+  &quot;content&quot;: &quot;真的好有爱@高天航vs津爷 &quot;,
+  &quot;time&quot;: &quot;13-7-16 10:21&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c40&quot;
+}" transform="translate(280 3680)">
+<title>c40: 真的好有爱@高天航vs津爷 </title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c40</text>
+<text class="node-text" x="10" y="40">真的好有爱@高天航vs津爷</text>
+</g>
+<g class="node comment" data-node-id="comment-41" data-title="c41" data-content="真好。哈哈" data-meta="{
+  &quot;comment id&quot;: 41,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2455927447&quot;,
+  &quot;user name&quot;: &quot;霓虹闪烁8699&quot;,
+  &quot;content&quot;: &quot;真好。哈哈&quot;,
+  &quot;time&quot;: &quot;13-7-16 10:11&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c41&quot;
+}" transform="translate(280 3772)">
+<title>c41: 真好。哈哈</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c41</text>
+<text class="node-text" x="10" y="40">真好。哈哈</text>
+</g>
+<g class="node comment" data-node-id="comment-42" data-title="c42" data-content=" @食神方_MCLUB" data-meta="{
+  &quot;comment id&quot;: 42,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1769255503&quot;,
+  &quot;user name&quot;: &quot;CHACHAWOOD-&quot;,
+  &quot;content&quot;: &quot; @食神方_MCLUB&quot;,
+  &quot;time&quot;: &quot;13-7-16 10:05&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c42&quot;
+}" transform="translate(280 3864)">
+<title>c42:  @食神方_MCLUB</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c42</text>
+<text class="node-text" x="10" y="40">@食神方_MCLUB</text>
+</g>
+<g class="node comment" data-node-id="comment-43" data-title="c43" data-content="这才是自然的和谐！" data-meta="{
+  &quot;comment id&quot;: 43,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2916320811&quot;,
+  &quot;user name&quot;: &quot;醉月夜julinchao&quot;,
+  &quot;content&quot;: &quot;这才是自然的和谐！&quot;,
+  &quot;time&quot;: &quot;13-7-16 09:59&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c43&quot;
+}" transform="translate(280 3956)">
+<title>c43: 这才是自然的和谐！</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c43</text>
+<text class="node-text" x="10" y="40">这才是自然的和谐！</text>
+</g>
+<g class="node comment" data-node-id="comment-44" data-title="c44" data-content="" data-meta="{
+  &quot;comment id&quot;: 44,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1941717754&quot;,
+  &quot;user name&quot;: &quot;谢崇锦&quot;,
+  &quot;content&quot;: &quot;&quot;,
+  &quot;time&quot;: &quot;13-7-16 09:57&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c44&quot;
+}" transform="translate(280 4048)">
+<title>c44: </title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c44</text>
+<text class="node-text" x="10" y="40"></text>
+</g>
+<g class="node comment" data-node-id="comment-45" data-title="c45" data-content="哇，好治愈啊。" data-meta="{
+  &quot;comment id&quot;: 45,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1836725734&quot;,
+  &quot;user name&quot;: &quot;渔木圪垯&quot;,
+  &quot;content&quot;: &quot;哇，好治愈啊。&quot;,
+  &quot;time&quot;: &quot;13-7-16 09:48&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c45&quot;
+}" transform="translate(280 4140)">
+<title>c45: 哇，好治愈啊。</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c45</text>
+<text class="node-text" x="10" y="40">哇，好治愈啊。</text>
+</g>
+<g class="node comment" data-node-id="comment-46" data-title="c46" data-content="我也想跟小海豚冲浪" data-meta="{
+  &quot;comment id&quot;: 46,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1440199010&quot;,
+  &quot;user name&quot;: &quot;武小某&quot;,
+  &quot;content&quot;: &quot;我也想跟小海豚冲浪&quot;,
+  &quot;time&quot;: &quot;13-7-16 09:47&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c46&quot;
+}" transform="translate(280 4232)">
+<title>c46: 我也想跟小海豚冲浪</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c46</text>
+<text class="node-text" x="10" y="40">我也想跟小海豚冲浪</text>
+</g>
+<g class="node comment" data-node-id="comment-47" data-title="c47" data-content="#微博桌面表态#" data-meta="{
+  &quot;comment id&quot;: 47,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2609012202&quot;,
+  &quot;user name&quot;: &quot;CSJ_6688&quot;,
+  &quot;content&quot;: &quot;#微博桌面表态#&quot;,
+  &quot;time&quot;: &quot;13-7-16 09:46&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c47&quot;
+}" transform="translate(280 4324)">
+<title>c47: #微博桌面表态#</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c47</text>
+<text class="node-text" x="10" y="40">#微博桌面表态#</text>
+</g>
+<g class="node comment" data-node-id="comment-48" data-title="c48" data-content="海豚是人类的好朋友" data-meta="{
+  &quot;comment id&quot;: 48,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1002453940&quot;,
+  &quot;user name&quot;: &quot;小人的世界&quot;,
+  &quot;content&quot;: &quot;海豚是人类的好朋友&quot;,
+  &quot;time&quot;: &quot;13-7-16 09:41&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c48&quot;
+}" transform="translate(280 4416)">
+<title>c48: 海豚是人类的好朋友</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c48</text>
+<text class="node-text" x="10" y="40">海豚是人类的好朋友</text>
+</g>
+<g class="node comment" data-node-id="comment-49" data-title="c49" data-content="感动" data-meta="{
+  &quot;comment id&quot;: 49,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2423637821&quot;,
+  &quot;user name&quot;: &quot;娃娃老婆婆&quot;,
+  &quot;content&quot;: &quot;感动&quot;,
+  &quot;time&quot;: &quot;13-7-16 09:35&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c49&quot;
+}" transform="translate(280 4508)">
+<title>c49: 感动</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c49</text>
+<text class="node-text" x="10" y="40">感动</text>
+</g>
+<g class="node comment" data-node-id="comment-50" data-title="c50" data-content="潇洒 //@未曾傍雪舞1015RMA:海豚良心好。" data-meta="{
+  &quot;comment id&quot;: 50,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2681338460&quot;,
+  &quot;user name&quot;: &quot;Dylan我是一条鱼&quot;,
+  &quot;content&quot;: &quot;潇洒 //@未曾傍雪舞1015RMA:海豚良心好。&quot;,
+  &quot;time&quot;: &quot;13-7-16 09:27&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c50&quot;
+}" transform="translate(280 4600)">
+<title>c50: 潇洒 //@未曾傍雪舞1015RMA:海豚良心好。</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c50</text>
+<text class="node-text" x="10" y="40">潇洒 //@未曾傍雪舞1015RMA:海豚良心好</text>
+<text class="node-text" x="10" y="57">。</text>
+</g>
+<g class="node comment" data-node-id="comment-51" data-title="c51" data-content="世界还是好事多 //@柔美的长发女菡紫:自然界的博爱！//@鬼才晓晓:有爱！" data-meta="{
+  &quot;comment id&quot;: 51,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2008855101&quot;,
+  &quot;user name&quot;: &quot;云山雾耳罩&quot;,
+  &quot;content&quot;: &quot;世界还是好事多 //@柔美的长发女菡紫:自然界的博爱！//@鬼才晓晓:有爱！&quot;,
+  &quot;time&quot;: &quot;13-7-16 09:26&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c51&quot;
+}" transform="translate(280 4692)">
+<title>c51: 世界还是好事多 //@柔美的长发女菡紫:自然界的博爱！//@鬼才晓晓:有爱！</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c51</text>
+<text class="node-text" x="10" y="40">世界还是好事多 //@柔美的长发女菡紫:自然界的</text>
+<text class="node-text" x="10" y="57">博爱！//@鬼才晓晓:有爱！</text>
+</g>
+<g class="node comment" data-node-id="comment-52" data-title="c52" data-content="好有爱沃" data-meta="{
+  &quot;comment id&quot;: 52,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1764006361&quot;,
+  &quot;user name&quot;: &quot;奥迪大众配件&quot;,
+  &quot;content&quot;: &quot;好有爱沃&quot;,
+  &quot;time&quot;: &quot;13-7-16 09:18&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c52&quot;
+}" transform="translate(280 4784)">
+<title>c52: 好有爱沃</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c52</text>
+<text class="node-text" x="10" y="40">好有爱沃</text>
+</g>
+<g class="node comment" data-node-id="comment-53" data-title="c53" data-content="有时候，动物比人类更善良" data-meta="{
+  &quot;comment id&quot;: 53,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2408686113&quot;,
+  &quot;user name&quot;: &quot;江凯伦-JOY&quot;,
+  &quot;content&quot;: &quot;有时候，动物比人类更善良&quot;,
+  &quot;time&quot;: &quot;13-7-16 09:13&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c53&quot;
+}" transform="translate(280 4876)">
+<title>c53: 有时候，动物比人类更善良</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c53</text>
+<text class="node-text" x="10" y="40">有时候，动物比人类更善良</text>
+</g>
+<g class="node comment" data-node-id="comment-54" data-title="c54" data-content="好有爱喔  好感人 " data-meta="{
+  &quot;comment id&quot;: 54,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1954100052&quot;,
+  &quot;user name&quot;: &quot;菜鸟中的战斗迪&quot;,
+  &quot;content&quot;: &quot;好有爱喔  好感人 &quot;,
+  &quot;time&quot;: &quot;13-7-16 09:11&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c54&quot;
+}" transform="translate(280 4968)">
+<title>c54: 好有爱喔  好感人 </title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c54</text>
+<text class="node-text" x="10" y="40">好有爱喔 好感人</text>
+</g>
+<g class="node comment" data-node-id="comment-55" data-title="c55" data-content="海豚和狗狗都是人类最忠实的朋友！@野生空间项目 //@小僧很环保: @苏北不在空城 //@空气净化网-微博://@335小宝: " data-meta="{
+  &quot;comment id&quot;: 55,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2363355202&quot;,
+  &quot;user name&quot;: &quot;艾绿郑元英&quot;,
+  &quot;content&quot;: &quot;海豚和狗狗都是人类最忠实的朋友！@野生空间项目 //@小僧很环保: @苏北不在空城 //@空气净化网-微博://@335小宝: &quot;,
+  &quot;time&quot;: &quot;13-7-16 09:06&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c55&quot;
+}" transform="translate(280 5060)">
+<title>c55: 海豚和狗狗都是人类最忠实的朋友！@野生空间项目 //@小僧很环保: @苏北不在空城 //@空气净化网-微博://@335小宝: </title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c55</text>
+<text class="node-text" x="10" y="40">海豚和狗狗都是人类最忠实的朋友！@野生空间项目 </text>
+<text class="node-text" x="10" y="57">//@小僧很环保: @苏北不在空城 //@空气净</text>
+</g>
+<g class="node comment" data-node-id="comment-56" data-title="c56" data-content="" data-meta="{
+  &quot;comment id&quot;: 56,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2661478863&quot;,
+  &quot;user name&quot;: &quot;vivi_非典型双鱼&quot;,
+  &quot;content&quot;: &quot;&quot;,
+  &quot;time&quot;: &quot;13-7-16 09:06&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c56&quot;
+}" transform="translate(280 5152)">
+<title>c56: </title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c56</text>
+<text class="node-text" x="10" y="40"></text>
+</g>
+<g class="node comment" data-node-id="comment-57" data-title="c57" data-content="转发微博" data-meta="{
+  &quot;comment id&quot;: 57,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2789848231&quot;,
+  &quot;user name&quot;: &quot;刘晶晶Layla&quot;,
+  &quot;content&quot;: &quot;转发微博&quot;,
+  &quot;time&quot;: &quot;13-7-16 09:00&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c57&quot;
+}" transform="translate(280 5244)">
+<title>c57: 转发微博</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c57</text>
+<text class="node-text" x="10" y="40">转发微博</text>
+</g>
+<g class="node comment" data-node-id="comment-58" data-title="c58" data-content="赞！" data-meta="{
+  &quot;comment id&quot;: 58,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2737945523&quot;,
+  &quot;user name&quot;: &quot;缱绻情深深几许&quot;,
+  &quot;content&quot;: &quot;赞！&quot;,
+  &quot;time&quot;: &quot;13-7-16 08:57&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c58&quot;
+}" transform="translate(280 5336)">
+<title>c58: 赞！</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c58</text>
+<text class="node-text" x="10" y="40">赞！</text>
+</g>
+<g class="node comment" data-node-id="comment-59" data-title="c59" data-content="比人有情感" data-meta="{
+  &quot;comment id&quot;: 59,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2133918464&quot;,
+  &quot;user name&quot;: &quot;林先生单独装辣&quot;,
+  &quot;content&quot;: &quot;比人有情感&quot;,
+  &quot;time&quot;: &quot;13-7-16 08:55&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c59&quot;
+}" transform="translate(280 5428)">
+<title>c59: 比人有情感</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c59</text>
+<text class="node-text" x="10" y="40">比人有情感</text>
+</g>
+<g class="node comment" data-node-id="comment-60" data-title="c60" data-content="因为最早就是@牛尔 抛出来这故事忽悠人的" data-meta="{
+  &quot;comment id&quot;: 60,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1278116132&quot;,
+  &quot;user name&quot;: &quot;树旅行Shoo&quot;,
+  &quot;content&quot;: &quot;因为最早就是@牛尔 抛出来这故事忽悠人的&quot;,
+  &quot;time&quot;: &quot;13-7-16 08:52&quot;,
+  &quot;stance_label&quot;: 1,
+  &quot;state&quot;: 1,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c60&quot;
+}" transform="translate(280 5520)">
+<title>c60: 因为最早就是@牛尔 抛出来这故事忽悠人的</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c60</text>
+<text class="node-text" x="10" y="40">因为最早就是@牛尔 抛出来这故事忽悠人的</text>
+</g>
+<g class="node comment" data-node-id="comment-61" data-title="c61" data-content="" data-meta="{
+  &quot;comment id&quot;: 61,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1727750011&quot;,
+  &quot;user name&quot;: &quot;AWC琉璃苹果&quot;,
+  &quot;content&quot;: &quot;&quot;,
+  &quot;time&quot;: &quot;13-7-16 08:47&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c61&quot;
+}" transform="translate(280 5612)">
+<title>c61: </title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c61</text>
+<text class="node-text" x="10" y="40"></text>
+</g>
+<g class="node comment" data-node-id="comment-62" data-title="c62" data-content="" data-meta="{
+  &quot;comment id&quot;: 62,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2415010127&quot;,
+  &quot;user name&quot;: &quot;现实成了回忆&quot;,
+  &quot;content&quot;: &quot;&quot;,
+  &quot;time&quot;: &quot;13-7-16 08:45&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c62&quot;
+}" transform="translate(280 5704)">
+<title>c62: </title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c62</text>
+<text class="node-text" x="10" y="40"></text>
+</g>
+<g class="node comment" data-node-id="comment-63" data-title="c63" data-content="动物之间都知道帮助，而如今这社会上的人已经让人们不敢伸出友谊之手了。" data-meta="{
+  &quot;comment id&quot;: 63,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;3484821655&quot;,
+  &quot;user name&quot;: &quot;YiMing-Lee&quot;,
+  &quot;content&quot;: &quot;动物之间都知道帮助，而如今这社会上的人已经让人们不敢伸出友谊之手了。&quot;,
+  &quot;time&quot;: &quot;13-7-16 08:39&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c63&quot;
+}" transform="translate(280 5796)">
+<title>c63: 动物之间都知道帮助，而如今这社会上的人已经让人们不敢伸出友谊之手了。</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c63</text>
+<text class="node-text" x="10" y="40">动物之间都知道帮助，而如今这社会上的人已经让人们</text>
+<text class="node-text" x="10" y="57">不敢伸出友谊之手了。</text>
+</g>
+<g class="node comment" data-node-id="comment-64" data-title="c64" data-content="" data-meta="{
+  &quot;comment id&quot;: 64,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1722531883&quot;,
+  &quot;user name&quot;: &quot;MsJJman&quot;,
+  &quot;content&quot;: &quot;&quot;,
+  &quot;time&quot;: &quot;13-7-16 08:31&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c64&quot;
+}" transform="translate(280 5888)">
+<title>c64: </title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c64</text>
+<text class="node-text" x="10" y="40"></text>
+</g>
+<g class="node comment" data-node-id="comment-65" data-title="c65" data-content="骗人的，这个是截图，明明就是一部电影好吧" data-meta="{
+  &quot;comment id&quot;: 65,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1764390074&quot;,
+  &quot;user name&quot;: &quot;猪香世家&quot;,
+  &quot;content&quot;: &quot;骗人的，这个是截图，明明就是一部电影好吧&quot;,
+  &quot;time&quot;: &quot;13-7-16 08:17&quot;,
+  &quot;stance_label&quot;: 1,
+  &quot;state&quot;: 1,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c65&quot;
+}" transform="translate(280 5980)">
+<title>c65: 骗人的，这个是截图，明明就是一部电影好吧</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c65</text>
+<text class="node-text" x="10" y="40">骗人的，这个是截图，明明就是一部电影好吧</text>
+</g>
+<g class="node comment" data-node-id="comment-66" data-title="c66" data-content="哇@哥是李小Q" data-meta="{
+  &quot;comment id&quot;: 66,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1879014682&quot;,
+  &quot;user name&quot;: &quot;小婷踩小强&quot;,
+  &quot;content&quot;: &quot;哇@哥是李小Q&quot;,
+  &quot;time&quot;: &quot;13-7-16 08:15&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c66&quot;
+}" transform="translate(280 6072)">
+<title>c66: 哇@哥是李小Q</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c66</text>
+<text class="node-text" x="10" y="40">哇@哥是李小Q</text>
+</g>
+<g class="node comment" data-node-id="comment-67" data-title="c67" data-content="和谐" data-meta="{
+  &quot;comment id&quot;: 67,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2271791493&quot;,
+  &quot;user name&quot;: &quot;随那谁&quot;,
+  &quot;content&quot;: &quot;和谐&quot;,
+  &quot;time&quot;: &quot;13-7-16 08:15&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c67&quot;
+}" transform="translate(280 6164)">
+<title>c67: 和谐</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c67</text>
+<text class="node-text" x="10" y="40">和谐</text>
+</g>
+<g class="node comment" data-node-id="comment-68" data-title="c68" data-content="动物界也和协了" data-meta="{
+  &quot;comment id&quot;: 68,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2887369060&quot;,
+  &quot;user name&quot;: &quot;小靓蜜蜂&quot;,
+  &quot;content&quot;: &quot;动物界也和协了&quot;,
+  &quot;time&quot;: &quot;13-7-16 08:13&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c68&quot;
+}" transform="translate(280 6256)">
+<title>c68: 动物界也和协了</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c68</text>
+<text class="node-text" x="10" y="40">动物界也和协了</text>
+</g>
+<g class="node comment" data-node-id="comment-69" data-title="c69" data-content="好萌好有" data-meta="{
+  &quot;comment id&quot;: 69,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1874345977&quot;,
+  &quot;user name&quot;: &quot;打不过你压死你的吕Wife&quot;,
+  &quot;content&quot;: &quot;好萌好有&quot;,
+  &quot;time&quot;: &quot;13-7-16 08:10&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c69&quot;
+}" transform="translate(280 6348)">
+<title>c69: 好萌好有</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c69</text>
+<text class="node-text" x="10" y="40">好萌好有</text>
+</g>
+<g class="node comment" data-node-id="comment-70" data-title="c70" data-content="这只海豚认错人了吧？好又爱啊@麦兜兜兜兜麦兜兜m_m " data-meta="{
+  &quot;comment id&quot;: 70,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1807258042&quot;,
+  &quot;user name&quot;: &quot;百分之俩&quot;,
+  &quot;content&quot;: &quot;这只海豚认错人了吧？好又爱啊@麦兜兜兜兜麦兜兜m_m &quot;,
+  &quot;time&quot;: &quot;13-7-16 08:01&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c70&quot;
+}" transform="translate(280 6440)">
+<title>c70: 这只海豚认错人了吧？好又爱啊@麦兜兜兜兜麦兜兜m_m </title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c70</text>
+<text class="node-text" x="10" y="40">这只海豚认错人了吧？好又爱啊@麦兜兜兜兜麦兜兜m</text>
+<text class="node-text" x="10" y="57">_m</text>
+</g>
+<g class="node comment" data-node-id="comment-71" data-title="c71" data-content="这事你艾特人家牛尔作甚啊？" data-meta="{
+  &quot;comment id&quot;: 71,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;3182189257&quot;,
+  &quot;user name&quot;: &quot;思闻欧巴&quot;,
+  &quot;content&quot;: &quot;这事你艾特人家牛尔作甚啊？&quot;,
+  &quot;time&quot;: &quot;13-7-16 07:58&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c71&quot;
+}" transform="translate(280 6532)">
+<title>c71: 这事你艾特人家牛尔作甚啊？</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c71</text>
+<text class="node-text" x="10" y="40">这事你艾特人家牛尔作甚啊？</text>
+</g>
+<g class="node comment" data-node-id="comment-72" data-title="c72" data-content="你爱护他们他们就会有爱心" data-meta="{
+  &quot;comment id&quot;: 72,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2619437474&quot;,
+  &quot;user name&quot;: &quot;须日三省吾身&quot;,
+  &quot;content&quot;: &quot;你爱护他们他们就会有爱心&quot;,
+  &quot;time&quot;: &quot;13-7-16 07:57&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c72&quot;
+}" transform="translate(280 6624)">
+<title>c72: 你爱护他们他们就会有爱心</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c72</text>
+<text class="node-text" x="10" y="40">你爱护他们他们就会有爱心</text>
+</g>
+<g class="node comment" data-node-id="comment-73" data-title="c73" data-content="不是说江豚只有中国有吗！！上个星期央视刚做了关于保护江豚的节目、" data-meta="{
+  &quot;comment id&quot;: 73,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2504331212&quot;,
+  &quot;user name&quot;: &quot;我在想起个什么名字好呢&quot;,
+  &quot;content&quot;: &quot;不是说江豚只有中国有吗！！上个星期央视刚做了关于保护江豚的节目、&quot;,
+  &quot;time&quot;: &quot;13-7-16 07:54&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c73&quot;
+}" transform="translate(280 6716)">
+<title>c73: 不是说江豚只有中国有吗！！上个星期央视刚做了关于保护江豚的节目、</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c73</text>
+<text class="node-text" x="10" y="40">不是说江豚只有中国有吗！！上个星期央视刚做了关于</text>
+<text class="node-text" x="10" y="57">保护江豚的节目、</text>
+</g>
+<g class="node comment" data-node-id="comment-74" data-title="c74" data-content="……有江豚的，汗哪，不知道请百度" data-meta="{
+  &quot;comment id&quot;: 74,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2545079377&quot;,
+  &quot;user name&quot;: &quot;无所畏惧牛可风&quot;,
+  &quot;content&quot;: &quot;……有江豚的，汗哪，不知道请百度&quot;,
+  &quot;time&quot;: &quot;13-7-16 07:49&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c74&quot;
+}" transform="translate(280 6808)">
+<title>c74: ……有江豚的，汗哪，不知道请百度</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c74</text>
+<text class="node-text" x="10" y="40">……有江豚的，汗哪，不知道请百度</text>
+</g>
+<g class="node comment" data-node-id="comment-75" data-title="c75" data-content="@姜夏媛  " data-meta="{
+  &quot;comment id&quot;: 75,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1826250325&quot;,
+  &quot;user name&quot;: &quot;LangHC&quot;,
+  &quot;content&quot;: &quot;@姜夏媛  &quot;,
+  &quot;time&quot;: &quot;13-7-16 07:45&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c75&quot;
+}" transform="translate(280 6900)">
+<title>c75: @姜夏媛  </title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c75</text>
+<text class="node-text" x="10" y="40">@姜夏媛</text>
+</g>
+<g class="node comment" data-node-id="comment-76" data-title="c76" data-content="@武小某  " data-meta="{
+  &quot;comment id&quot;: 76,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1776739695&quot;,
+  &quot;user name&quot;: &quot;13张CD&quot;,
+  &quot;content&quot;: &quot;@武小某  &quot;,
+  &quot;time&quot;: &quot;13-7-16 07:43&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c76&quot;
+}" transform="translate(280 6992)">
+<title>c76: @武小某  </title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c76</text>
+<text class="node-text" x="10" y="40">@武小某</text>
+</g>
+<g class="node comment" data-node-id="comment-77" data-title="c77" data-content="为什么要就狗呢？同类" data-meta="{
+  &quot;comment id&quot;: 77,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1989406253&quot;,
+  &quot;user name&quot;: &quot;登_徒子&quot;,
+  &quot;content&quot;: &quot;为什么要就狗呢？同类&quot;,
+  &quot;time&quot;: &quot;13-7-16 07:41&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c77&quot;
+}" transform="translate(280 7084)">
+<title>c77: 为什么要就狗呢？同类</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c77</text>
+<text class="node-text" x="10" y="40">为什么要就狗呢？同类</text>
+</g>
+<g class="node comment" data-node-id="comment-78" data-title="c78" data-content="" data-meta="{
+  &quot;comment id&quot;: 78,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1738298494&quot;,
+  &quot;user name&quot;: &quot;zrshmily&quot;,
+  &quot;content&quot;: &quot;&quot;,
+  &quot;time&quot;: &quot;13-7-16 07:35&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c78&quot;
+}" transform="translate(280 7176)">
+<title>c78: </title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c78</text>
+<text class="node-text" x="10" y="40"></text>
+</g>
+<g class="node comment" data-node-id="comment-79" data-title="c79" data-content="真有爱！" data-meta="{
+  &quot;comment id&quot;: 79,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2096829440&quot;,
+  &quot;user name&quot;: &quot;静宝贝_1128是垚垚呀&quot;,
+  &quot;content&quot;: &quot;真有爱！&quot;,
+  &quot;time&quot;: &quot;13-7-16 07:35&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c79&quot;
+}" transform="translate(280 7268)">
+<title>c79: 真有爱！</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c79</text>
+<text class="node-text" x="10" y="40">真有爱！</text>
+</g>
+    </svg>
+  </main>
+  <aside class="side">
+    <div class="panel">
+      <h2 id="node-title">source</h2>
+      <div id="node-content" class="content">【幸运的狗狗 】佛罗里达Marco岛发生了一件感人的事件：一只狗掉进运河，一群海豚便担起了救狗的责任，附近的居民听见海豚的声音，超级大声，出来一看，原来海豚们正驼着狗狗往安全地带游，他们赶紧报警，花了近15个小时狗狗被消防人员拉出并与主人团聚。感谢附近的居民拍下这一张感人的照片@牛尔 </div>
+      <h2>metadata</h2>
+      <pre id="node-meta"></pre>
+    </div>
+  </aside>
+</div>
+<script>
+const titleEl = document.getElementById("node-title");
+const contentEl = document.getElementById("node-content");
+const metaEl = document.getElementById("node-meta");
+const nodes = Array.from(document.querySelectorAll(".node"));
+
+function selectNode(node) {
+  nodes.forEach(n => n.classList.remove("active"));
+  node.classList.add("active");
+  titleEl.textContent = node.dataset.title || "";
+  contentEl.textContent = node.dataset.content || "";
+  metaEl.textContent = node.dataset.meta || "";
+}
+
+nodes.forEach(node => {
+  node.addEventListener("click", () => selectNode(node));
+});
+
+const sourceNode = document.querySelector('.node[data-node-id="source"]');
+if (sourceNode) {
+  selectNode(sourceNode);
+}
+</script>
+</body>
+</html>

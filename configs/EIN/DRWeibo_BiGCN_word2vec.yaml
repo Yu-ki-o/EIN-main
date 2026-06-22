@@ -1,0 +1,47 @@
+# model and data
+model_name: EIN
+dataset: DRWeibo
+num_classes: 2
+language: ch # en or ch
+word_embedding: word2vec # word2vec or multilingual-e5-base
+result_name: null # set a name to save logs under experiments/EIN/DRWeibo/<result_name>
+experiment_mode: id # id or strict_ood
+ood_source_datasets: []
+ood_val_domain: source # source or target
+debug: False
+
+# training parameters
+seed: 0
+device: cuda
+lr: 0.0005
+weight_decay: 0.0001
+patience: 10
+n_epochs: 100
+split: '622'
+
+# model parameters
+batch_size: 128
+hidden_dim: 128
+TDdroprate: 0.2
+BUdroprate: 0.2
+tokenize_mode: jieba
+k: 10000
+vector_size: 200
+in_feats: 200
+n_layers_conv: 3
+aug1: DropEdge,mean,0.2,0.7
+aug2: NodeDrop,0.2,0.7
+n_layers_feat: 1
+n_layers_fc: 2
+skip_connection: True
+res_branch: BNConvReLU
+dropout: 0.3
+edge_norm: True
+global_pool: sum
+undirected: True
+
+base_model: BiGCN
+max_hop: 20
+init_alpha: 0.0
+init_beta: 0.0
+lamda: 1

@@ -1,0 +1,17 @@
+Experiment setting:
+Target dataset: Pheme
+Mode: strict_ood
+OOD source datasets: ['DRWeibo', 'Weibo']
+Validation domain: source
+
+Seed results:
+Seed 0: Acc 0.6246 | AUC 0.5917 | F1 0.2317
+Seed 1: Acc 0.5470 | AUC 0.5225 | F1 0.4183
+Seed 2: Acc 0.6315 | AUC 0.6017 | F1 0.1722
+Seed 3: Acc 0.6350 | AUC 0.5717 | F1 0.0751
+Seed 4: Acc 0.6037 | AUC 0.5610 | F1 0.2789
+
+Average results over 5 runs:
+ACC: 60.84+/-3.25 (%)
+AUC: 56.97+/-2.76 (%)
+F1: 23.53+/-11.41 (%)

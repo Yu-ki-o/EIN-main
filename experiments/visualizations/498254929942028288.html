@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>498254929942028288 (1)</title>
+<style>
+body {
+  margin: 0;
+  font-family: Arial, "Microsoft YaHei", sans-serif;
+  color: #1f2933;
+  background: #f6f8fb;
+}
+.app {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  height: 100vh;
+}
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #d9e2ec;
+  background: #ffffff;
+}
+.toolbar h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+.toolbar span {
+  color: #52616b;
+  font-size: 13px;
+}
+.graph-wrap {
+  overflow: auto;
+}
+svg {
+  display: block;
+  background: #fbfdff;
+}
+.edge {
+  fill: none;
+  stroke: #9fb3c8;
+  stroke-width: 1.4;
+}
+.node {
+  cursor: pointer;
+}
+.node rect {
+  fill: #ffffff;
+  stroke: #829ab1;
+  stroke-width: 1.2;
+}
+.node.source rect {
+  fill: #e3f8ff;
+  stroke: #2d9cdb;
+  stroke-width: 1.8;
+}
+.node:hover rect, .node.active rect {
+  stroke: #ef6c00;
+  stroke-width: 2.4;
+}
+.node-label {
+  font-size: 13px;
+  font-weight: 700;
+  fill: #102a43;
+}
+.node-text {
+  font-size: 12px;
+  fill: #334e68;
+}
+.side {
+  border-left: 1px solid #d9e2ec;
+  background: #ffffff;
+  min-width: 0;
+  overflow: auto;
+}
+.panel {
+  padding: 16px;
+}
+.panel h2 {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+.content {
+  white-space: pre-wrap;
+  line-height: 1.5;
+  padding: 12px;
+  background: #f6f8fb;
+  border: 1px solid #d9e2ec;
+  border-radius: 6px;
+}
+pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 12px;
+  background: #102a43;
+  color: #f0f4f8;
+  border-radius: 6px;
+  font-size: 12px;
+}
+@media (max-width: 900px) {
+  .app {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) 45vh;
+  }
+  .side {
+    border-left: 0;
+    border-top: 1px solid #d9e2ec;
+  }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <main class="graph-wrap">
+    <div class="toolbar">
+      <h1>498254929942028288 (1)</h1>
+      <span>nodes: 20 | comments: 19 | label: 1</span>
+    </div>
+    <svg width="1430" height="1446" viewBox="-40 -40 1430 1446">
+      <path class="edge" d="M 230 679.4615384615385 C 255.0 679.4615384615385, 255.0 85.0, 280 85.0" />
+<path class="edge" d="M 230 679.4615384615385 C 255.0 679.4615384615385, 255.0 223.0, 280 223.0" />
+<path class="edge" d="M 230 679.4615384615385 C 255.0 679.4615384615385, 255.0 315.0, 280 315.0" />
+<path class="edge" d="M 230 679.4615384615385 C 255.0 679.4615384615385, 255.0 407.0, 280 407.0" />
+<path class="edge" d="M 230 679.4615384615385 C 255.0 679.4615384615385, 255.0 499.0, 280 499.0" />
+<path class="edge" d="M 230 679.4615384615385 C 255.0 679.4615384615385, 255.0 591.0, 280 591.0" />
+<path class="edge" d="M 230 679.4615384615385 C 255.0 679.4615384615385, 255.0 683.0, 280 683.0" />
+<path class="edge" d="M 230 679.4615384615385 C 255.0 679.4615384615385, 255.0 775.0, 280 775.0" />
+<path class="edge" d="M 230 679.4615384615385 C 255.0 679.4615384615385, 255.0 867.0, 280 867.0" />
+<path class="edge" d="M 230 679.4615384615385 C 255.0 679.4615384615385, 255.0 959.0, 280 959.0" />
+<path class="edge" d="M 230 679.4615384615385 C 255.0 679.4615384615385, 255.0 1051.0, 280 1051.0" />
+<path class="edge" d="M 230 679.4615384615385 C 255.0 679.4615384615385, 255.0 1143.0, 280 1143.0" />
+<path class="edge" d="M 230 679.4615384615385 C 255.0 679.4615384615385, 255.0 1235.0, 280 1235.0" />
+<path class="edge" d="M 510 85.0 C 535.0 85.0, 535.0 39.0, 560 39.0" />
+<path class="edge" d="M 510 85.0 C 535.0 85.0, 535.0 131.0, 560 131.0" />
+<path class="edge" d="M 510 591.0 C 535.0 591.0, 535.0 591.0, 560 591.0" />
+<path class="edge" d="M 510 867.0 C 535.0 867.0, 535.0 867.0, 560 867.0" />
+<path class="edge" d="M 790 591.0 C 815.0 591.0, 815.0 591.0, 840 591.0" />
+<path class="edge" d="M 790 867.0 C 815.0 867.0, 815.0 867.0, 840 867.0" />
+<g class="node source" data-node-id="source" data-title="source" data-content="17 year old unarmed kid shot ten times by police for stealing candy. I didn&#x27;t know that was punishable by death.
+
+(read the #ferguson tag)" data-meta="{
+  &quot;content&quot;: &quot;17 year old unarmed kid shot ten times by police for stealing candy. I didn&#x27;t know that was punishable by death.\n\n(read the #ferguson tag)&quot;,
+  &quot;user id&quot;: 7214972,
+  &quot;tweet id&quot;: &quot;498254929942028288&quot;,
+  &quot;label&quot;: 1,
+  &quot;node_kind&quot;: &quot;source&quot;,
+  &quot;node_label&quot;: &quot;source&quot;
+}" transform="translate(0 640.4615384615385)">
+<title>source: 17 year old unarmed kid shot ten times by police for stealing candy. I didn&#x27;t know that was punishable by death.
+
+(read the #ferguson tag)</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">source</text>
+<text class="node-text" x="10" y="40">17 year old unarmed kid </text>
+<text class="node-text" x="10" y="57">shot ten times by police</text>
+</g>
+<g class="node comment" data-node-id="comment-0" data-title="c0" data-content="No excuse. “@inthefade: 17 year old unarmed kid shot ten times by police for stealing candy. I didn&#x27;t know that was punishable by death." data-meta="{
+  &quot;comment id&quot;: 0,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [
+    1,
+    2
+  ],
+  &quot;content&quot;: &quot;No excuse. “@inthefade: 17 year old unarmed kid shot ten times by police for stealing candy. I didn&#x27;t know that was punishable by death.&quot;,
+  &quot;user id&quot;: 712590698,
+  &quot;user name&quot;: &quot;&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c0&quot;
+}" transform="translate(280 46.0)">
+<title>c0: No excuse. “@inthefade: 17 year old unarmed kid shot ten times by police for stealing candy. I didn&#x27;t know that was punishable by death.</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c0</text>
+<text class="node-text" x="10" y="40">No excuse. “@inthefade: </text>
+<text class="node-text" x="10" y="57">17 year old unarmed kid </text>
+</g>
+<g class="node comment" data-node-id="comment-1" data-title="c1" data-content="@AnneMarieFlynn2 @adam_zander @inthefade This is unbelievable, or should be." data-meta="{
+  &quot;comment id&quot;: 1,
+  &quot;parent&quot;: 0,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;@AnneMarieFlynn2 @adam_zander @inthefade This is unbelievable, or should be.&quot;,
+  &quot;user id&quot;: 32921077,
+  &quot;user name&quot;: &quot;&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 2,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c1&quot;
+}" transform="translate(560 0)">
+<title>c1: @AnneMarieFlynn2 @adam_zander @inthefade This is unbelievable, or should be.</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c1</text>
+<text class="node-text" x="10" y="40">@AnneMarieFlynn2 @adam_z</text>
+<text class="node-text" x="10" y="57">ander @inthefade This is</text>
+</g>
+<g class="node comment" data-node-id="comment-2" data-title="c2" data-content="@AnneMarieFlynn2 @klemosy @inthefade Anything is punishable by death if the youth is black." data-meta="{
+  &quot;comment id&quot;: 2,
+  &quot;parent&quot;: 0,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;@AnneMarieFlynn2 @klemosy @inthefade Anything is punishable by death if the youth is black.&quot;,
+  &quot;user id&quot;: 329159493,
+  &quot;user name&quot;: &quot;&quot;,
+  &quot;stance_label&quot;: 1,
+  &quot;state&quot;: 1,
+  &quot;hop&quot;: 2,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c2&quot;
+}" transform="translate(560 92)">
+<title>c2: @AnneMarieFlynn2 @klemosy @inthefade Anything is punishable by death if the youth is black.</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c2</text>
+<text class="node-text" x="10" y="40">@AnneMarieFlynn2 @klemos</text>
+<text class="node-text" x="10" y="57">y @inthefade Anything is</text>
+</g>
+<g class="node comment" data-node-id="comment-3" data-title="c3" data-content="@inthefade there&#x27;s no excuse" data-meta="{
+  &quot;comment id&quot;: 3,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;@inthefade there&#x27;s no excuse&quot;,
+  &quot;user id&quot;: 2364168730,
+  &quot;user name&quot;: &quot;&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c3&quot;
+}" transform="translate(280 184)">
+<title>c3: @inthefade there&#x27;s no excuse</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c3</text>
+<text class="node-text" x="10" y="40">@inthefade there&#x27;s no ex</text>
+<text class="node-text" x="10" y="57">cuse</text>
+</g>
+<g class="node comment" data-node-id="comment-4" data-title="c4" data-content="@inthefade @divineem It applies to Black people." data-meta="{
+  &quot;comment id&quot;: 4,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;@inthefade @divineem It applies to Black people.&quot;,
+  &quot;user id&quot;: 115921994,
+  &quot;user name&quot;: &quot;&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c4&quot;
+}" transform="translate(280 276)">
+<title>c4: @inthefade @divineem It applies to Black people.</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c4</text>
+<text class="node-text" x="10" y="40">@inthefade @divineem It </text>
+<text class="node-text" x="10" y="57">applies to Black people.</text>
+</g>
+<g class="node comment" data-node-id="comment-5" data-title="c5" data-content=".@inthefade This story makes me physically sick. @marieann66 #ferguson  http://t.co/PDo2pakAln" data-meta="{
+  &quot;comment id&quot;: 5,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;.@inthefade This story makes me physically sick. @marieann66 #ferguson  http://t.co/PDo2pakAln&quot;,
+  &quot;user id&quot;: 98983800,
+  &quot;user name&quot;: &quot;&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c5&quot;
+}" transform="translate(280 368)">
+<title>c5: .@inthefade This story makes me physically sick. @marieann66 #ferguson  http://t.co/PDo2pakAln</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c5</text>
+<text class="node-text" x="10" y="40">.@inthefade This story m</text>
+<text class="node-text" x="10" y="57">akes me physically sick.</text>
+</g>
+<g class="node comment" data-node-id="comment-6" data-title="c6" data-content="@inthefade @Alllwftopic Agreed! Should be charged w/murder!!" data-meta="{
+  &quot;comment id&quot;: 6,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;@inthefade @Alllwftopic Agreed! Should be charged w/murder!!&quot;,
+  &quot;user id&quot;: 94476810,
+  &quot;user name&quot;: &quot;&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c6&quot;
+}" transform="translate(280 460)">
+<title>c6: @inthefade @Alllwftopic Agreed! Should be charged w/murder!!</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c6</text>
+<text class="node-text" x="10" y="40">@inthefade @Alllwftopic </text>
+<text class="node-text" x="10" y="57">Agreed! Should be charge</text>
+</g>
+<g class="node comment" data-node-id="comment-7" data-title="c7" data-content="@inthefade @Alasscan_ apparently it is now" data-meta="{
+  &quot;comment id&quot;: 7,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [
+    8
+  ],
+  &quot;content&quot;: &quot;@inthefade @Alasscan_ apparently it is now&quot;,
+  &quot;user id&quot;: 2481146024,
+  &quot;user name&quot;: &quot;&quot;,
+  &quot;stance_label&quot;: 1,
+  &quot;state&quot;: 1,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c7&quot;
+}" transform="translate(280 552.0)">
+<title>c7: @inthefade @Alasscan_ apparently it is now</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c7</text>
+<text class="node-text" x="10" y="40">@inthefade @Alasscan_ ap</text>
+<text class="node-text" x="10" y="57">parently it is now</text>
+</g>
+<g class="node comment" data-node-id="comment-8" data-title="c8" data-content="@JackieWillard2 These days anything, especially with Stand Your Ground and even a sneeze is punishable by death. @inthefade" data-meta="{
+  &quot;comment id&quot;: 8,
+  &quot;parent&quot;: 7,
+  &quot;children&quot;: [
+    17
+  ],
+  &quot;content&quot;: &quot;@JackieWillard2 These days anything, especially with Stand Your Ground and even a sneeze is punishable by death. @inthefade&quot;,
+  &quot;user id&quot;: 26070572,
+  &quot;user name&quot;: &quot;&quot;,
+  &quot;stance_label&quot;: 1,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 2,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c8&quot;
+}" transform="translate(560 552.0)">
+<title>c8: @JackieWillard2 These days anything, especially with Stand Your Ground and even a sneeze is punishable by death. @inthefade</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c8</text>
+<text class="node-text" x="10" y="40">@JackieWillard2 These da</text>
+<text class="node-text" x="10" y="57">ys anything, especially </text>
+</g>
+<g class="node comment" data-node-id="comment-9" data-title="c9" data-content="@inthefade @Alasscan_ It&#x27;s not-unless you happen to be a black male,apparently.We have to make police far more accountable. This can&#x27;t go on" data-meta="{
+  &quot;comment id&quot;: 9,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;@inthefade @Alasscan_ It&#x27;s not-unless you happen to be a black male,apparently.We have to make police far more accountable. This can&#x27;t go on&quot;,
+  &quot;user id&quot;: 1229007625,
+  &quot;user name&quot;: &quot;&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c9&quot;
+}" transform="translate(280 644)">
+<title>c9: @inthefade @Alasscan_ It&#x27;s not-unless you happen to be a black male,apparently.We have to make police far more accountable. This can&#x27;t go on</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c9</text>
+<text class="node-text" x="10" y="40">@inthefade @Alasscan_ It</text>
+<text class="node-text" x="10" y="57">&#x27;s not-unless you happen</text>
+</g>
+<g class="node comment" data-node-id="comment-10" data-title="c10" data-content=". @inthefade We don&#x27;t even know that he stole any candy." data-meta="{
+  &quot;comment id&quot;: 10,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;. @inthefade We don&#x27;t even know that he stole any candy.&quot;,
+  &quot;user id&quot;: 467026225,
+  &quot;user name&quot;: &quot;&quot;,
+  &quot;stance_label&quot;: 1,
+  &quot;state&quot;: 1,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c10&quot;
+}" transform="translate(280 736)">
+<title>c10: . @inthefade We don&#x27;t even know that he stole any candy.</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c10</text>
+<text class="node-text" x="10" y="40">. @inthefade We don&#x27;t ev</text>
+<text class="node-text" x="10" y="57">en know that he stole an</text>
+</g>
+<g class="node comment" data-node-id="comment-11" data-title="c11" data-content="@inthefade there has not been any proof that he stole candy. I guess skittles(candy) has become a reason to kill black teens." data-meta="{
+  &quot;comment id&quot;: 11,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [
+    12
+  ],
+  &quot;content&quot;: &quot;@inthefade there has not been any proof that he stole candy. I guess skittles(candy) has become a reason to kill black teens.&quot;,
+  &quot;user id&quot;: 16672644,
+  &quot;user name&quot;: &quot;&quot;,
+  &quot;stance_label&quot;: 1,
+  &quot;state&quot;: 1,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c11&quot;
+}" transform="translate(280 828.0)">
+<title>c11: @inthefade there has not been any proof that he stole candy. I guess skittles(candy) has become a reason to kill black teens.</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c11</text>
+<text class="node-text" x="10" y="40">@inthefade there has not</text>
+<text class="node-text" x="10" y="57"> been any proof that he </text>
+</g>
+<g class="node comment" data-node-id="comment-12" data-title="c12" data-content="@pjhnsn8 I was just going off what I read in the #ferguson tag early last night. Wasn&#x27;t any real news out at that point." data-meta="{
+  &quot;comment id&quot;: 12,
+  &quot;parent&quot;: 11,
+  &quot;children&quot;: [
+    18
+  ],
+  &quot;content&quot;: &quot;@pjhnsn8 I was just going off what I read in the #ferguson tag early last night. Wasn&#x27;t any real news out at that point.&quot;,
+  &quot;user id&quot;: 7214972,
+  &quot;user name&quot;: &quot;&quot;,
+  &quot;stance_label&quot;: 1,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 2,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c12&quot;
+}" transform="translate(560 828.0)">
+<title>c12: @pjhnsn8 I was just going off what I read in the #ferguson tag early last night. Wasn&#x27;t any real news out at that point.</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c12</text>
+<text class="node-text" x="10" y="40">@pjhnsn8 I was just goin</text>
+<text class="node-text" x="10" y="57">g off what I read in the</text>
+</g>
+<g class="node comment" data-node-id="comment-13" data-title="c13" data-content="@inthefade #Shot ten times for stealing candy? God have mercy!" data-meta="{
+  &quot;comment id&quot;: 13,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;@inthefade #Shot ten times for stealing candy? God have mercy!&quot;,
+  &quot;user id&quot;: 2435021404,
+  &quot;user name&quot;: &quot;&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c13&quot;
+}" transform="translate(280 920)">
+<title>c13: @inthefade #Shot ten times for stealing candy? God have mercy!</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c13</text>
+<text class="node-text" x="10" y="40">@inthefade #Shot ten tim</text>
+<text class="node-text" x="10" y="57">es for stealing candy? G</text>
+</g>
+<g class="node comment" data-node-id="comment-14" data-title="c14" data-content="@inthefade @Smilingl8dy you should say &quot;allegedly&quot; about the stealing candy. Also, police stmt does not mention that as cause." data-meta="{
+  &quot;comment id&quot;: 14,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;@inthefade @Smilingl8dy you should say \&quot;allegedly\&quot; about the stealing candy. Also, police stmt does not mention that as cause.&quot;,
+  &quot;user id&quot;: 1110022212,
+  &quot;user name&quot;: &quot;&quot;,
+  &quot;stance_label&quot;: 1,
+  &quot;state&quot;: 1,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c14&quot;
+}" transform="translate(280 1012)">
+<title>c14: @inthefade @Smilingl8dy you should say &quot;allegedly&quot; about the stealing candy. Also, police stmt does not mention that as cause.</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c14</text>
+<text class="node-text" x="10" y="40">@inthefade @Smilingl8dy </text>
+<text class="node-text" x="10" y="57">you should say &quot;allegedl</text>
+</g>
+<g class="node comment" data-node-id="comment-15" data-title="c15" data-content="@inthefade It is if someone starts assaulting an officer" data-meta="{
+  &quot;comment id&quot;: 15,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;@inthefade It is if someone starts assaulting an officer&quot;,
+  &quot;user id&quot;: 2297403132,
+  &quot;user name&quot;: &quot;&quot;,
+  &quot;stance_label&quot;: 1,
+  &quot;state&quot;: 1,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c15&quot;
+}" transform="translate(280 1104)">
+<title>c15: @inthefade It is if someone starts assaulting an officer</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c15</text>
+<text class="node-text" x="10" y="40">@inthefade It is if some</text>
+<text class="node-text" x="10" y="57">one starts assaulting an</text>
+</g>
+<g class="node comment" data-node-id="comment-16" data-title="c16" data-content="@inthefade He was 18. Nothing to do with stealing candy. He was walking in the street. Horrible situation. But stop spreading false facts." data-meta="{
+  &quot;comment id&quot;: 16,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;@inthefade He was 18. Nothing to do with stealing candy. He was walking in the street. Horrible situation. But stop spreading false facts.&quot;,
+  &quot;user id&quot;: 481509183,
+  &quot;user name&quot;: &quot;&quot;,
+  &quot;stance_label&quot;: 1,
+  &quot;state&quot;: 1,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c16&quot;
+}" transform="translate(280 1196)">
+<title>c16: @inthefade He was 18. Nothing to do with stealing candy. He was walking in the street. Horrible situation. But stop spreading false facts.</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c16</text>
+<text class="node-text" x="10" y="40">@inthefade He was 18. No</text>
+<text class="node-text" x="10" y="57">thing to do with stealin</text>
+</g>
+<g class="node comment" data-node-id="comment-17" data-title="c17" data-content="@Alasscan_ @inthefade true" data-meta="{
+  &quot;comment id&quot;: 17,
+  &quot;parent&quot;: 8,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;@Alasscan_ @inthefade true&quot;,
+  &quot;user id&quot;: 2481146024,
+  &quot;user name&quot;: &quot;&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 3,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c17&quot;
+}" transform="translate(840 552)">
+<title>c17: @Alasscan_ @inthefade true</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c17</text>
+<text class="node-text" x="10" y="40">@Alasscan_ @inthefade tr</text>
+<text class="node-text" x="10" y="57">ue</text>
+</g>
+<g class="node comment" data-node-id="comment-18" data-title="c18" data-content="@inthefade I understand, it has changed to cigs,  a tussle in a car, and then his saggy pants,maybe there never will be a truthful story." data-meta="{
+  &quot;comment id&quot;: 18,
+  &quot;parent&quot;: 12,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;@inthefade I understand, it has changed to cigs,  a tussle in a car, and then his saggy pants,maybe there never will be a truthful story.&quot;,
+  &quot;user id&quot;: 16672644,
+  &quot;user name&quot;: &quot;&quot;,
+  &quot;stance_label&quot;: 1,
+  &quot;state&quot;: 1,
+  &quot;hop&quot;: 3,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c18&quot;
+}" transform="translate(840 828)">
+<title>c18: @inthefade I understand, it has changed to cigs,  a tussle in a car, and then his saggy pants,maybe there never will be a truthful story.</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c18</text>
+<text class="node-text" x="10" y="40">@inthefade I understand,</text>
+<text class="node-text" x="10" y="57"> it has changed to cigs,</text>
+</g>
+    </svg>
+  </main>
+  <aside class="side">
+    <div class="panel">
+      <h2 id="node-title">source</h2>
+      <div id="node-content" class="content">17 year old unarmed kid shot ten times by police for stealing candy. I didn&#x27;t know that was punishable by death.
+
+(read the #ferguson tag)</div>
+      <h2>metadata</h2>
+      <pre id="node-meta"></pre>
+    </div>
+  </aside>
+</div>
+<script>
+const titleEl = document.getElementById("node-title");
+const contentEl = document.getElementById("node-content");
+const metaEl = document.getElementById("node-meta");
+const nodes = Array.from(document.querySelectorAll(".node"));
+
+function selectNode(node) {
+  nodes.forEach(n => n.classList.remove("active"));
+  node.classList.add("active");
+  titleEl.textContent = node.dataset.title || "";
+  contentEl.textContent = node.dataset.content || "";
+  metaEl.textContent = node.dataset.meta || "";
+}
+
+nodes.forEach(node => {
+  node.addEventListener("click", () => selectNode(node));
+});
+
+const sourceNode = document.querySelector('.node[data-node-id="source"]');
+if (sourceNode) {
+  selectNode(sourceNode);
+}
+</script>
+</body>
+</html>

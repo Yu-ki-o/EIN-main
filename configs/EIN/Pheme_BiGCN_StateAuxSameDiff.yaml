@@ -1,0 +1,73 @@
+# model and data
+model_name: EIN
+dataset: Pheme
+num_classes: 2
+language: en # en or ch
+word_embedding: word2vec # word2vec or multilingual-e5-base
+e5_model_name: intfloat/multilingual-e5-base
+e5_max_length: 128
+e5_batch_size: 64
+result_name: Ours_bigcn_directed_dualview_valacc_crossatten_stanceonly # set a name to save logs under experiments/EIN/Pheme/<result_name>
+experiment_mode: id # id or strict_ood
+ood_source_datasets: []
+ood_val_domain: source # source or target
+debug: False
+
+# training parameters
+seed: 0
+device: cuda
+lr: 0.0005
+weight_decay: 0.0001
+patience: 10
+n_epochs: 100
+selection_metric: val_acc # val_loss, val_acc, val_auc, or val_f1
+split: '622'
+
+# model parameters
+batch_size: 128
+hidden_dim: 64
+in_feats: 200    #这行在更换编码器时需要进行修改,200 or 768
+tokenize_mode: nltk
+k: 10000
+vector_size: 200
+undirected: True
+n_layers_conv: 3
+n_layers_feat: 1
+n_layers_fc: 2
+skip_connection: True
+res_branch: BNConvReLU
+dropout: 0.1
+edge_norm: True
+global_pool: sum
+
+base_model: BiGCN_StateAuxSameDiff
+max_hop: 47
+init_alpha: 1.0
+init_beta: 1.0
+lamda: 0.0
+
+# state-supervised same/diff enhancement
+state_aux_dual_view: True
+state_aux_transition_attention: False
+
+state_aux_transition_attention_blend: 1.0
+state_aux_reply_target_attention: False
+state_aux_reply_target_attention_blend: 1.0
+state_aux_cross_view_attention: True
+state_aux_cross_view_attention_blend: 1.0
+state_aux_cross_view_topk_ratio: 0.3
+state_aux_cross_view_min_nodes: 1
+state_aux_edge_relation_routing: True
+state_aux_num_states: 2
+state_aux_temp: 1.0
+state_aux_detach_route: False
+lambda_node_state_aux: 0.1
+lambda_edge_same_aux: 0.1
+lambda_same_diff_sep: 0.01
+same_path_blend: 1.0
+diff_path_blend: 1.0
+same_diff_gate_blend: 1.0
+same_dulreg_blend: 0.0
+same_dulreg_logvar_min: -8.0
+same_dulreg_logvar_max: 8.0
+same_dulreg_precision_max: 10000.0

@@ -1,0 +1,13 @@
+Experiment setting:
+Target dataset: DRWeibo
+Mode: id
+OOD source datasets: []
+Validation domain: source
+
+Seed results:
+Seed 0: Acc 0.8488 | AUC 0.8457 | F1 0.8286
+
+Average results over 1 runs:
+ACC: 84.88+/-0.00 (%)
+AUC: 84.57+/-0.00 (%)
+F1: 82.86+/-0.00 (%)

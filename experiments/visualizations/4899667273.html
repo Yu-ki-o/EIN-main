@@ -1,0 +1,1010 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>2211101021392023682 (0)</title>
+<style>
+body {
+  margin: 0;
+  font-family: Arial, "Microsoft YaHei", sans-serif;
+  color: #1f2933;
+  background: #f6f8fb;
+}
+.app {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  height: 100vh;
+}
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #d9e2ec;
+  background: #ffffff;
+}
+.toolbar h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+.toolbar span {
+  color: #52616b;
+  font-size: 13px;
+}
+.graph-wrap {
+  overflow: auto;
+}
+svg {
+  display: block;
+  background: #fbfdff;
+}
+.edge {
+  fill: none;
+  stroke: #9fb3c8;
+  stroke-width: 1.4;
+}
+.node {
+  cursor: pointer;
+}
+.node rect {
+  fill: #ffffff;
+  stroke: #829ab1;
+  stroke-width: 1.2;
+}
+.node.source rect {
+  fill: #e3f8ff;
+  stroke: #2d9cdb;
+  stroke-width: 1.8;
+}
+.node:hover rect, .node.active rect {
+  stroke: #ef6c00;
+  stroke-width: 2.4;
+}
+.node-label {
+  font-size: 13px;
+  font-weight: 700;
+  fill: #102a43;
+}
+.node-text {
+  font-size: 12px;
+  fill: #334e68;
+}
+.side {
+  border-left: 1px solid #d9e2ec;
+  background: #ffffff;
+  min-width: 0;
+  overflow: auto;
+}
+.panel {
+  padding: 16px;
+}
+.panel h2 {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+.content {
+  white-space: pre-wrap;
+  line-height: 1.5;
+  padding: 12px;
+  background: #f6f8fb;
+  border: 1px solid #d9e2ec;
+  border-radius: 6px;
+}
+pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 12px;
+  background: #102a43;
+  color: #f0f4f8;
+  border-radius: 6px;
+  font-size: 12px;
+}
+@media (max-width: 900px) {
+  .app {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) 45vh;
+  }
+  .side {
+    border-left: 0;
+    border-top: 1px solid #d9e2ec;
+  }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <main class="graph-wrap">
+    <div class="toolbar">
+      <h1>2211101021392023682 (0)</h1>
+      <span>nodes: 44 | comments: 43 | label: 0</span>
+    </div>
+    <svg width="900" height="4114" viewBox="-40 -40 900 4114">
+      <path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 39.0, 280 39.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 131.0, 280 131.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 223.0, 280 223.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 315.0, 280 315.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 407.0, 280 407.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 499.0, 280 499.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 591.0, 280 591.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 683.0, 280 683.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 775.0, 280 775.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 867.0, 280 867.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 959.0, 280 959.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 1051.0, 280 1051.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 1143.0, 280 1143.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 1235.0, 280 1235.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 1327.0, 280 1327.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 1419.0, 280 1419.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 1511.0, 280 1511.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 1603.0, 280 1603.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 1695.0, 280 1695.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 1787.0, 280 1787.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 1879.0, 280 1879.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 1971.0, 280 1971.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 2063.0, 280 2063.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 2155.0, 280 2155.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 2247.0, 280 2247.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 2339.0, 280 2339.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 2431.0, 280 2431.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 2523.0, 280 2523.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 2615.0, 280 2615.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 2707.0, 280 2707.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 2799.0, 280 2799.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 2891.0, 280 2891.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 2983.0, 280 2983.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 3075.0, 280 3075.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 3167.0, 280 3167.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 3259.0, 280 3259.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 3351.0, 280 3351.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 3443.0, 280 3443.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 3535.0, 280 3535.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 3627.0, 280 3627.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 3719.0, 280 3719.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 3811.0, 280 3811.0" />
+<path class="edge" d="M 230 1971.0 C 255.0 1971.0, 255.0 3903.0, 280 3903.0" />
+<g class="node source" data-node-id="source" data-title="source" data-content="强烈推荐这个视频，Hans Rosling&#x27;s 200 Countries, 200 Years, 4 Minutes - The Joy of Stats http://sinaurl.cn/hbjnlO ， 一个动态图表可以看到过去200年各个国家全球的财富和生活水平是如何变化的，有中国的绝对和相对变化轨迹" data-meta="{
+  &quot;content&quot;: &quot;强烈推荐这个视频，Hans Rosling&#x27;s 200 Countries, 200 Years, 4 Minutes - The Joy of Stats http://sinaurl.cn/hbjnlO ， 一个动态图表可以看到过去200年各个国家全球的财富和生活水平是如何变化的，有中国的绝对和相对变化轨迹&quot;,
+  &quot;user id&quot;: 1651079022,
+  &quot;tweet id&quot;: &quot;2211101021392023682&quot;,
+  &quot;label&quot;: 0,
+  &quot;node_kind&quot;: &quot;source&quot;,
+  &quot;node_label&quot;: &quot;source&quot;
+}" transform="translate(0 1932.0)">
+<title>source: 强烈推荐这个视频，Hans Rosling&#x27;s 200 Countries, 200 Years, 4 Minutes - The Joy of Stats http://sinaurl.cn/hbjnlO ， 一个动态图表可以看到过去200年各个国家全球的财富和生活水平是如何变化的，有中国的绝对和相对变化轨迹</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">source</text>
+<text class="node-text" x="10" y="40">强烈推荐这个视频，Hans Rosling&#x27;s </text>
+<text class="node-text" x="10" y="57">200 Countries, 200 Years</text>
+</g>
+<g class="node comment" data-node-id="comment-0" data-title="c0" data-content="it is good" data-meta="{
+  &quot;comment id&quot;: 0,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;it is good&quot;,
+  &quot;user id&quot;: 1821906993,
+  &quot;user name&quot;: &quot;drakon&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c0&quot;
+}" transform="translate(280 0)">
+<title>c0: it is good</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c0</text>
+<text class="node-text" x="10" y="40">it is good</text>
+</g>
+<g class="node comment" data-node-id="comment-1" data-title="c1" data-content="结论很震撼！另，如果宏观经济学老师能这样讲课，我对经济学的兴趣会大N倍。" data-meta="{
+  &quot;comment id&quot;: 1,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;结论很震撼！另，如果宏观经济学老师能这样讲课，我对经济学的兴趣会大N倍。&quot;,
+  &quot;user id&quot;: 1639633451,
+  &quot;user name&quot;: &quot;赵剑Tony&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c1&quot;
+}" transform="translate(280 92)">
+<title>c1: 结论很震撼！另，如果宏观经济学老师能这样讲课，我对经济学的兴趣会大N倍。</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c1</text>
+<text class="node-text" x="10" y="40">结论很震撼！另，如果宏观经济学老师能这样讲课，我</text>
+<text class="node-text" x="10" y="57">对经济学的兴趣会大N倍。</text>
+</g>
+<g class="node comment" data-node-id="comment-2" data-title="c2" data-content="这个必须转，上海……就是个穷人悲剧的世界，人均很高，大部分很少" data-meta="{
+  &quot;comment id&quot;: 2,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;这个必须转，上海……就是个穷人悲剧的世界，人均很高，大部分很少&quot;,
+  &quot;user id&quot;: 1216893921,
+  &quot;user name&quot;: &quot;许鲜徐晗&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c2&quot;
+}" transform="translate(280 184)">
+<title>c2: 这个必须转，上海……就是个穷人悲剧的世界，人均很高，大部分很少</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c2</text>
+<text class="node-text" x="10" y="40">这个必须转，上海……就是个穷人悲剧的世界，人均很</text>
+<text class="node-text" x="10" y="57">高，大部分很少</text>
+</g>
+<g class="node comment" data-node-id="comment-3" data-title="c3" data-content="必须mark一下！" data-meta="{
+  &quot;comment id&quot;: 3,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;必须mark一下！&quot;,
+  &quot;user id&quot;: 1738161767,
+  &quot;user name&quot;: &quot;海蒂陈&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c3&quot;
+}" transform="translate(280 276)">
+<title>c3: 必须mark一下！</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c3</text>
+<text class="node-text" x="10" y="40">必须mark一下！</text>
+</g>
+<g class="node comment" data-node-id="comment-4" data-title="c4" data-content="实在喜欢这个老头的presentation，这里还有他在TED的演讲，Hans Rosling: Asia&#x27;s rise -- how and when http://sinaurl.cn/hbZLkk @申音 @李黎 @马锐Ryan @邓天卓 @ben49wang  @赵剑Tony @陈之岚Hattie @徐隽Cathy" data-meta="{
+  &quot;comment id&quot;: 4,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;实在喜欢这个老头的presentation，这里还有他在TED的演讲，Hans Rosling: Asia&#x27;s rise -- how and when http://sinaurl.cn/hbZLkk @申音 @李黎 @马锐Ryan @邓天卓 @ben49wang  @赵剑Tony @陈之岚Hattie @徐隽Cathy&quot;,
+  &quot;user id&quot;: 1651079022,
+  &quot;user name&quot;: &quot;常斌&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c4&quot;
+}" transform="translate(280 368)">
+<title>c4: 实在喜欢这个老头的presentation，这里还有他在TED的演讲，Hans Rosling: Asia&#x27;s rise -- how and when http://sinaurl.cn/hbZLkk @申音 @李黎 @马锐Ryan @邓天卓 @ben49wang  @赵剑Tony @陈之岚Hattie @徐隽Cathy</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c4</text>
+<text class="node-text" x="10" y="40">实在喜欢这个老头的presentation，这里</text>
+<text class="node-text" x="10" y="57">还有他在TED的演讲，Hans Rosling:</text>
+</g>
+<g class="node comment" data-node-id="comment-5" data-title="c5" data-content="好久没看ted了…" data-meta="{
+  &quot;comment id&quot;: 5,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;好久没看ted了…&quot;,
+  &quot;user id&quot;: 1647302454,
+  &quot;user name&quot;: &quot;Retina&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c5&quot;
+}" transform="translate(280 460)">
+<title>c5: 好久没看ted了…</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c5</text>
+<text class="node-text" x="10" y="40">好久没看ted了…</text>
+</g>
+<g class="node comment" data-node-id="comment-6" data-title="c6" data-content="这个 不丑！" data-meta="{
+  &quot;comment id&quot;: 6,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;这个 不丑！&quot;,
+  &quot;user id&quot;: 1646277410,
+  &quot;user name&quot;: &quot;金刀&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c6&quot;
+}" transform="translate(280 552)">
+<title>c6: 这个 不丑！</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c6</text>
+<text class="node-text" x="10" y="40">这个 不丑！</text>
+</g>
+<g class="node comment" data-node-id="comment-7" data-title="c7" data-content="@电商大海 @电商李梁" data-meta="{
+  &quot;comment id&quot;: 7,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;@电商大海 @电商李梁&quot;,
+  &quot;user id&quot;: 1403217613,
+  &quot;user name&quot;: &quot;电商吕志刚&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c7&quot;
+}" transform="translate(280 644)">
+<title>c7: @电商大海 @电商李梁</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c7</text>
+<text class="node-text" x="10" y="40">@电商大海 @电商李梁</text>
+</g>
+<g class="node comment" data-node-id="comment-8" data-title="c8" data-content="@常斌 :实在喜欢这个老头的presentation，这里还有他在TED的演讲，Hans Rosling: Asia&#x27;s rise -- how and when [视频]  [视频] http://sinaurl.cn/hbZLkk" data-meta="{
+  &quot;comment id&quot;: 8,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;@常斌 :实在喜欢这个老头的presentation，这里还有他在TED的演讲，Hans Rosling: Asia&#x27;s rise -- how and when [视频]  [视频] http://sinaurl.cn/hbZLkk&quot;,
+  &quot;user id&quot;: 1656014067,
+  &quot;user name&quot;: &quot;MarshaLL_BohaNNoN&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c8&quot;
+}" transform="translate(280 736)">
+<title>c8: @常斌 :实在喜欢这个老头的presentation，这里还有他在TED的演讲，Hans Rosling: Asia&#x27;s rise -- how and when [视频]  [视频] http://sinaurl.cn/hbZLkk</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c8</text>
+<text class="node-text" x="10" y="40">@常斌 :实在喜欢这个老头的presentati</text>
+<text class="node-text" x="10" y="57">on，这里还有他在TED的演讲，Hans Ros</text>
+</g>
+<g class="node comment" data-node-id="comment-9" data-title="c9" data-content="amazing presentation" data-meta="{
+  &quot;comment id&quot;: 9,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;amazing presentation&quot;,
+  &quot;user id&quot;: 1823706460,
+  &quot;user name&quot;: &quot;小鲤余&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c9&quot;
+}" transform="translate(280 828)">
+<title>c9: amazing presentation</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c9</text>
+<text class="node-text" x="10" y="40">amazing presentation</text>
+</g>
+<g class="node comment" data-node-id="comment-10" data-title="c10" data-content="这个好好玩哦！大家一定要看看！" data-meta="{
+  &quot;comment id&quot;: 10,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;这个好好玩哦！大家一定要看看！&quot;,
+  &quot;user id&quot;: 1762776657,
+  &quot;user name&quot;: &quot;子秋QQ&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c10&quot;
+}" transform="translate(280 920)">
+<title>c10: 这个好好玩哦！大家一定要看看！</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c10</text>
+<text class="node-text" x="10" y="40">这个好好玩哦！大家一定要看看！</text>
+</g>
+<g class="node comment" data-node-id="comment-11" data-title="c11" data-content="表现手法比较有趣，不过貌似有小原点上上下下的像微生物入侵" data-meta="{
+  &quot;comment id&quot;: 11,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;表现手法比较有趣，不过貌似有小原点上上下下的像微生物入侵&quot;,
+  &quot;user id&quot;: 1761693531,
+  &quot;user name&quot;: &quot;KKSH&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c11&quot;
+}" transform="translate(280 1012)">
+<title>c11: 表现手法比较有趣，不过貌似有小原点上上下下的像微生物入侵</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c11</text>
+<text class="node-text" x="10" y="40">表现手法比较有趣，不过貌似有小原点上上下下的像微</text>
+<text class="node-text" x="10" y="57">生物入侵</text>
+</g>
+<g class="node comment" data-node-id="comment-12" data-title="c12" data-content="这个绝对要转" data-meta="{
+  &quot;comment id&quot;: 12,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;这个绝对要转&quot;,
+  &quot;user id&quot;: 1775437387,
+  &quot;user name&quot;: &quot;Jun君_爱自己了不起&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c12&quot;
+}" transform="translate(280 1104)">
+<title>c12: 这个绝对要转</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c12</text>
+<text class="node-text" x="10" y="40">这个绝对要转</text>
+</g>
+<g class="node comment" data-node-id="comment-13" data-title="c13" data-content="转，5分钟时间演绎了多少数据的变化啊？" data-meta="{
+  &quot;comment id&quot;: 13,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;转，5分钟时间演绎了多少数据的变化啊？&quot;,
+  &quot;user id&quot;: 1859181732,
+  &quot;user name&quot;: &quot;ProteinMonica&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c13&quot;
+}" transform="translate(280 1196)">
+<title>c13: 转，5分钟时间演绎了多少数据的变化啊？</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c13</text>
+<text class="node-text" x="10" y="40">转，5分钟时间演绎了多少数据的变化啊？</text>
+</g>
+<g class="node comment" data-node-id="comment-14" data-title="c14" data-content="太酷了 // @常斌  :实在喜欢这个老头的presentation，这里还有他在TED的演讲，Hans Rosling: A" data-meta="{
+  &quot;comment id&quot;: 14,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;太酷了 // @常斌  :实在喜欢这个老头的presentation，这里还有他在TED的演讲，Hans Rosling: A&quot;,
+  &quot;user id&quot;: 1752204033,
+  &quot;user name&quot;: &quot;龙门铁甲&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c14&quot;
+}" transform="translate(280 1288)">
+<title>c14: 太酷了 // @常斌  :实在喜欢这个老头的presentation，这里还有他在TED的演讲，Hans Rosling: A</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c14</text>
+<text class="node-text" x="10" y="40">太酷了 // @常斌 :实在喜欢这个老头的pre</text>
+<text class="node-text" x="10" y="57">sentation，这里还有他在TED的演讲，H</text>
+</g>
+<g class="node comment" data-node-id="comment-15" data-title="c15" data-content="上海的朋友应该感到满意，因为从生活水平上看已经达到中上水平，和意大利一样，但是贫困的地区和50年前比差别不大，这就是中国，我们太大了。" data-meta="{
+  &quot;comment id&quot;: 15,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;上海的朋友应该感到满意，因为从生活水平上看已经达到中上水平，和意大利一样，但是贫困的地区和50年前比差别不大，这就是中国，我们太大了。&quot;,
+  &quot;user id&quot;: 1881655860,
+  &quot;user name&quot;: &quot;彭焱焱&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c15&quot;
+}" transform="translate(280 1380)">
+<title>c15: 上海的朋友应该感到满意，因为从生活水平上看已经达到中上水平，和意大利一样，但是贫困的地区和50年前比差别不大，这就是中国，我们太大了。</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c15</text>
+<text class="node-text" x="10" y="40">上海的朋友应该感到满意，因为从生活水平上看已经达</text>
+<text class="node-text" x="10" y="57">到中上水平，和意大利一样，但是贫困的地区和50年</text>
+</g>
+<g class="node comment" data-node-id="comment-16" data-title="c16" data-content="酷，如果我们也可以这样做presentation，那太酷乐" data-meta="{
+  &quot;comment id&quot;: 16,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;酷，如果我们也可以这样做presentation，那太酷乐&quot;,
+  &quot;user id&quot;: 1667574797,
+  &quot;user name&quot;: &quot;君君还是君君&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c16&quot;
+}" transform="translate(280 1472)">
+<title>c16: 酷，如果我们也可以这样做presentation，那太酷乐</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c16</text>
+<text class="node-text" x="10" y="40">酷，如果我们也可以这样做presentation</text>
+<text class="node-text" x="10" y="57">，那太酷乐</text>
+</g>
+<g class="node comment" data-node-id="comment-17" data-title="c17" data-content="用12万个公共数据在4分钟内讲述200个国家的200年" data-meta="{
+  &quot;comment id&quot;: 17,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;用12万个公共数据在4分钟内讲述200个国家的200年&quot;,
+  &quot;user id&quot;: 1667163601,
+  &quot;user name&quot;: &quot;棉棉525&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c17&quot;
+}" transform="translate(280 1564)">
+<title>c17: 用12万个公共数据在4分钟内讲述200个国家的200年</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c17</text>
+<text class="node-text" x="10" y="40">用12万个公共数据在4分钟内讲述200个国家的2</text>
+<text class="node-text" x="10" y="57">00年</text>
+</g>
+<g class="node comment" data-node-id="comment-18" data-title="c18" data-content="想起遥远的跟印度师傅做bubble的岁月……" data-meta="{
+  &quot;comment id&quot;: 18,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;想起遥远的跟印度师傅做bubble的岁月……&quot;,
+  &quot;user id&quot;: 1351259017,
+  &quot;user name&quot;: &quot;Tim_Cherry&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c18&quot;
+}" transform="translate(280 1656)">
+<title>c18: 想起遥远的跟印度师傅做bubble的岁月……</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c18</text>
+<text class="node-text" x="10" y="40">想起遥远的跟印度师傅做bubble的岁月……</text>
+</g>
+<g class="node comment" data-node-id="comment-19" data-title="c19" data-content="真得推荐！！！" data-meta="{
+  &quot;comment id&quot;: 19,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;真得推荐！！！&quot;,
+  &quot;user id&quot;: 1654963402,
+  &quot;user name&quot;: &quot;万玛南杰&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c19&quot;
+}" transform="translate(280 1748)">
+<title>c19: 真得推荐！！！</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c19</text>
+<text class="node-text" x="10" y="40">真得推荐！！！</text>
+</g>
+<g class="node comment" data-node-id="comment-20" data-title="c20" data-content="这就是我将要做的数据平台可以提供展现的效果之一,由用户提供各种数据展现方式." data-meta="{
+  &quot;comment id&quot;: 20,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;这就是我将要做的数据平台可以提供展现的效果之一,由用户提供各种数据展现方式.&quot;,
+  &quot;user id&quot;: 1663480663,
+  &quot;user name&quot;: &quot;罗格大大&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c20&quot;
+}" transform="translate(280 1840)">
+<title>c20: 这就是我将要做的数据平台可以提供展现的效果之一,由用户提供各种数据展现方式.</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c20</text>
+<text class="node-text" x="10" y="40">这就是我将要做的数据平台可以提供展现的效果之一,</text>
+<text class="node-text" x="10" y="57">由用户提供各种数据展现方式.</text>
+</g>
+<g class="node comment" data-node-id="comment-21" data-title="c21" data-content="难以置信的想象力。。太神奇了 太神奇了~~" data-meta="{
+  &quot;comment id&quot;: 21,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;难以置信的想象力。。太神奇了 太神奇了~~&quot;,
+  &quot;user id&quot;: 1832014213,
+  &quot;user name&quot;: &quot;Julia-Rotto&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c21&quot;
+}" transform="translate(280 1932)">
+<title>c21: 难以置信的想象力。。太神奇了 太神奇了~~</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c21</text>
+<text class="node-text" x="10" y="40">难以置信的想象力。。太神奇了 太神奇了~~</text>
+</g>
+<g class="node comment" data-node-id="comment-22" data-title="c22" data-content="一个动态图表可以看到过去200年各个国家全球的财富和生活水平是如何变化的" data-meta="{
+  &quot;comment id&quot;: 22,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;一个动态图表可以看到过去200年各个国家全球的财富和生活水平是如何变化的&quot;,
+  &quot;user id&quot;: 1415736262,
+  &quot;user name&quot;: &quot;岚之方向&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c22&quot;
+}" transform="translate(280 2024)">
+<title>c22: 一个动态图表可以看到过去200年各个国家全球的财富和生活水平是如何变化的</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c22</text>
+<text class="node-text" x="10" y="40">一个动态图表可以看到过去200年各个国家全球的财</text>
+<text class="node-text" x="10" y="57">富和生活水平是如何变化的</text>
+</g>
+<g class="node comment" data-node-id="comment-23" data-title="c23" data-content="很棒！太赞了！ 不过奇怪的是在2：12的时候为什么有个欧洲国家的平均年龄怎么跌到了横轴以下啊。。。灾难？" data-meta="{
+  &quot;comment id&quot;: 23,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;很棒！太赞了！ 不过奇怪的是在2：12的时候为什么有个欧洲国家的平均年龄怎么跌到了横轴以下啊。。。灾难？&quot;,
+  &quot;user id&quot;: 1763734444,
+  &quot;user name&quot;: &quot;马锐Ryan&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c23&quot;
+}" transform="translate(280 2116)">
+<title>c23: 很棒！太赞了！ 不过奇怪的是在2：12的时候为什么有个欧洲国家的平均年龄怎么跌到了横轴以下啊。。。灾难？</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c23</text>
+<text class="node-text" x="10" y="40">很棒！太赞了！ 不过奇怪的是在2：12的时候为什</text>
+<text class="node-text" x="10" y="57">么有个欧洲国家的平均年龄怎么跌到了横轴以下啊。。</text>
+</g>
+<g class="node comment" data-node-id="comment-24" data-title="c24" data-content="思考中………" data-meta="{
+  &quot;comment id&quot;: 24,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;思考中………&quot;,
+  &quot;user id&quot;: 1079070503,
+  &quot;user name&quot;: &quot;Davidcheung-大伟&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c24&quot;
+}" transform="translate(280 2208)">
+<title>c24: 思考中………</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c24</text>
+<text class="node-text" x="10" y="40">思考中………</text>
+</g>
+<g class="node comment" data-node-id="comment-25" data-title="c25" data-content="这个可以成为网商案例研究的一种表现形式么？" data-meta="{
+  &quot;comment id&quot;: 25,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;这个可以成为网商案例研究的一种表现形式么？&quot;,
+  &quot;user id&quot;: 1675975784,
+  &quot;user name&quot;: &quot;高晓虎Stanley&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c25&quot;
+}" transform="translate(280 2300)">
+<title>c25: 这个可以成为网商案例研究的一种表现形式么？</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c25</text>
+<text class="node-text" x="10" y="40">这个可以成为网商案例研究的一种表现形式么？</text>
+</g>
+<g class="node comment" data-node-id="comment-26" data-title="c26" data-content="这个必须转，看了两遍" data-meta="{
+  &quot;comment id&quot;: 26,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;这个必须转，看了两遍&quot;,
+  &quot;user id&quot;: 1894003231,
+  &quot;user name&quot;: &quot;孙立新&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c26&quot;
+}" transform="translate(280 2392)">
+<title>c26: 这个必须转，看了两遍</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c26</text>
+<text class="node-text" x="10" y="40">这个必须转，看了两遍</text>
+</g>
+<g class="node comment" data-node-id="comment-27" data-title="c27" data-content="有趣，很形象！" data-meta="{
+  &quot;comment id&quot;: 27,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;有趣，很形象！&quot;,
+  &quot;user id&quot;: 1736777603,
+  &quot;user name&quot;: &quot;Nueve果子&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c27&quot;
+}" transform="translate(280 2484)">
+<title>c27: 有趣，很形象！</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c27</text>
+<text class="node-text" x="10" y="40">有趣，很形象！</text>
+</g>
+<g class="node comment" data-node-id="comment-28" data-title="c28" data-content="200年的经济运行轨迹...看着让人激动不已" data-meta="{
+  &quot;comment id&quot;: 28,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;200年的经济运行轨迹...看着让人激动不已&quot;,
+  &quot;user id&quot;: 1736234494,
+  &quot;user name&quot;: &quot;LittlePiNo&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c28&quot;
+}" transform="translate(280 2576)">
+<title>c28: 200年的经济运行轨迹...看着让人激动不已</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c28</text>
+<text class="node-text" x="10" y="40">200年的经济运行轨迹...看着让人激动不已</text>
+</g>
+<g class="node comment" data-node-id="comment-29" data-title="c29" data-content="impressive" data-meta="{
+  &quot;comment id&quot;: 29,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;impressive&quot;,
+  &quot;user id&quot;: 1890812007,
+  &quot;user name&quot;: &quot;卧底老愤青&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c29&quot;
+}" transform="translate(280 2668)">
+<title>c29: impressive</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c29</text>
+<text class="node-text" x="10" y="40">impressive</text>
+</g>
+<g class="node comment" data-node-id="comment-30" data-title="c30" data-content="Again,又是英国人。" data-meta="{
+  &quot;comment id&quot;: 30,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;Again,又是英国人。&quot;,
+  &quot;user id&quot;: 1799003943,
+  &quot;user name&quot;: &quot;和华屋一起成长&quot;,
+  &quot;stance_label&quot;: 1,
+  &quot;state&quot;: 1,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c30&quot;
+}" transform="translate(280 2760)">
+<title>c30: Again,又是英国人。</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c30</text>
+<text class="node-text" x="10" y="40">Again,又是英国人。</text>
+</g>
+<g class="node comment" data-node-id="comment-31" data-title="c31" data-content="听得懂英文的了解一下，听不懂英文的看一下bbc互动展示" data-meta="{
+  &quot;comment id&quot;: 31,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;听得懂英文的了解一下，听不懂英文的看一下bbc互动展示&quot;,
+  &quot;user id&quot;: 1871795817,
+  &quot;user name&quot;: &quot;David-刘洋&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c31&quot;
+}" transform="translate(280 2852)">
+<title>c31: 听得懂英文的了解一下，听不懂英文的看一下bbc互动展示</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c31</text>
+<text class="node-text" x="10" y="40">听得懂英文的了解一下，听不懂英文的看一下bbc互</text>
+<text class="node-text" x="10" y="57">动展示</text>
+</g>
+<g class="node comment" data-node-id="comment-32" data-title="c32" data-content="两个难过：中国的人均寿命在 1960 年前后猛地往下掉到一下。我的老家贵州的人均收入水平和加纳差不多，咱再也别嫌非洲兄弟穷了。" data-meta="{
+  &quot;comment id&quot;: 32,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;两个难过：中国的人均寿命在 1960 年前后猛地往下掉到一下。我的老家贵州的人均收入水平和加纳差不多，咱再也别嫌非洲兄弟穷了。&quot;,
+  &quot;user id&quot;: 1659563272,
+  &quot;user name&quot;: &quot;黄继新&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c32&quot;
+}" transform="translate(280 2944)">
+<title>c32: 两个难过：中国的人均寿命在 1960 年前后猛地往下掉到一下。我的老家贵州的人均收入水平和加纳差不多，咱再也别嫌非洲兄弟穷了。</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c32</text>
+<text class="node-text" x="10" y="40">两个难过：中国的人均寿命在 1960 年前后猛地</text>
+<text class="node-text" x="10" y="57">往下掉到一下。我的老家贵州的人均收入水平和加纳差</text>
+</g>
+<g class="node comment" data-node-id="comment-33" data-title="c33" data-content="Amazing" data-meta="{
+  &quot;comment id&quot;: 33,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;Amazing&quot;,
+  &quot;user id&quot;: 1752135454,
+  &quot;user name&quot;: &quot;梁舒楠&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c33&quot;
+}" transform="translate(280 3036)">
+<title>c33: Amazing</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c33</text>
+<text class="node-text" x="10" y="40">Amazing</text>
+</g>
+<g class="node comment" data-node-id="comment-34" data-title="c34" data-content="看看中国在过去200的世界地位" data-meta="{
+  &quot;comment id&quot;: 34,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;看看中国在过去200的世界地位&quot;,
+  &quot;user id&quot;: 1297076842,
+  &quot;user name&quot;: &quot;天蝎在哪里&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c34&quot;
+}" transform="translate(280 3128)">
+<title>c34: 看看中国在过去200的世界地位</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c34</text>
+<text class="node-text" x="10" y="40">看看中国在过去200的世界地位</text>
+</g>
+<g class="node comment" data-node-id="comment-35" data-title="c35" data-content="有意思！" data-meta="{
+  &quot;comment id&quot;: 35,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;有意思！&quot;,
+  &quot;user id&quot;: 1893642262,
+  &quot;user name&quot;: &quot;道生阳明山&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c35&quot;
+}" transform="translate(280 3220)">
+<title>c35: 有意思！</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c35</text>
+<text class="node-text" x="10" y="40">有意思！</text>
+</g>
+<g class="node comment" data-node-id="comment-36" data-title="c36" data-content="精彩的presentation！" data-meta="{
+  &quot;comment id&quot;: 36,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;精彩的presentation！&quot;,
+  &quot;user id&quot;: 1893720954,
+  &quot;user name&quot;: &quot;驴妈妈旅游网曾俊&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c36&quot;
+}" transform="translate(280 3312)">
+<title>c36: 精彩的presentation！</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c36</text>
+<text class="node-text" x="10" y="40">精彩的presentation！</text>
+</g>
+<g class="node comment" data-node-id="comment-37" data-title="c37" data-content="很酷的演讲" data-meta="{
+  &quot;comment id&quot;: 37,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;很酷的演讲&quot;,
+  &quot;user id&quot;: 1706419832,
+  &quot;user name&quot;: &quot;babymao&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c37&quot;
+}" transform="translate(280 3404)">
+<title>c37: 很酷的演讲</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c37</text>
+<text class="node-text" x="10" y="40">很酷的演讲</text>
+</g>
+<g class="node comment" data-node-id="comment-38" data-title="c38" data-content="49年之后，中国的发展速度确实很快啊，还有，展示真的很帅." data-meta="{
+  &quot;comment id&quot;: 38,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;49年之后，中国的发展速度确实很快啊，还有，展示真的很帅.&quot;,
+  &quot;user id&quot;: 1723843281,
+  &quot;user name&quot;: &quot;走在魔都的狼&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c38&quot;
+}" transform="translate(280 3496)">
+<title>c38: 49年之后，中国的发展速度确实很快啊，还有，展示真的很帅.</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c38</text>
+<text class="node-text" x="10" y="40">49年之后，中国的发展速度确实很快啊，还有，展示</text>
+<text class="node-text" x="10" y="57">真的很帅.</text>
+</g>
+<g class="node comment" data-node-id="comment-39" data-title="c39" data-content="推荐" data-meta="{
+  &quot;comment id&quot;: 39,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;推荐&quot;,
+  &quot;user id&quot;: 2101686670,
+  &quot;user name&quot;: &quot;劳伦斯_杨&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c39&quot;
+}" transform="translate(280 3588)">
+<title>c39: 推荐</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c39</text>
+<text class="node-text" x="10" y="40">推荐</text>
+</g>
+<g class="node comment" data-node-id="comment-40" data-title="c40" data-content="你该看看这差距！" data-meta="{
+  &quot;comment id&quot;: 40,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;你该看看这差距！&quot;,
+  &quot;user id&quot;: 1795142371,
+  &quot;user name&quot;: &quot;Leon_theMore&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c40&quot;
+}" transform="translate(280 3680)">
+<title>c40: 你该看看这差距！</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c40</text>
+<text class="node-text" x="10" y="40">你该看看这差距！</text>
+</g>
+<g class="node comment" data-node-id="comment-41" data-title="c41" data-content="学习这种presentation的方式，让人印象深刻" data-meta="{
+  &quot;comment id&quot;: 41,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;学习这种presentation的方式，让人印象深刻&quot;,
+  &quot;user id&quot;: 2030790911,
+  &quot;user name&quot;: &quot;Cuc璇仔&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c41&quot;
+}" transform="translate(280 3772)">
+<title>c41: 学习这种presentation的方式，让人印象深刻</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c41</text>
+<text class="node-text" x="10" y="40">学习这种presentation的方式，让人印象</text>
+<text class="node-text" x="10" y="57">深刻</text>
+</g>
+<g class="node comment" data-node-id="comment-42" data-title="c42" data-content="China上下最Volatile，以及1959年的那个Drop" data-meta="{
+  &quot;comment id&quot;: 42,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;content&quot;: &quot;China上下最Volatile，以及1959年的那个Drop&quot;,
+  &quot;user id&quot;: 1661887237,
+  &quot;user name&quot;: &quot;孙钊Rickiesun&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c42&quot;
+}" transform="translate(280 3864)">
+<title>c42: China上下最Volatile，以及1959年的那个Drop</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c42</text>
+<text class="node-text" x="10" y="40">China上下最Volatile，以及1959年</text>
+<text class="node-text" x="10" y="57">的那个Drop</text>
+</g>
+    </svg>
+  </main>
+  <aside class="side">
+    <div class="panel">
+      <h2 id="node-title">source</h2>
+      <div id="node-content" class="content">强烈推荐这个视频，Hans Rosling&#x27;s 200 Countries, 200 Years, 4 Minutes - The Joy of Stats http://sinaurl.cn/hbjnlO ， 一个动态图表可以看到过去200年各个国家全球的财富和生活水平是如何变化的，有中国的绝对和相对变化轨迹</div>
+      <h2>metadata</h2>
+      <pre id="node-meta"></pre>
+    </div>
+  </aside>
+</div>
+<script>
+const titleEl = document.getElementById("node-title");
+const contentEl = document.getElementById("node-content");
+const metaEl = document.getElementById("node-meta");
+const nodes = Array.from(document.querySelectorAll(".node"));
+
+function selectNode(node) {
+  nodes.forEach(n => n.classList.remove("active"));
+  node.classList.add("active");
+  titleEl.textContent = node.dataset.title || "";
+  contentEl.textContent = node.dataset.content || "";
+  metaEl.textContent = node.dataset.meta || "";
+}
+
+nodes.forEach(node => {
+  node.addEventListener("click", () => selectNode(node));
+});
+
+const sourceNode = document.querySelector('.node[data-node-id="source"]');
+if (sourceNode) {
+  selectNode(sourceNode);
+}
+</script>
+</body>
+</html>
