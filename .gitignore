@@ -28,6 +28,14 @@ word2vec/
 *.model
 *.npy
 
+# Always keep project configs and model source files trackable.
+!configs/
+!configs/**
+!model/
+!model/**
+model/**/__pycache__/
+model/**/*.py[cod]
+
 # Experiment outputs: keep lightweight summaries/visualizations, ignore runs.
 experiments/**/seed_*/
 experiments/**/*.log
