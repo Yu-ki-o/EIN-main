@@ -4,7 +4,7 @@ dataset: Weibo
 num_classes: 2
 language: ch # en or ch
 word_embedding: word2vec # match original EIN Weibo runs
-result_name: Ours_resgcn_directed_dualview_valacc_crossatten_stanceonly # set a name to save logs under experiments/EIN/Weibo/<result_name>
+result_name: Ours_resgcn_directed_dualview_valloss_stanceonly # set a name to save logs under experiments/EIN/Weibo/<result_name>
 experiment_mode: id # id or strict_ood
 ood_source_datasets: []
 ood_val_domain: source # source or target
@@ -17,7 +17,7 @@ lr: 0.0005
 weight_decay: 0.00001
 patience: 10
 n_epochs: 100
-selection_metric: val_acc # val_loss, val_acc, val_auc, or val_f1
+selection_metric: val_loss # val_loss, val_acc, val_auc, or val_f1
 split: '622'
 
 # model parameters
@@ -54,11 +54,14 @@ state_aux_transition_attention: False
 state_aux_transition_attention_blend: 1.0
 state_aux_reply_target_attention: False
 state_aux_reply_target_attention_blend: 1.0
-state_aux_cross_view_attention: True
+state_aux_cross_view_attention: False
 state_aux_cross_view_attention_blend: 1.0
 state_aux_cross_view_topk_ratio: 0.3
 state_aux_cross_view_min_nodes: 1
+state_aux_cross_view_vectorized: True
+state_aux_cross_view_bucket_sizes: [16, 32, 64, 128, 256, 512, 1024]
 state_aux_edge_relation_routing: True
+state_aux_preserve_route_strength: True
 state_aux_num_states: 2
 state_aux_temp: 1.0
 state_aux_detach_route: False

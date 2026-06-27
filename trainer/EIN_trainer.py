@@ -33,9 +33,23 @@ class EINTrainer(object):
 
         train_dataset, val_dataset, test_dataset = datasets
 
-        self.train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-        self.val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
-        self.test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
+        loader_kwargs = self._loader_kwargs()
+        self.train_loader = DataLoader(
+            train_dataset,
+            batch_size=args.batch_size,
+            shuffle=True,
+            **loader_kwargs
+        )
+        self.val_loader = DataLoader(
+            val_dataset,
+            batch_size=args.batch_size,
+            **loader_kwargs
+        )
+        self.test_loader = DataLoader(
+            test_dataset,
+            batch_size=args.batch_size,
+            **loader_kwargs
+        )
         
         self.train_per_epoch = len(self.train_loader)
 
@@ -48,6 +62,31 @@ class EINTrainer(object):
         
         self.logger.info('Experiment log path in: {}'.format(args.log_dir))
         self.logger.info('Experiment configs are: {}'.format(args))
+        self.logger.info(
+            'Runtime device: {} | pin_memory: {} | non_blocking transfer: {}'.format(
+                self.device,
+                self.device.type == 'cuda',
+                self.device.type == 'cuda',
+            )
+        )
+
+    def _loader_kwargs(self):
+        num_workers = max(0, int(getattr(self.args, 'num_workers', 0)))
+        kwargs = {
+            'num_workers': num_workers,
+            'pin_memory': self.device.type == 'cuda',
+        }
+        if num_workers > 0:
+            kwargs['persistent_workers'] = bool(
+                getattr(self.args, 'persistent_workers', True)
+            )
+        return kwargs
+
+    def _move_to_device(self, data):
+        return data.to(
+            self.device,
+            non_blocking=self.device.type == 'cuda',
+        )
 
     def get_selection_metric(self):
         metric = getattr(self.args, 'selection_metric', 'val_loss')
@@ -64,15 +103,24 @@ class EINTrainer(object):
 
     def train_epoch(self, epoch):
         self.model.train()
+        if hasattr(self.model, 'set_epoch'):
+            self.model.set_epoch(epoch)
         train_loss = 0
         for batch_idx, data in enumerate(self.train_loader):
-            self.optimizer.zero_grad()
-            data.to(self.device)
+            self.optimizer.zero_grad(set_to_none=True)
+            data = self._move_to_device(data)
             out_labels, U, S, D = self.model(data)
             
             p_loss = self.model.physics_loss(U, S, D, data.user_state)
 
-            loss = F.nll_loss(out_labels, data.y) + p_loss
+            if hasattr(self.model, 'classification_loss'):
+                classification_loss = self.model.classification_loss(
+                    out_labels,
+                    data.y,
+                )
+            else:
+                classification_loss = F.nll_loss(out_labels, data.y)
+            loss = classification_loss + p_loss
             if hasattr(self.model, 'auxiliary_loss'):
                 aux_loss = self.model.auxiliary_loss()
                 if aux_loss is not None:
@@ -95,9 +143,15 @@ class EINTrainer(object):
         self.model.eval()
         with torch.no_grad():
             for batch_idx, data in enumerate(self.val_loader):
-                data.to(self.device)
+                data = self._move_to_device(data)
                 val_out, _, _, _ = self.model(data)
-                val_loss  = F.nll_loss(val_out, data.y)
+                if hasattr(self.model, 'classification_loss'):
+                    val_loss = self.model.classification_loss(
+                        val_out,
+                        data.y,
+                    )
+                else:
+                    val_loss = F.nll_loss(val_out, data.y)
                 val_losses.append(val_loss.item())
                 y_true += data.y.tolist()
                 y_pred += val_out.max(1).indices.tolist()
@@ -132,7 +186,7 @@ class EINTrainer(object):
         self.model.eval()
         with torch.no_grad():
             for batch_idx, data in enumerate(self.test_loader):
-                data.to(self.device)
+                data = self._move_to_device(data)
                 test_out, _, _, _ = self.model(data)
 
                 y_true += data.y.tolist()

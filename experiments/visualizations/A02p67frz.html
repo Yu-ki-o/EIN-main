@@ -1,0 +1,776 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A02p67frz (1)</title>
+<style>
+body {
+  margin: 0;
+  font-family: Arial, "Microsoft YaHei", sans-serif;
+  color: #1f2933;
+  background: #f6f8fb;
+}
+.app {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  height: 100vh;
+}
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #d9e2ec;
+  background: #ffffff;
+}
+.toolbar h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+.toolbar span {
+  color: #52616b;
+  font-size: 13px;
+}
+.graph-wrap {
+  overflow: auto;
+}
+svg {
+  display: block;
+  background: #fbfdff;
+}
+.edge {
+  fill: none;
+  stroke: #9fb3c8;
+  stroke-width: 1.4;
+}
+.node {
+  cursor: pointer;
+}
+.node rect {
+  fill: #ffffff;
+  stroke: #829ab1;
+  stroke-width: 1.2;
+}
+.node.source rect {
+  fill: #e3f8ff;
+  stroke: #2d9cdb;
+  stroke-width: 1.8;
+}
+.node:hover rect, .node.active rect {
+  stroke: #ef6c00;
+  stroke-width: 2.4;
+}
+.node-label {
+  font-size: 13px;
+  font-weight: 700;
+  fill: #102a43;
+}
+.node-text {
+  font-size: 12px;
+  fill: #334e68;
+}
+.side {
+  border-left: 1px solid #d9e2ec;
+  background: #ffffff;
+  min-width: 0;
+  overflow: auto;
+}
+.panel {
+  padding: 16px;
+}
+.panel h2 {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+.content {
+  white-space: pre-wrap;
+  line-height: 1.5;
+  padding: 12px;
+  background: #f6f8fb;
+  border: 1px solid #d9e2ec;
+  border-radius: 6px;
+}
+pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 12px;
+  background: #102a43;
+  color: #f0f4f8;
+  border-radius: 6px;
+  font-size: 12px;
+}
+@media (max-width: 900px) {
+  .app {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) 45vh;
+  }
+  .side {
+    border-left: 0;
+    border-top: 1px solid #d9e2ec;
+  }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <main class="graph-wrap">
+    <div class="toolbar">
+      <h1>A02p67frz (1)</h1>
+      <span>nodes: 30 | comments: 29 | label: 1</span>
+    </div>
+    <svg width="900" height="2826" viewBox="-40 -40 900 2826">
+      <path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 39.0, 280 39.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 131.0, 280 131.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 223.0, 280 223.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 315.0, 280 315.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 407.0, 280 407.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 499.0, 280 499.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 591.0, 280 591.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 683.0, 280 683.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 775.0, 280 775.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 867.0, 280 867.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 959.0, 280 959.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 1051.0, 280 1051.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 1143.0, 280 1143.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 1235.0, 280 1235.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 1327.0, 280 1327.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 1419.0, 280 1419.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 1511.0, 280 1511.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 1603.0, 280 1603.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 1695.0, 280 1695.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 1787.0, 280 1787.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 1879.0, 280 1879.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 1971.0, 280 1971.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 2063.0, 280 2063.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 2155.0, 280 2155.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 2247.0, 280 2247.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 2339.0, 280 2339.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 2431.0, 280 2431.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 2523.0, 280 2523.0" />
+<path class="edge" d="M 230 1327.0 C 255.0 1327.0, 255.0 2615.0, 280 2615.0" />
+<g class="node source" data-node-id="source" data-title="source" data-content="今天上午一市民女儿在循礼门大润发超市附近被人拐走了！小女孩三岁多，能准确说出她爸爸的手机号码。从监控上看到孩子是被一个四十多岁男人抱走。现大人都急疯了，有知情者请告之！求扩散！万分感谢！提醒：武汉警方要引起重视，最近关山、南湖多次出现类似情况，一定是有一个拐卖儿童团伙流窜到汉了。 " data-meta="{
+  &quot;content&quot;: &quot;今天上午一市民女儿在循礼门大润发超市附近被人拐走了！小女孩三岁多，能准确说出她爸爸的手机号码。从监控上看到孩子是被一个四十多岁男人抱走。现大人都急疯了，有知情者请告之！求扩散！万分感谢！提醒：武汉警方要引起重视，最近关山、南湖多次出现类似情况，一定是有一个拐卖儿童团伙流窜到汉了。 &quot;,
+  &quot;time&quot;: &quot;13-7-14 22:33&quot;,
+  &quot;user id&quot;: &quot;1095380460&quot;,
+  &quot;tweet id&quot;: &quot;A02p67frz&quot;,
+  &quot;label&quot;: 1,
+  &quot;theme&quot;: null,
+  &quot;node_kind&quot;: &quot;source&quot;,
+  &quot;node_label&quot;: &quot;source&quot;
+}" transform="translate(0 1288.0)">
+<title>source: 今天上午一市民女儿在循礼门大润发超市附近被人拐走了！小女孩三岁多，能准确说出她爸爸的手机号码。从监控上看到孩子是被一个四十多岁男人抱走。现大人都急疯了，有知情者请告之！求扩散！万分感谢！提醒：武汉警方要引起重视，最近关山、南湖多次出现类似情况，一定是有一个拐卖儿童团伙流窜到汉了。 </title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">source</text>
+<text class="node-text" x="10" y="40">今天上午一市民女儿在循礼门大润发超市附近被人拐走</text>
+<text class="node-text" x="10" y="57">了！小女孩三岁多，能准确说出她爸爸的手机号码。从</text>
+</g>
+<g class="node comment" data-node-id="comment-0" data-title="c0" data-content="好可怕！嗯回去跟奶奶也说下" data-meta="{
+  &quot;comment id&quot;: 0,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1769351435&quot;,
+  &quot;user name&quot;: &quot;小狐狸yjj&quot;,
+  &quot;content&quot;: &quot;好可怕！嗯回去跟奶奶也说下&quot;,
+  &quot;time&quot;: &quot;13-7-17 08:53&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c0&quot;
+}" transform="translate(280 0)">
+<title>c0: 好可怕！嗯回去跟奶奶也说下</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c0</text>
+<text class="node-text" x="10" y="40">好可怕！嗯回去跟奶奶也说下</text>
+</g>
+<g class="node comment" data-node-id="comment-1" data-title="c1" data-content="经查，“小女孩在大润发走丢”一事发生于赣州，且小女孩于7月12日已被找到，详情：网页链接，被举报人构成“发布不实信息”，虽无即时危险，但应予澄清，现根据《新浪微博社区管理规定(试行)》（微博社区管理中心）第23条，予以标识处理。" data-meta="{
+  &quot;comment id&quot;: 1,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1845060564&quot;,
+  &quot;user name&quot;: &quot;一只爱行摄的青蛙&quot;,
+  &quot;content&quot;: &quot;经查，“小女孩在大润发走丢”一事发生于赣州，且小女孩于7月12日已被找到，详情：网页链接，被举报人构成“发布不实信息”，虽无即时危险，但应予澄清，现根据《新浪微博社区管理规定(试行)》（微博社区管理中心）第23条，予以标识处理。&quot;,
+  &quot;time&quot;: &quot;13-7-15 18:32&quot;,
+  &quot;stance_label&quot;: 1,
+  &quot;state&quot;: 1,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c1&quot;
+}" transform="translate(280 92)">
+<title>c1: 经查，“小女孩在大润发走丢”一事发生于赣州，且小女孩于7月12日已被找到，详情：网页链接，被举报人构成“发布不实信息”，虽无即时危险，但应予澄清，现根据《新浪微博社区管理规定(试行)》（微博社区管理中心）第23条，予以标识处理。</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c1</text>
+<text class="node-text" x="10" y="40">经查，“小女孩在大润发走丢”一事发生于赣州，且小</text>
+<text class="node-text" x="10" y="57">女孩于7月12日已被找到，详情：网页链接，被举报</text>
+</g>
+<g class="node comment" data-node-id="comment-2" data-title="c2" data-content="假消息，已有记者证实////@天外天边: @黄-小-艳 ：求证、跟踪。//@凯子哥369: //@直播大武汉官方微博:#观众求助#关注 @天外天边//@培德律师汪_洋: //@武汉律师张绍明://@小lion惠://@iliangwei://@老徐纪事:请武汉的朋友转。@武汉律师张绍明 @直播大武汉官方微博 @武汉新浪乐居 @武汉同城会" data-meta="{
+  &quot;comment id&quot;: 2,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1438954984&quot;,
+  &quot;user name&quot;: &quot;邱秀桐&quot;,
+  &quot;content&quot;: &quot;假消息，已有记者证实////@天外天边: @黄-小-艳 ：求证、跟踪。//@凯子哥369: //@直播大武汉官方微博:#观众求助#关注 @天外天边//@培德律师汪_洋: //@武汉律师张绍明://@小lion惠://@iliangwei://@老徐纪事:请武汉的朋友转。@武汉律师张绍明 @直播大武汉官方微博 @武汉新浪乐居 @武汉同城会&quot;,
+  &quot;time&quot;: &quot;13-7-15 15:54&quot;,
+  &quot;stance_label&quot;: 1,
+  &quot;state&quot;: 1,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c2&quot;
+}" transform="translate(280 184)">
+<title>c2: 假消息，已有记者证实////@天外天边: @黄-小-艳 ：求证、跟踪。//@凯子哥369: //@直播大武汉官方微博:#观众求助#关注 @天外天边//@培德律师汪_洋: //@武汉律师张绍明://@小lion惠://@iliangwei://@老徐纪事:请武汉的朋友转。@武汉律师张绍明 @直播大武汉官方微博 @武汉新浪乐居 @武汉同城会</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c2</text>
+<text class="node-text" x="10" y="40">假消息，已有记者证实////@天外天边: @黄-</text>
+<text class="node-text" x="10" y="57">小-艳 ：求证、跟踪。//@凯子哥369: //</text>
+</g>
+<g class="node comment" data-node-id="comment-3" data-title="c3" data-content="@黄-小-艳 ：求证、跟踪。//@凯子哥369: //@直播大武汉官方微博:#观众求助#关注 @天外天边//@培德律师汪_洋: //@武汉律师张绍明://@小lion惠://@iliangwei://@老徐纪事:请武汉的朋友转。@武汉律师张绍明 @直播大武汉官方微博 @武汉新浪乐居 @武汉同城会" data-meta="{
+  &quot;comment id&quot;: 3,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1131849647&quot;,
+  &quot;user name&quot;: &quot;天外天边&quot;,
+  &quot;content&quot;: &quot;@黄-小-艳 ：求证、跟踪。//@凯子哥369: //@直播大武汉官方微博:#观众求助#关注 @天外天边//@培德律师汪_洋: //@武汉律师张绍明://@小lion惠://@iliangwei://@老徐纪事:请武汉的朋友转。@武汉律师张绍明 @直播大武汉官方微博 @武汉新浪乐居 @武汉同城会&quot;,
+  &quot;time&quot;: &quot;13-7-15 15:30&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c3&quot;
+}" transform="translate(280 276)">
+<title>c3: @黄-小-艳 ：求证、跟踪。//@凯子哥369: //@直播大武汉官方微博:#观众求助#关注 @天外天边//@培德律师汪_洋: //@武汉律师张绍明://@小lion惠://@iliangwei://@老徐纪事:请武汉的朋友转。@武汉律师张绍明 @直播大武汉官方微博 @武汉新浪乐居 @武汉同城会</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c3</text>
+<text class="node-text" x="10" y="40">@黄-小-艳 ：求证、跟踪。//@凯子哥369:</text>
+<text class="node-text" x="10" y="57"> //@直播大武汉官方微博:#观众求助#关注 @</text>
+</g>
+<g class="node comment" data-node-id="comment-4" data-title="c4" data-content="打击犯罪！//@直播大武汉官方微博: #观众求助#关注 @天外天边//@培德律师汪_洋: //@武汉律师张绍明://@小lion惠://@iliangwei://@老徐纪事:请武汉的朋友转。@武汉律师张绍明 @直播大武汉官方微博 @武汉新浪乐居 @武汉同城会" data-meta="{
+  &quot;comment id&quot;: 4,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1652843865&quot;,
+  &quot;user name&quot;: &quot;與箜氣對話&quot;,
+  &quot;content&quot;: &quot;打击犯罪！//@直播大武汉官方微博: #观众求助#关注 @天外天边//@培德律师汪_洋: //@武汉律师张绍明://@小lion惠://@iliangwei://@老徐纪事:请武汉的朋友转。@武汉律师张绍明 @直播大武汉官方微博 @武汉新浪乐居 @武汉同城会&quot;,
+  &quot;time&quot;: &quot;13-7-15 13:30&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c4&quot;
+}" transform="translate(280 368)">
+<title>c4: 打击犯罪！//@直播大武汉官方微博: #观众求助#关注 @天外天边//@培德律师汪_洋: //@武汉律师张绍明://@小lion惠://@iliangwei://@老徐纪事:请武汉的朋友转。@武汉律师张绍明 @直播大武汉官方微博 @武汉新浪乐居 @武汉同城会</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c4</text>
+<text class="node-text" x="10" y="40">打击犯罪！//@直播大武汉官方微博: #观众求助</text>
+<text class="node-text" x="10" y="57">#关注 @天外天边//@培德律师汪_洋: //@</text>
+</g>
+<g class="node comment" data-node-id="comment-5" data-title="c5" data-content="你还在传谣？！" data-meta="{
+  &quot;comment id&quot;: 5,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1407171427&quot;,
+  &quot;user name&quot;: &quot;武昌府快捕&quot;,
+  &quot;content&quot;: &quot;你还在传谣？！&quot;,
+  &quot;time&quot;: &quot;13-7-15 13:30&quot;,
+  &quot;stance_label&quot;: 1,
+  &quot;state&quot;: 1,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c5&quot;
+}" transform="translate(280 460)">
+<title>c5: 你还在传谣？！</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c5</text>
+<text class="node-text" x="10" y="40">你还在传谣？！</text>
+</g>
+<g class="node comment" data-node-id="comment-6" data-title="c6" data-content="@楚天都市报 @武汉晚报 @927事事关心" data-meta="{
+  &quot;comment id&quot;: 6,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1571777367&quot;,
+  &quot;user name&quot;: &quot;达达姐&quot;,
+  &quot;content&quot;: &quot;@楚天都市报 @武汉晚报 @927事事关心&quot;,
+  &quot;time&quot;: &quot;13-7-15 13:26&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c6&quot;
+}" transform="translate(280 552)">
+<title>c6: @楚天都市报 @武汉晚报 @927事事关心</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c6</text>
+<text class="node-text" x="10" y="40">@楚天都市报 @武汉晚报 @927事事关心</text>
+</g>
+<g class="node comment" data-node-id="comment-7" data-title="c7" data-content="注意呀，可恶的人贩子" data-meta="{
+  &quot;comment id&quot;: 7,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1763342352&quot;,
+  &quot;user name&quot;: &quot;叶梓清扬&quot;,
+  &quot;content&quot;: &quot;注意呀，可恶的人贩子&quot;,
+  &quot;time&quot;: &quot;13-7-15 13:25&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c7&quot;
+}" transform="translate(280 644)">
+<title>c7: 注意呀，可恶的人贩子</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c7</text>
+<text class="node-text" x="10" y="40">注意呀，可恶的人贩子</text>
+</g>
+<g class="node comment" data-node-id="comment-8" data-title="c8" data-content="散步谣言的公安机关将依照刑法的有关规定追究造谣者的刑事责任。" data-meta="{
+  &quot;comment id&quot;: 8,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1845060564&quot;,
+  &quot;user name&quot;: &quot;一只爱行摄的青蛙&quot;,
+  &quot;content&quot;: &quot;散步谣言的公安机关将依照刑法的有关规定追究造谣者的刑事责任。&quot;,
+  &quot;time&quot;: &quot;13-7-15 13:25&quot;,
+  &quot;stance_label&quot;: 1,
+  &quot;state&quot;: 1,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c8&quot;
+}" transform="translate(280 736)">
+<title>c8: 散步谣言的公安机关将依照刑法的有关规定追究造谣者的刑事责任。</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c8</text>
+<text class="node-text" x="10" y="40">散步谣言的公安机关将依照刑法的有关规定追究造谣者</text>
+<text class="node-text" x="10" y="57">的刑事责任。</text>
+</g>
+<g class="node comment" data-node-id="comment-9" data-title="c9" data-content="散步谣言构成犯罪的，公安机关将依照刑法有关规定依法追究造谣者的刑事责任。" data-meta="{
+  &quot;comment id&quot;: 9,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1845060564&quot;,
+  &quot;user name&quot;: &quot;一只爱行摄的青蛙&quot;,
+  &quot;content&quot;: &quot;散步谣言构成犯罪的，公安机关将依照刑法有关规定依法追究造谣者的刑事责任。&quot;,
+  &quot;time&quot;: &quot;13-7-15 13:24&quot;,
+  &quot;stance_label&quot;: 1,
+  &quot;state&quot;: 1,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c9&quot;
+}" transform="translate(280 828)">
+<title>c9: 散步谣言构成犯罪的，公安机关将依照刑法有关规定依法追究造谣者的刑事责任。</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c9</text>
+<text class="node-text" x="10" y="40">散步谣言构成犯罪的，公安机关将依照刑法有关规定依</text>
+<text class="node-text" x="10" y="57">法追究造谣者的刑事责任。</text>
+</g>
+<g class="node comment" data-node-id="comment-10" data-title="c10" data-content="网上最新传言说是在山东日照，也是这个女孩的图片，现在的信息传播啊" data-meta="{
+  &quot;comment id&quot;: 10,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2352887462&quot;,
+  &quot;user name&quot;: &quot;神奇的小飞2011&quot;,
+  &quot;content&quot;: &quot;网上最新传言说是在山东日照，也是这个女孩的图片，现在的信息传播啊&quot;,
+  &quot;time&quot;: &quot;13-7-15 13:11&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c10&quot;
+}" transform="translate(280 920)">
+<title>c10: 网上最新传言说是在山东日照，也是这个女孩的图片，现在的信息传播啊</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c10</text>
+<text class="node-text" x="10" y="40">网上最新传言说是在山东日照，也是这个女孩的图片，</text>
+<text class="node-text" x="10" y="57">现在的信息传播啊</text>
+</g>
+<g class="node comment" data-node-id="comment-11" data-title="c11" data-content="@武汉公安 @湖北公安 @宝贝回家" data-meta="{
+  &quot;comment id&quot;: 11,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2711796905&quot;,
+  &quot;user name&quot;: &quot;大力金刚1979&quot;,
+  &quot;content&quot;: &quot;@武汉公安 @湖北公安 @宝贝回家&quot;,
+  &quot;time&quot;: &quot;13-7-15 12:36&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c11&quot;
+}" transform="translate(280 1012)">
+<title>c11: @武汉公安 @湖北公安 @宝贝回家</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c11</text>
+<text class="node-text" x="10" y="40">@武汉公安 @湖北公安 @宝贝回家</text>
+</g>
+<g class="node comment" data-node-id="comment-12" data-title="c12" data-content="@冰冰山_i6r 冰冰山_i6r" data-meta="{
+  &quot;comment id&quot;: 12,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1950107315&quot;,
+  &quot;user name&quot;: &quot;轻轻说话的女人&quot;,
+  &quot;content&quot;: &quot;@冰冰山_i6r 冰冰山_i6r&quot;,
+  &quot;time&quot;: &quot;13-7-15 09:40&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c12&quot;
+}" transform="translate(280 1104)">
+<title>c12: @冰冰山_i6r 冰冰山_i6r</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c12</text>
+<text class="node-text" x="10" y="40">@冰冰山_i6r 冰冰山_i6r</text>
+</g>
+<g class="node comment" data-node-id="comment-13" data-title="c13" data-content="@楚天金报 @楚天都市报 @武汉晚报 @武汉晨报 @武汉新浪乐居 //@21聂春林: //@武汉律师张绍明://@小lion惠://@iliangwei://@老徐纪事:请武汉的朋友转。@武汉律师张绍明 @直播大武汉官方微博 @武汉新浪乐居 @武汉同城会" data-meta="{
+  &quot;comment id&quot;: 13,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2036634923&quot;,
+  &quot;user name&quot;: &quot;西瓜不瓜er&quot;,
+  &quot;content&quot;: &quot;@楚天金报 @楚天都市报 @武汉晚报 @武汉晨报 @武汉新浪乐居 //@21聂春林: //@武汉律师张绍明://@小lion惠://@iliangwei://@老徐纪事:请武汉的朋友转。@武汉律师张绍明 @直播大武汉官方微博 @武汉新浪乐居 @武汉同城会&quot;,
+  &quot;time&quot;: &quot;13-7-15 09:17&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c13&quot;
+}" transform="translate(280 1196)">
+<title>c13: @楚天金报 @楚天都市报 @武汉晚报 @武汉晨报 @武汉新浪乐居 //@21聂春林: //@武汉律师张绍明://@小lion惠://@iliangwei://@老徐纪事:请武汉的朋友转。@武汉律师张绍明 @直播大武汉官方微博 @武汉新浪乐居 @武汉同城会</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c13</text>
+<text class="node-text" x="10" y="40">@楚天金报 @楚天都市报 @武汉晚报 @武汉晨报</text>
+<text class="node-text" x="10" y="57"> @武汉新浪乐居 //@21聂春林: //@武汉</text>
+</g>
+<g class="node comment" data-node-id="comment-14" data-title="c14" data-content="把嘟嘟牵紧些啊@小狐狸yjj" data-meta="{
+  &quot;comment id&quot;: 14,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1888424501&quot;,
+  &quot;user name&quot;: &quot;阿熙熙阿牛牛&quot;,
+  &quot;content&quot;: &quot;把嘟嘟牵紧些啊@小狐狸yjj&quot;,
+  &quot;time&quot;: &quot;13-7-15 00:32&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c14&quot;
+}" transform="translate(280 1288)">
+<title>c14: 把嘟嘟牵紧些啊@小狐狸yjj</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c14</text>
+<text class="node-text" x="10" y="40">把嘟嘟牵紧些啊@小狐狸yjj</text>
+</g>
+<g class="node comment" data-node-id="comment-15" data-title="c15" data-content="//@陈士浩HDC: //@九粮液-梁积宏: //@馨研宝贝2003: //@传媒人王杰: 也给南昌人提个醒" data-meta="{
+  &quot;comment id&quot;: 15,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2635710357&quot;,
+  &quot;user name&quot;: &quot;巴甫啰福&quot;,
+  &quot;content&quot;: &quot;//@陈士浩HDC: //@九粮液-梁积宏: //@馨研宝贝2003: //@传媒人王杰: 也给南昌人提个醒&quot;,
+  &quot;time&quot;: &quot;13-7-15 00:26&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c15&quot;
+}" transform="translate(280 1380)">
+<title>c15: //@陈士浩HDC: //@九粮液-梁积宏: //@馨研宝贝2003: //@传媒人王杰: 也给南昌人提个醒</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c15</text>
+<text class="node-text" x="10" y="40">//@陈士浩HDC: //@九粮液-梁积宏: /</text>
+<text class="node-text" x="10" y="57">/@馨研宝贝2003: //@传媒人王杰: 也给</text>
+</g>
+<g class="node comment" data-node-id="comment-16" data-title="c16" data-content="//@70年代1112772362: //@千千闋歌: //@陈士浩HDC: //@九粮液-梁积宏: //@馨研宝贝2003: //@传媒人王杰: 也给南昌人提个醒" data-meta="{
+  &quot;comment id&quot;: 16,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2188047924&quot;,
+  &quot;user name&quot;: &quot;骆lin&quot;,
+  &quot;content&quot;: &quot;//@70年代1112772362: //@千千闋歌: //@陈士浩HDC: //@九粮液-梁积宏: //@馨研宝贝2003: //@传媒人王杰: 也给南昌人提个醒&quot;,
+  &quot;time&quot;: &quot;13-7-15 00:05&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c16&quot;
+}" transform="translate(280 1472)">
+<title>c16: //@70年代1112772362: //@千千闋歌: //@陈士浩HDC: //@九粮液-梁积宏: //@馨研宝贝2003: //@传媒人王杰: 也给南昌人提个醒</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c16</text>
+<text class="node-text" x="10" y="40">//@70年代1112772362: //@千千</text>
+<text class="node-text" x="10" y="57">闋歌: //@陈士浩HDC: //@九粮液-梁积</text>
+</g>
+<g class="node comment" data-node-id="comment-17" data-title="c17" data-content="假的？？//@安定桥下的董小姐: 假新闻 //@苏木影子鱼://@九粮液-梁积宏: //@馨研宝贝2003: //@传媒人王杰: 也给南昌人提个醒" data-meta="{
+  &quot;comment id&quot;: 17,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2804011594&quot;,
+  &quot;user name&quot;: &quot;馨研宝贝2003&quot;,
+  &quot;content&quot;: &quot;假的？？//@安定桥下的董小姐: 假新闻 //@苏木影子鱼://@九粮液-梁积宏: //@馨研宝贝2003: //@传媒人王杰: 也给南昌人提个醒&quot;,
+  &quot;time&quot;: &quot;13-7-14 23:25&quot;,
+  &quot;stance_label&quot;: 1,
+  &quot;state&quot;: 1,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c17&quot;
+}" transform="translate(280 1564)">
+<title>c17: 假的？？//@安定桥下的董小姐: 假新闻 //@苏木影子鱼://@九粮液-梁积宏: //@馨研宝贝2003: //@传媒人王杰: 也给南昌人提个醒</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c17</text>
+<text class="node-text" x="10" y="40">假的？？//@安定桥下的董小姐: 假新闻 //@</text>
+<text class="node-text" x="10" y="57">苏木影子鱼://@九粮液-梁积宏: //@馨研宝</text>
+</g>
+<g class="node comment" data-node-id="comment-18" data-title="c18" data-content="//@台州大卫: //@胡掌门: //@九粮液-梁积宏: //@馨研宝贝2003: //@传媒人王杰: 也给南昌人提个醒" data-meta="{
+  &quot;comment id&quot;: 18,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1803299843&quot;,
+  &quot;user name&quot;: &quot;尚承眼镜&quot;,
+  &quot;content&quot;: &quot;//@台州大卫: //@胡掌门: //@九粮液-梁积宏: //@馨研宝贝2003: //@传媒人王杰: 也给南昌人提个醒&quot;,
+  &quot;time&quot;: &quot;13-7-14 23:15&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c18&quot;
+}" transform="translate(280 1656)">
+<title>c18: //@台州大卫: //@胡掌门: //@九粮液-梁积宏: //@馨研宝贝2003: //@传媒人王杰: 也给南昌人提个醒</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c18</text>
+<text class="node-text" x="10" y="40">//@台州大卫: //@胡掌门: //@九粮液-</text>
+<text class="node-text" x="10" y="57">梁积宏: //@馨研宝贝2003: //@传媒人</text>
+</g>
+<g class="node comment" data-node-id="comment-19" data-title="c19" data-content="祈祷" data-meta="{
+  &quot;comment id&quot;: 19,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1931286800&quot;,
+  &quot;user name&quot;: &quot;东奴-&quot;,
+  &quot;content&quot;: &quot;祈祷&quot;,
+  &quot;time&quot;: &quot;13-7-14 23:13&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c19&quot;
+}" transform="translate(280 1748)">
+<title>c19: 祈祷</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c19</text>
+<text class="node-text" x="10" y="40">祈祷</text>
+</g>
+<g class="node comment" data-node-id="comment-20" data-title="c20" data-content="//@陈士浩HDC: //@九粮液-梁积宏: //@馨研宝贝2003: //@传媒人王杰: 也给南昌人提个醒" data-meta="{
+  &quot;comment id&quot;: 20,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2475946021&quot;,
+  &quot;user name&quot;: &quot;千千阙歌&quot;,
+  &quot;content&quot;: &quot;//@陈士浩HDC: //@九粮液-梁积宏: //@馨研宝贝2003: //@传媒人王杰: 也给南昌人提个醒&quot;,
+  &quot;time&quot;: &quot;13-7-14 23:13&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c20&quot;
+}" transform="translate(280 1840)">
+<title>c20: //@陈士浩HDC: //@九粮液-梁积宏: //@馨研宝贝2003: //@传媒人王杰: 也给南昌人提个醒</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c20</text>
+<text class="node-text" x="10" y="40">//@陈士浩HDC: //@九粮液-梁积宏: /</text>
+<text class="node-text" x="10" y="57">/@馨研宝贝2003: //@传媒人王杰: 也给</text>
+</g>
+<g class="node comment" data-node-id="comment-21" data-title="c21" data-content="//@九粮液-梁积宏: //@馨研宝贝2003: //@传媒人王杰: 也给南昌人提个醒" data-meta="{
+  &quot;comment id&quot;: 21,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1140155275&quot;,
+  &quot;user name&quot;: &quot;陈士浩HDC&quot;,
+  &quot;content&quot;: &quot;//@九粮液-梁积宏: //@馨研宝贝2003: //@传媒人王杰: 也给南昌人提个醒&quot;,
+  &quot;time&quot;: &quot;13-7-14 23:11&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c21&quot;
+}" transform="translate(280 1932)">
+<title>c21: //@九粮液-梁积宏: //@馨研宝贝2003: //@传媒人王杰: 也给南昌人提个醒</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c21</text>
+<text class="node-text" x="10" y="40">//@九粮液-梁积宏: //@馨研宝贝2003:</text>
+<text class="node-text" x="10" y="57"> //@传媒人王杰: 也给南昌人提个醒</text>
+</g>
+<g class="node comment" data-node-id="comment-22" data-title="c22" data-content="收到，谢谢。" data-meta="{
+  &quot;comment id&quot;: 22,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1095380460&quot;,
+  &quot;user name&quot;: &quot;hi胡蕾&quot;,
+  &quot;content&quot;: &quot;收到，谢谢。&quot;,
+  &quot;time&quot;: &quot;13-7-14 23:08&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c22&quot;
+}" transform="translate(280 2024)">
+<title>c22: 收到，谢谢。</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c22</text>
+<text class="node-text" x="10" y="40">收到，谢谢。</text>
+</g>
+<g class="node comment" data-node-id="comment-23" data-title="c23" data-content="学会微博搜索，看看网友转发评论，了解事情来龙去脉。[呵呵]晚安！" data-meta="{
+  &quot;comment id&quot;: 23,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2017414743&quot;,
+  &quot;user name&quot;: &quot;江西Fanny&quot;,
+  &quot;content&quot;: &quot;学会微博搜索，看看网友转发评论，了解事情来龙去脉。[呵呵]晚安！&quot;,
+  &quot;time&quot;: &quot;13-7-14 23:06&quot;,
+  &quot;stance_label&quot;: 1,
+  &quot;state&quot;: 1,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c23&quot;
+}" transform="translate(280 2116)">
+<title>c23: 学会微博搜索，看看网友转发评论，了解事情来龙去脉。[呵呵]晚安！</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c23</text>
+<text class="node-text" x="10" y="40">学会微博搜索，看看网友转发评论，了解事情来龙去脉</text>
+<text class="node-text" x="10" y="57">。[呵呵]晚安！</text>
+</g>
+<g class="node comment" data-node-id="comment-24" data-title="c24" data-content="找到就好，主要最近身边这样的情况发生好几起，请大家警钟长鸣。" data-meta="{
+  &quot;comment id&quot;: 24,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1095380460&quot;,
+  &quot;user name&quot;: &quot;hi胡蕾&quot;,
+  &quot;content&quot;: &quot;找到就好，主要最近身边这样的情况发生好几起，请大家警钟长鸣。&quot;,
+  &quot;time&quot;: &quot;13-7-14 23:03&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c24&quot;
+}" transform="translate(280 2208)">
+<title>c24: 找到就好，主要最近身边这样的情况发生好几起，请大家警钟长鸣。</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c24</text>
+<text class="node-text" x="10" y="40">找到就好，主要最近身边这样的情况发生好几起，请大</text>
+<text class="node-text" x="10" y="57">家警钟长鸣。</text>
+</g>
+<g class="node comment" data-node-id="comment-25" data-title="c25" data-content="//@传媒人王杰: 也给南昌人提个醒" data-meta="{
+  &quot;comment id&quot;: 25,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2804011594&quot;,
+  &quot;user name&quot;: &quot;馨研宝贝2003&quot;,
+  &quot;content&quot;: &quot;//@传媒人王杰: 也给南昌人提个醒&quot;,
+  &quot;time&quot;: &quot;13-7-14 23:01&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c25&quot;
+}" transform="translate(280 2300)">
+<title>c25: //@传媒人王杰: 也给南昌人提个醒</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c25</text>
+<text class="node-text" x="10" y="40">//@传媒人王杰: 也给南昌人提个醒</text>
+</g>
+<g class="node comment" data-node-id="comment-26" data-title="c26" data-content="10号当天就找到了的。媒体都采访了。再传就是传谣言！！！详情见@新浪江西" data-meta="{
+  &quot;comment id&quot;: 26,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2017414743&quot;,
+  &quot;user name&quot;: &quot;江西Fanny&quot;,
+  &quot;content&quot;: &quot;10号当天就找到了的。媒体都采访了。再传就是传谣言！！！详情见@新浪江西&quot;,
+  &quot;time&quot;: &quot;13-7-14 23:00&quot;,
+  &quot;stance_label&quot;: 1,
+  &quot;state&quot;: 1,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c26&quot;
+}" transform="translate(280 2392)">
+<title>c26: 10号当天就找到了的。媒体都采访了。再传就是传谣言！！！详情见@新浪江西</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c26</text>
+<text class="node-text" x="10" y="40">10号当天就找到了的。媒体都采访了。再传就是传谣</text>
+<text class="node-text" x="10" y="57">言！！！详情见@新浪江西</text>
+</g>
+<g class="node comment" data-node-id="comment-27" data-title="c27" data-content="10号当天就找到了的。媒体都采访了。再传就是传谣言！！！" data-meta="{
+  &quot;comment id&quot;: 27,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;2017414743&quot;,
+  &quot;user name&quot;: &quot;江西Fanny&quot;,
+  &quot;content&quot;: &quot;10号当天就找到了的。媒体都采访了。再传就是传谣言！！！&quot;,
+  &quot;time&quot;: &quot;13-7-14 23:00&quot;,
+  &quot;stance_label&quot;: 1,
+  &quot;state&quot;: 1,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c27&quot;
+}" transform="translate(280 2484)">
+<title>c27: 10号当天就找到了的。媒体都采访了。再传就是传谣言！！！</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c27</text>
+<text class="node-text" x="10" y="40">10号当天就找到了的。媒体都采访了。再传就是传谣</text>
+<text class="node-text" x="10" y="57">言！！！</text>
+</g>
+<g class="node comment" data-node-id="comment-28" data-title="c28" data-content="也给南昌人提个醒" data-meta="{
+  &quot;comment id&quot;: 28,
+  &quot;parent&quot;: -1,
+  &quot;children&quot;: [],
+  &quot;user id&quot;: &quot;1393256001&quot;,
+  &quot;user name&quot;: &quot;王杰的旅行日记&quot;,
+  &quot;content&quot;: &quot;也给南昌人提个醒&quot;,
+  &quot;time&quot;: &quot;13-7-14 22:45&quot;,
+  &quot;stance_label&quot;: 0,
+  &quot;state&quot;: 0,
+  &quot;hop&quot;: 1,
+  &quot;node_kind&quot;: &quot;comment&quot;,
+  &quot;node_label&quot;: &quot;c28&quot;
+}" transform="translate(280 2576)">
+<title>c28: 也给南昌人提个醒</title>
+<rect width="230" height="78" rx="6" />
+<text class="node-label" x="10" y="20">c28</text>
+<text class="node-text" x="10" y="40">也给南昌人提个醒</text>
+</g>
+    </svg>
+  </main>
+  <aside class="side">
+    <div class="panel">
+      <h2 id="node-title">source</h2>
+      <div id="node-content" class="content">今天上午一市民女儿在循礼门大润发超市附近被人拐走了！小女孩三岁多，能准确说出她爸爸的手机号码。从监控上看到孩子是被一个四十多岁男人抱走。现大人都急疯了，有知情者请告之！求扩散！万分感谢！提醒：武汉警方要引起重视，最近关山、南湖多次出现类似情况，一定是有一个拐卖儿童团伙流窜到汉了。 </div>
+      <h2>metadata</h2>
+      <pre id="node-meta"></pre>
+    </div>
+  </aside>
+</div>
+<script>
+const titleEl = document.getElementById("node-title");
+const contentEl = document.getElementById("node-content");
+const metaEl = document.getElementById("node-meta");
+const nodes = Array.from(document.querySelectorAll(".node"));
+
+function selectNode(node) {
+  nodes.forEach(n => n.classList.remove("active"));
+  node.classList.add("active");
+  titleEl.textContent = node.dataset.title || "";
+  contentEl.textContent = node.dataset.content || "";
+  metaEl.textContent = node.dataset.meta || "";
+}
+
+nodes.forEach(node => {
+  node.addEventListener("click", () => selectNode(node));
+});
+
+const sourceNode = document.querySelector('.node[data-node-id="source"]');
+if (sourceNode) {
+  selectNode(sourceNode);
+}
+</script>
+</body>
+</html>

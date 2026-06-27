@@ -1,0 +1,66 @@
+import unittest
+
+import torch
+
+from model.semantic_change_encoder import (
+    MLPSemanticChangeEncoder,
+    build_semantic_change_encoder,
+)
+
+
+class MLPSemanticChangeEncoderTest(unittest.TestCase):
+    def test_output_shape_and_gradient(self):
+        encoder = MLPSemanticChangeEncoder(
+            input_dim=4,
+            output_dim=6,
+            hidden_dim=8,
+            dropout=0.0,
+        )
+        support = torch.randn(5, 4, requires_grad=True)
+        deny = torch.randn(5, 4, requires_grad=True)
+
+        change = encoder(support, deny)
+        self.assertEqual(tuple(change.shape), (5, 6))
+
+        change.sum().backward()
+        self.assertIsNotNone(support.grad)
+        self.assertIsNotNone(deny.grad)
+
+    def test_identical_views_produce_zero_change(self):
+        encoder = MLPSemanticChangeEncoder(input_dim=4).eval()
+        nodes = torch.randn(7, 4)
+
+        change = encoder(nodes, nodes)
+        self.assertTrue(torch.equal(change, torch.zeros_like(change)))
+
+    def test_features_keep_direction_and_magnitude(self):
+        encoder = MLPSemanticChangeEncoder(input_dim=2)
+        support = torch.tensor([[1.0, -2.0]])
+        deny = torch.tensor([[3.0, -5.0]])
+
+        forward_features = encoder.change_features(support, deny)
+        reverse_features = encoder.change_features(deny, support)
+
+        self.assertTrue(
+            torch.equal(forward_features[:, :2], -reverse_features[:, :2])
+        )
+        self.assertTrue(
+            torch.equal(forward_features[:, 2:], reverse_features[:, 2:])
+        )
+
+    def test_factory_exposes_replaceable_interface(self):
+        encoder = build_semantic_change_encoder(
+            "mlp",
+            input_dim=4,
+            output_dim=4,
+        )
+        self.assertIsInstance(encoder, MLPSemanticChangeEncoder)
+
+    def test_mismatched_views_are_rejected(self):
+        encoder = MLPSemanticChangeEncoder(input_dim=4)
+        with self.assertRaises(ValueError):
+            encoder(torch.randn(3, 4), torch.randn(4, 4))
+
+
+if __name__ == "__main__":
+    unittest.main()

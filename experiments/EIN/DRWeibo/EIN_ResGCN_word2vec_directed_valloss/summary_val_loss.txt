@@ -1,0 +1,21 @@
+Experiment setting:
+Target dataset: DRWeibo
+Mode: id
+OOD source datasets: []
+Validation domain: source
+Evaluation protocol: final_test
+Checkpoint selection metric: val_loss
+Word2Vec SHA256: aad05186ed49c35cc075bec85d481c8f5cf180b0ee7b5665cae8deffe9d9d0d7
+Last split manifest SHA256: edfac1cbf7b02318217a53dae6d865de3cd9166d5bfbb7731cd56c4226256ee3
+
+Seed results:
+Seed 0: Acc 0.8721 | AUC 0.9418 | F1 0.8654
+Seed 1: Acc 0.8746 | AUC 0.9402 | F1 0.8730
+Seed 2: Acc 0.8663 | AUC 0.9302 | F1 0.8596
+Seed 3: Acc 0.8621 | AUC 0.9416 | F1 0.8566
+Seed 4: Acc 0.8713 | AUC 0.9338 | F1 0.8607
+
+Average results over 5 runs:
+ACC: 86.93+/-0.45 (%)
+AUC: 93.75+/-0.47 (%)
+F1: 86.31+/-0.57 (%)

@@ -8,6 +8,20 @@ from torch_scatter import scatter_mean
 import copy
 
 
+def _extend_root_features(node_features, data):
+    if hasattr(data, 'ptr'):
+        root_index = data.ptr[:-1].to(device=data.batch.device)
+    else:
+        is_root = torch.ones(
+            data.batch.size(0),
+            dtype=torch.bool,
+            device=data.batch.device,
+        )
+        is_root[1:] = data.batch[1:] != data.batch[:-1]
+        root_index = is_root.nonzero(as_tuple=False).view(-1)
+    return node_features[root_index][data.batch.long()]
+
+
 
 
 class TDrumorGCN(torch.nn.Module):
@@ -23,20 +37,13 @@ class TDrumorGCN(torch.nn.Module):
         x1 = copy.copy(x.float())
         x = self.conv1(x, edge_index)
         x2 = copy.copy(x)
-        root_extend = torch.zeros(len(data.batch), x1.size(1)).to(self.device)
-        batch_size = max(data.batch) + 1
-        for num_batch in range(batch_size):
-            index = (torch.eq(data.batch, num_batch))
-            root_extend[index] = x1[index][0]
+        root_extend = _extend_root_features(x1, data)
         x = torch.cat((x, root_extend), 1)
         x = F.relu(x)
         x = F.dropout(x, training=self.training)
         x = self.conv2(x, edge_index)
         x = F.relu(x)
-        root_extend = torch.zeros(len(data.batch), x2.size(1)).to(self.device)
-        for num_batch in range(batch_size):
-            index = (torch.eq(data.batch, num_batch))
-            root_extend[index] = x2[index][0]
+        root_extend = _extend_root_features(x2, data)
         x = torch.cat((x, root_extend), 1)
         x = scatter_mean(x, data.batch, dim=0)
         return x
@@ -57,20 +64,13 @@ class BUrumorGCN(torch.nn.Module):
         x1 = copy.copy(x.float())
         x = self.conv1(x, edge_index)
         x2 = copy.copy(x)
-        root_extend = torch.zeros(len(data.batch), x1.size(1)).to(self.device)
-        batch_size = max(data.batch) + 1
-        for num_batch in range(batch_size):
-            index = (torch.eq(data.batch, num_batch))
-            root_extend[index] = x1[index][0]
+        root_extend = _extend_root_features(x1, data)
         x = torch.cat((x, root_extend), 1)
         x = F.relu(x)
         x = F.dropout(x, training=self.training)
         x = self.conv2(x, edge_index)
         x = F.relu(x)
-        root_extend = torch.zeros(len(data.batch), x2.size(1)).to(self.device)
-        for num_batch in range(batch_size):
-            index = (torch.eq(data.batch, num_batch))
-            root_extend[index] = x2[index][0]
+        root_extend = _extend_root_features(x2, data)
         x = torch.cat((x, root_extend), 1)
         x = scatter_mean(x, data.batch, dim=0)
 

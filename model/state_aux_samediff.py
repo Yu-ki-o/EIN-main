@@ -3,6 +3,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch_geometric.utils import to_dense_batch
 
 
 class StateAuxSameDiffEnhancer(nn.Module):
@@ -83,8 +84,31 @@ class StateAuxSameDiffEnhancer(nn.Module):
             1,
             int(getattr(args, 'state_aux_cross_view_min_nodes', 1)),
         )
+        self.cross_view_vectorized = bool(
+            getattr(args, 'state_aux_cross_view_vectorized', True)
+        )
+        bucket_sizes = getattr(
+            args,
+            'state_aux_cross_view_bucket_sizes',
+            [16, 32, 64, 128, 256, 512, 1024],
+        )
+        if isinstance(bucket_sizes, str):
+            bucket_sizes = [
+                int(value.strip())
+                for value in bucket_sizes.split(',')
+                if value.strip()
+            ]
+        self.cross_view_bucket_sizes = sorted(
+            {
+                max(1, int(value))
+                for value in bucket_sizes
+            }
+        )
         self.edge_relation_routing = bool(
             getattr(args, 'state_aux_edge_relation_routing', False)
+        )
+        self.preserve_route_strength = bool(
+            getattr(args, 'state_aux_preserve_route_strength', False)
         )
         self.use_node_state_aux = bool(
             getattr(args, 'state_aux_use_node_state_aux', not self.edge_relation_routing)
@@ -172,6 +196,17 @@ class StateAuxSameDiffEnhancer(nn.Module):
             return None
         return (node_state >= 0) & (node_state < self.num_states)
 
+    def _route_strength(self, weight, dst, num_nodes):
+        weight = weight.view(-1, 1)
+        weight_sum = weight.new_zeros(num_nodes, 1)
+        edge_count = weight.new_zeros(num_nodes, 1)
+        weight_sum.index_add_(0, dst, weight)
+        edge_count.index_add_(0, dst, torch.ones_like(weight))
+        return (weight_sum / edge_count.clamp_min(1.0)).clamp(0.0, 1.0)
+
+    def _blend_route_strength(self, h, candidate, route_strength):
+        return h + route_strength * (candidate - h)
+
     def _aggregate_diff(self, h, edge_index, diff_weight):
         src, dst = edge_index
         msg = self.diff_msg_mlp(h[src])
@@ -185,7 +220,9 @@ class StateAuxSameDiffEnhancer(nn.Module):
 
         aggr = out / denom.clamp_min(1e-6)
         has_msg = denom > 0
-        return torch.where(has_msg, aggr, h)
+        aggr = torch.where(has_msg, aggr, h)
+        strength = self._route_strength(diff_weight, dst, h.size(0))
+        return aggr, strength
 
     def _aggregate_same_uncertain(self, h, edge_index, same_weight):
         src, dst = edge_index
@@ -217,7 +254,13 @@ class StateAuxSameDiffEnhancer(nn.Module):
             basic = torch.where(basic_denom > 0, basic, h)
             dulreg = (1.0 - self.dulreg_blend) * basic + self.dulreg_blend * dulreg
 
-        return dulreg, logvar.mean().detach(), precision.mean().detach()
+        strength = self._route_strength(same_weight, dst, h.size(0))
+        return (
+            dulreg,
+            strength,
+            logvar.mean().detach(),
+            precision.mean().detach(),
+        )
 
     def _edge_same_probability(self, h, edge_index):
         src, dst = edge_index
@@ -479,7 +522,7 @@ class StateAuxSameDiffEnhancer(nn.Module):
 
         return out, has_context
 
-    def _apply_cross_view_attention(self, z_same, z_diff, batch):
+    def _apply_cross_view_attention_loop(self, z_same, z_diff, batch):
         same_scores = self.cross_same_score(z_same)
         diff_scores = self.cross_diff_score(z_diff)
         same_selected = self._topk_mask_by_graph(same_scores, batch)
@@ -512,6 +555,162 @@ class StateAuxSameDiffEnhancer(nn.Module):
         z_same = torch.where(same_has_context, z_same_updated, z_same)
         z_diff = torch.where(diff_has_context, z_diff_updated, z_diff)
         return z_same, z_diff
+
+    def _dense_topk_mask(self, scores, valid_mask):
+        scores = scores.masked_fill(
+            ~valid_mask,
+            torch.finfo(scores.dtype).min,
+        )
+        node_count = valid_mask.sum(dim=1)
+        selected_count = torch.ceil(
+            node_count.to(dtype=scores.dtype) * self.cross_view_topk_ratio
+        ).long()
+        selected_count = torch.maximum(
+            selected_count,
+            selected_count.new_full(
+                selected_count.size(),
+                self.cross_view_min_nodes,
+            ),
+        )
+        selected_count = torch.minimum(selected_count, node_count)
+
+        order = torch.argsort(scores, dim=1, descending=True)
+        rank = torch.empty_like(order)
+        rank_values = torch.arange(
+            scores.size(1),
+            device=scores.device,
+        ).view(1, -1).expand_as(order)
+        rank.scatter_(1, order, rank_values)
+        return valid_mask & (rank < selected_count.view(-1, 1))
+
+    def _dense_cross_attention(
+        self,
+        query_nodes,
+        key_value_nodes,
+        selected_key_mask,
+        valid_mask,
+    ):
+        query = self.cross_query(query_nodes)
+        key = self.cross_key(key_value_nodes)
+        value = self.cross_value(key_value_nodes)
+        attention = torch.matmul(query, key.transpose(1, 2))
+        attention = attention * (self.hidden_dim ** -0.5)
+        attention = attention.masked_fill(
+            ~selected_key_mask.unsqueeze(1),
+            torch.finfo(attention.dtype).min,
+        )
+        attention = F.softmax(attention, dim=-1)
+        context = torch.matmul(attention, value)
+        return context * valid_mask.unsqueeze(-1).to(dtype=context.dtype)
+
+    def _apply_cross_view_attention_vectorized(self, z_same, z_diff, batch):
+        if batch is None:
+            batch = torch.zeros(
+                z_same.size(0),
+                dtype=torch.long,
+                device=z_same.device,
+            )
+        if batch.numel() == 0:
+            return z_same, z_diff
+
+        graph_node_count = torch.bincount(batch)
+        same_output = torch.empty_like(z_same)
+        diff_output = torch.empty_like(z_diff)
+        lower_bound = 0
+        bucket_bounds = self.cross_view_bucket_sizes + [2**31 - 1]
+
+        for upper_bound in bucket_bounds:
+            graph_in_bucket = (
+                (graph_node_count > lower_bound)
+                & (graph_node_count <= upper_bound)
+            )
+            node_index = graph_in_bucket[batch].nonzero(
+                as_tuple=False
+            ).view(-1)
+            lower_bound = upper_bound
+            if node_index.numel() == 0:
+                continue
+
+            original_graph = batch[node_index]
+            _, dense_batch = torch.unique_consecutive(
+                original_graph,
+                return_inverse=True,
+            )
+            same_dense, valid_mask = to_dense_batch(
+                z_same[node_index],
+                dense_batch,
+            )
+            diff_dense, _ = to_dense_batch(
+                z_diff[node_index],
+                dense_batch,
+            )
+            same_score_dense, _ = to_dense_batch(
+                self.cross_same_score(z_same[node_index]).view(-1),
+                dense_batch,
+                fill_value=torch.finfo(z_same.dtype).min,
+            )
+            diff_score_dense, _ = to_dense_batch(
+                self.cross_diff_score(z_diff[node_index]).view(-1),
+                dense_batch,
+                fill_value=torch.finfo(z_diff.dtype).min,
+            )
+
+            same_selected = self._dense_topk_mask(
+                same_score_dense,
+                valid_mask,
+            )
+            diff_selected = self._dense_topk_mask(
+                diff_score_dense,
+                valid_mask,
+            )
+            same_context = self._dense_cross_attention(
+                same_dense,
+                diff_dense,
+                diff_selected,
+                valid_mask,
+            )
+            diff_context = self._dense_cross_attention(
+                diff_dense,
+                same_dense,
+                same_selected,
+                valid_mask,
+            )
+
+            same_delta = self.cross_out(same_context)
+            diff_delta = self.cross_out(diff_context)
+            same_delta = F.dropout(
+                same_delta,
+                self.dropout,
+                training=self.training,
+            )
+            diff_delta = F.dropout(
+                diff_delta,
+                self.dropout,
+                training=self.training,
+            )
+            same_updated = self.cross_same_norm(
+                same_dense + self.cross_view_attention_blend * same_delta
+            )
+            diff_updated = self.cross_diff_norm(
+                diff_dense + self.cross_view_attention_blend * diff_delta
+            )
+            same_output[node_index] = same_updated[valid_mask]
+            diff_output[node_index] = diff_updated[valid_mask]
+
+        return same_output, diff_output
+
+    def _apply_cross_view_attention(self, z_same, z_diff, batch):
+        if self.cross_view_vectorized:
+            return self._apply_cross_view_attention_vectorized(
+                z_same,
+                z_diff,
+                batch,
+            )
+        return self._apply_cross_view_attention_loop(
+            z_same,
+            z_diff,
+            batch,
+        )
 
     def forward(
         self,
@@ -580,19 +779,35 @@ class StateAuxSameDiffEnhancer(nn.Module):
                     true_same[valid_edge],
                 )
 
-        same_aggr, logvar_mean, precision_mean = self._aggregate_same_uncertain(
+        (
+            same_aggr,
+            same_strength,
+            logvar_mean,
+            precision_mean,
+        ) = self._aggregate_same_uncertain(
             h,
             edge_index,
             same_weight,
         )
-        diff_aggr = self._aggregate_diff(h, edge_index, diff_weight)
+        diff_aggr, diff_strength = self._aggregate_diff(
+            h,
+            edge_index,
+            diff_weight,
+        )
 
         diff_summary = self.diff_summary_norm(diff_aggr - h)
         diff_gate = torch.sigmoid(self.diff_gate_mlp(torch.cat([h, diff_summary], dim=-1)))
         gated_diff_summary = diff_summary * diff_gate
         diff_delta = self.diff_path_mlp(torch.cat([h, gated_diff_summary], dim=-1))
         diff_delta = F.dropout(diff_delta, self.dropout, training=self.training)
-        z_diff = self.diff_path_norm(h + self.diff_path_blend * diff_delta)
+        diff_candidate = self.diff_path_norm(
+            h + self.diff_path_blend * diff_delta
+        )
+        z_diff = (
+            self._blend_route_strength(h, diff_candidate, diff_strength)
+            if self.preserve_route_strength
+            else diff_candidate
+        )
 
         same_summary = self.same_summary_norm(same_aggr - h)
         same_gate = torch.sigmoid(self.same_gate_mlp(torch.cat([h, same_summary], dim=-1)))
@@ -600,7 +815,14 @@ class StateAuxSameDiffEnhancer(nn.Module):
         guided_same_summary = same_summary * guided_gate
         same_delta = self.same_path_mlp(torch.cat([h, guided_same_summary], dim=-1))
         same_delta = F.dropout(same_delta, self.dropout, training=self.training)
-        z_same = self.same_path_norm(h + self.same_path_blend * same_delta)
+        same_candidate = self.same_path_norm(
+            h + self.same_path_blend * same_delta
+        )
+        z_same = (
+            self._blend_route_strength(h, same_candidate, same_strength)
+            if self.preserve_route_strength
+            else same_candidate
+        )
 
         if self.transition_attention:
             if tree_edge_index is None:

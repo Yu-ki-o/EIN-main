@@ -4,7 +4,7 @@ dataset: DRWeibo
 num_classes: 2
 language: ch # en or ch
 word_embedding: word2vec # match original EIN DRWeibo runs
-result_name: null # set a name to save logs under experiments/EIN/DRWeibo/<result_name>
+result_name: Ours_bigcn_directed_dualview_valloss_stanceonly # set a name to save logs under experiments/EIN/DRWeibo/<result_name>
 experiment_mode: id # id or strict_ood
 ood_source_datasets: []
 ood_val_domain: source # source or target
@@ -17,7 +17,7 @@ lr: 0.0005
 weight_decay: 0.0001
 patience: 10
 n_epochs: 100
-selection_metric: val_acc # val_loss, val_acc, val_auc, or val_f1
+selection_metric: val_loss # val_loss, val_acc, val_auc, or val_f1
 split: '622'
 
 # model parameters

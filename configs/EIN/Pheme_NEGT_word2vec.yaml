@@ -1,0 +1,47 @@
+# model and data
+model_name: EIN
+dataset: Pheme
+num_classes: 2
+language: en
+word_embedding: word2vec
+result_name: negt_directed_valloss_word2vec
+experiment_mode: id
+ood_source_datasets: []
+ood_val_domain: source
+debug: False
+
+# training parameters
+seed: 0
+device: cuda
+lr: 0.001
+weight_decay: 0.01
+patience: 10
+n_epochs: 100
+selection_metric: val_loss
+split: '622'
+num_workers: 0
+
+# model parameters
+base_model: NEGT
+batch_size: 32
+hidden_dim: 128
+in_feats: 200
+tokenize_mode: nltk
+k: 10000
+vector_size: 200
+undirected: False
+dropout: 0.5
+max_hop: 47
+
+# NEGT parameters
+negt_hidden_dim: 128
+negt_heads: 4
+negt_dropout: 0.5
+negt_info_loss_weight: 1.0
+negt_init_r: 0.9
+negt_final_r: 0.8
+negt_decay_interval: 10
+negt_decay_r: 0.1
+negt_attention_scale: 1000.1
+negt_concat: False
+negt_use_gnn: False

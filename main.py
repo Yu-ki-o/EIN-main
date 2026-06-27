@@ -14,10 +14,19 @@ from supervisor import (
     EIN_LIRS_supervisor,
     EIN_BiGCN_StateAuxSameDiff_supervisor,
     EIN_ResGCN_StateAuxSameDiff_supervisor,
+    EIN_BiGCN_SameDiffFusion_supervisor,
+    EIN_ResGCN_SameDiffFusion_supervisor,
+    EIN_BiGCN_UncertaintySemanticChange_supervisor,
+    EIN_ResGCN_UncertaintySemanticChange_supervisor,
+    EIN_GCN_UncertaintySemanticChange_supervisor,
+    EIN_GIN_UncertaintySemanticChange_supervisor,
+    EIN_SEEGraphMAE_supervisor,
+    EIN_KAGNN_supervisor,
     EIN_RAGCL_BiGCN_supervisor,
     EIN_RAGCL_ResGCN_supervisor,
     EIN_Plain_BiGCN_supervisor,
     EIN_Plain_ResGCN_supervisor,
+    EIN_NEGT_supervisor,
 )
 
 
@@ -46,6 +55,8 @@ def _summary_model_parts(args):
         return 'Ours', base_model.replace('_StateAuxSameDiff', '')
     if base_model == 'LIRS':
         return 'LIRS', None
+    if base_model == 'NEGT':
+        return 'NEGT', None
 
     return str(getattr(args, 'model_name', 'Model')).strip(), base_model
 
@@ -77,6 +88,27 @@ def build_summary_filename(args):
     return 'summary_{}.txt'.format('_'.join(safe_parts))
 
 
+def normalize_device_arg(device):
+    device = str(device).strip()
+    if not device:
+        return device
+
+    lowered = device.lower()
+    if lowered == 'cpu':
+        return 'cpu'
+    if lowered == 'cuda':
+        return 'cuda'
+    if lowered.isdigit():
+        return 'cuda:{}'.format(lowered)
+    if lowered.startswith('gpu') and lowered[3:].isdigit():
+        return 'cuda:{}'.format(lowered[3:])
+    if lowered.startswith('cuda'):
+        if lowered[4:].isdigit():
+            return 'cuda:{}'.format(lowered[4:])
+        return lowered
+    return device
+
+
 def summarize_results(results, args):
     metrics = ['acc', 'auc', 'f1']
     lines = []
@@ -105,6 +137,29 @@ def summarize_results(results, args):
             )
         )
 
+    without_ttt_metrics = [
+        'without_ttt_acc',
+        'without_ttt_auc',
+        'without_ttt_f1',
+    ]
+    if all(all(metric in result for metric in without_ttt_metrics) for result in results):
+        lines.append('')
+        lines.append('Test without TTT seed results:')
+        for result in results:
+            lines.append(
+                'Seed {seed}: Acc {without_ttt_acc:.4f} | AUC {without_ttt_auc:.4f} | F1 {without_ttt_f1:.4f}'.format(**result)
+            )
+
+        lines.append('')
+        lines.append('Average Test without TTT results over {} runs:'.format(len(results)))
+        for metric, label in zip(without_ttt_metrics, metrics):
+            values = np.array([result[metric] for result in results])
+            lines.append(
+                '{}: {:.2f}+/-{:.2f} (%)'.format(
+                    label.upper(), values.mean() * 100, values.std() * 100
+                )
+            )
+
     summary = '\n'.join(lines)
     print(summary)
 
@@ -132,16 +187,28 @@ if __name__ == '__main__':
 
     parser.add_argument('--config_filename', default='configs/EIN/' + dataset +'.yaml', 
                     type=str, help='the configuration to use')
-    args = parser.parse_args()
+    parser.add_argument(
+        '--device',
+        default=None,
+        type=str,
+        help='override config device, e.g. cuda:0, cuda:1, 0, 1, or cpu',
+    )
+    cli_args = parser.parse_args()
 
-    print(f'Starting experiment with configurations in {args.config_filename}...')
+    print(f'Starting experiment with configurations in {cli_args.config_filename}...')
     
     configs = yaml.load(
-        open(args.config_filename), 
+        open(cli_args.config_filename),
         Loader=yaml.FullLoader
     )
+    if cli_args.device is not None:
+        configs['device'] = normalize_device_arg(cli_args.device)
     
     args = argparse.Namespace(**configs)
+    args.config_filename = cli_args.config_filename
+
+    if cli_args.device is not None:
+        print('Command line device override: {}'.format(args.device))
 
     results = []
     supervisor = globals()['EIN_' + args.base_model + '_supervisor']

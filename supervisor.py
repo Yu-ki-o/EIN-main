@@ -10,13 +10,82 @@ from model.EIN_BiGCN import BiGCN
 from model.EIN_BiGCN_Uncertainty import BiGCN_Uncertainty
 from model.ResGCN_StateAuxSameDiff import ResGCN_StateAuxSameDiff
 from model.BiGCN_StateAuxSameDiff import BiGCN_StateAuxSameDiff
+from model.EIN_ResGCN_SameDiffFusion import EINResGCNSameDiffFusion
+from model.EIN_BiGCN_SameDiffFusion import EINBiGCNSameDiffFusion
+from model.BiGCN_UncertaintySemanticChange import BiGCN_UncertaintySemanticChange
+from model.ResGCN_UncertaintySemanticChange import ResGCN_UncertaintySemanticChange
+from model.GCN_UncertaintySemanticChange import GCN_UncertaintySemanticChange
+from model.GIN_UncertaintySemanticChange import GIN_UncertaintySemanticChange
+from model.SEEGraphMAE import SEEGraphMAE
+from model.KAGNN import KAGNN
 from model.LIRS import LIRSGIN
+from model.NEGT import NEGT
 from model.RAGCL_baselines import RAGCLBiGCN, RAGCLResGCN
 from trainer.EIN_trainer import EINTrainer
 from trainer.LIRS_trainer import LIRSTrainer
+from trainer.NEGT_trainer import NEGTTrainer
 from trainer.RAGCL_trainer import RAGCLTrainer
+from trainer.SEEGraphMAE_trainer import SEEGraphMAETrainer
 
 
+
+
+def resolve_device(args):
+    requested = str(getattr(args, 'device', 'cpu')).strip().lower()
+    if requested.isdigit():
+        requested = 'cuda:{}'.format(requested)
+    elif requested.startswith('gpu') and requested[3:].isdigit():
+        requested = 'cuda:{}'.format(requested[3:])
+    elif requested.startswith('cuda') and requested[4:].isdigit():
+        requested = 'cuda:{}'.format(requested[4:])
+
+    if requested.startswith('cuda'):
+        if not torch.cuda.is_available():
+            device_nodes = [
+                path
+                for path in (
+                    '/dev/nvidia0',
+                    '/dev/nvidiactl',
+                    '/dev/nvidia-uvm',
+                )
+                if os.path.exists(path)
+            ]
+            raise RuntimeError(
+                'CUDA was requested ({}) but PyTorch cannot access a GPU. '
+                'torch={} was built with CUDA {}, visible device count={}, '
+                'mapped NVIDIA device nodes={}. This usually means the job or '
+                'container was started without GPU device passthrough. Refusing '
+                'to silently fall back to CPU.'.format(
+                    requested,
+                    torch.__version__,
+                    torch.version.cuda,
+                    torch.cuda.device_count(),
+                    device_nodes,
+                )
+            )
+        # torch.cuda.set_device() requires an explicit device index. A bare
+        # "cuda" means the first device visible to this process.
+        device = torch.device(
+            'cuda:0' if requested == 'cuda' else requested
+        )
+        if device.index is not None and device.index >= torch.cuda.device_count():
+            raise RuntimeError(
+                'Requested {}, but only {} CUDA device(s) are visible.'.format(
+                    requested,
+                    torch.cuda.device_count(),
+                )
+            )
+        torch.cuda.set_device(device)
+        allow_tf32 = bool(getattr(args, 'allow_tf32', True))
+        torch.backends.cuda.matmul.allow_tf32 = allow_tf32
+        torch.backends.cudnn.allow_tf32 = allow_tf32
+        if allow_tf32:
+            torch.set_float32_matmul_precision('high')
+        return device
+
+    if requested != 'cpu':
+        raise ValueError('Unsupported device: {}'.format(requested))
+    return torch.device('cpu')
 
 
 def build_text_encoder(args, device, label_source_path):
@@ -127,9 +196,27 @@ def build_strict_ood_paths(args):
 
 
 def load_graph_dataset(args, path, text_encoder):
-    if args.base_model in ['ResGCN', 'ResGCN_Uncertainty', 'ResGCN_StateAuxSameDiff']:
+    if args.base_model in [
+        'ResGCN',
+        'ResGCN_Uncertainty',
+        'ResGCN_StateAuxSameDiff',
+        'ResGCN_SameDiffFusion',
+        'ResGCN_UncertaintySemanticChange',
+        'GCN_UncertaintySemanticChange',
+        'GIN_UncertaintySemanticChange',
+        'SEEGraphMAE',
+        'KAGNN',
+        'NEGT',
+    ]:
         return ResGCNTreeDataset(path, args.word_embedding, text_encoder, args.undirected, args=args)
-    if args.base_model in ['BiGCN', 'BiGCN_Uncertainty', 'BiGCN_StateAuxSameDiff', 'LIRS']:
+    if args.base_model in [
+        'BiGCN',
+        'BiGCN_Uncertainty',
+        'BiGCN_StateAuxSameDiff',
+        'BiGCN_SameDiffFusion',
+        'BiGCN_UncertaintySemanticChange',
+        'LIRS',
+    ]:
         return TreeDataset(path, args.word_embedding, text_encoder, args=args)
     if args.base_model in ['RAGCL_ResGCN', 'RAGCL_BiGCN', 'Plain_ResGCN', 'Plain_BiGCN']:
         return ResGCNTreeDataset(path, args.word_embedding, text_encoder, args.undirected, args=args)
@@ -163,7 +250,7 @@ def build_experiment_datasets(args, text_encoder):
 def EIN_ResGCN_supervisor(args):
     init_seed(args.seed, need_deepfix=True)
 
-    device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
+    device = resolve_device(args)
     
     label_source_path, _ = dataset_paths(args, args.dataset)
     print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
@@ -193,7 +280,7 @@ def EIN_ResGCN_supervisor(args):
 def EIN_ResGCN_Uncertainty_supervisor(args):
     init_seed(args.seed, need_deepfix=True)
 
-    device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
+    device = resolve_device(args)
 
     label_source_path, _ = dataset_paths(args, args.dataset)
     print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
@@ -233,7 +320,7 @@ def EIN_ResGCN_Uncertainty_supervisor(args):
 def EIN_BiGCN_supervisor(args):
     init_seed(args.seed, need_deepfix=False)
 
-    device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
+    device = resolve_device(args)
     
     label_source_path, _ = dataset_paths(args, args.dataset)
     print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
@@ -259,7 +346,7 @@ def EIN_BiGCN_supervisor(args):
 def EIN_BiGCN_Uncertainty_supervisor(args):
     init_seed(args.seed, need_deepfix=False)
 
-    device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
+    device = resolve_device(args)
 
     label_source_path, _ = dataset_paths(args, args.dataset)
     print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
@@ -289,7 +376,7 @@ def EIN_BiGCN_Uncertainty_supervisor(args):
 def EIN_RAGCL_ResGCN_supervisor(args):
     init_seed(args.seed, need_deepfix=True)
 
-    device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
+    device = resolve_device(args)
 
     label_source_path, _ = dataset_paths(args, args.dataset)
     print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
@@ -326,7 +413,7 @@ def EIN_RAGCL_ResGCN_supervisor(args):
 def EIN_RAGCL_BiGCN_supervisor(args):
     init_seed(args.seed, need_deepfix=False)
 
-    device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
+    device = resolve_device(args)
 
     label_source_path, _ = dataset_paths(args, args.dataset)
     print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
@@ -363,10 +450,39 @@ def EIN_Plain_BiGCN_supervisor(args):
     return EIN_RAGCL_BiGCN_supervisor(args)
 
 
+def EIN_NEGT_supervisor(args):
+    init_seed(args.seed, need_deepfix=False)
+
+    device = resolve_device(args)
+
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
+    text_encoder = build_text_encoder(args, device, label_source_path)
+
+    print('Seed {} | Building experiment datasets'.format(args.seed), flush=True)
+    train_dataset, val_dataset, test_dataset = build_experiment_datasets(args, text_encoder)
+
+    print('Seed {} | Initializing NEGT'.format(args.seed), flush=True)
+    base_model = NEGT(
+        args.in_feats,
+        args.hidden_dim,
+        args.num_classes,
+        args,
+        device,
+    ).to(device)
+
+    optimizer = base_model.init_optimizer(args)
+    datasets = [train_dataset, val_dataset, test_dataset]
+    trainer = NEGTTrainer(datasets, base_model, optimizer, args, device)
+
+    print('Seed {} | Start training'.format(args.seed), flush=True)
+    return trainer.train_process()
+
+
 def EIN_BiGCN_StateAuxSameDiff_supervisor(args):
     init_seed(args.seed, need_deepfix=False)
 
-    device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
+    device = resolve_device(args)
 
     label_source_path, _ = dataset_paths(args, args.dataset)
     print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
@@ -396,7 +512,7 @@ def EIN_BiGCN_StateAuxSameDiff_supervisor(args):
 def EIN_ResGCN_StateAuxSameDiff_supervisor(args):
     init_seed(args.seed, need_deepfix=True)
 
-    device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
+    device = resolve_device(args)
 
     label_source_path, _ = dataset_paths(args, args.dataset)
     print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
@@ -432,10 +548,286 @@ def EIN_ResGCN_StateAuxSameDiff_supervisor(args):
     return trainer.train_process()
 
 
+def EIN_ResGCN_SameDiffFusion_supervisor(args):
+    init_seed(args.seed, need_deepfix=True)
+
+    device = resolve_device(args)
+
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
+    text_encoder = build_text_encoder(args, device, label_source_path)
+
+    print('Seed {} | Building experiment datasets'.format(args.seed), flush=True)
+    train_dataset, val_dataset, test_dataset = build_experiment_datasets(args, text_encoder)
+
+    print('Seed {} | Initializing ResGCN_SameDiffFusion'.format(args.seed), flush=True)
+    base_model = EINResGCNSameDiffFusion(
+        dataset=train_dataset,
+        num_classes=args.num_classes,
+        hidden=args.hidden_dim,
+        num_feat_layers=args.n_layers_feat,
+        num_conv_layers=args.n_layers_conv,
+        num_fc_layers=args.n_layers_fc,
+        gfn=False,
+        collapse=False,
+        residual=args.skip_connection,
+        res_branch=args.res_branch,
+        global_pool=args.global_pool,
+        dropout=args.dropout,
+        edge_norm=args.edge_norm,
+        args=args,
+        device=device,
+    ).to(device)
+
+    optimizer = base_model.init_optimizer(args)
+    datasets = [train_dataset, val_dataset, test_dataset]
+    trainer = EINTrainer(datasets, base_model, optimizer, args, device)
+
+    print('Seed {} | Start training'.format(args.seed), flush=True)
+    return trainer.train_process()
+
+
+def EIN_BiGCN_SameDiffFusion_supervisor(args):
+    init_seed(args.seed, need_deepfix=False)
+
+    device = resolve_device(args)
+
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
+    text_encoder = build_text_encoder(args, device, label_source_path)
+
+    print('Seed {} | Building experiment datasets'.format(args.seed), flush=True)
+    train_dataset, val_dataset, test_dataset = build_experiment_datasets(args, text_encoder)
+
+    print('Seed {} | Initializing BiGCN_SameDiffFusion'.format(args.seed), flush=True)
+    base_model = EINBiGCNSameDiffFusion(
+        args.in_feats,
+        args.hidden_dim,
+        args.hidden_dim,
+        args.num_classes,
+        args,
+        device,
+    ).to(device)
+
+    optimizer = base_model.init_optimizer(args)
+    datasets = [train_dataset, val_dataset, test_dataset]
+    trainer = EINTrainer(datasets, base_model, optimizer, args, device)
+
+    print('Seed {} | Start training'.format(args.seed), flush=True)
+    return trainer.train_process()
+
+
+def EIN_BiGCN_UncertaintySemanticChange_supervisor(args):
+    init_seed(args.seed, need_deepfix=False)
+
+    device = resolve_device(args)
+
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
+    text_encoder = build_text_encoder(args, device, label_source_path)
+
+    print('Seed {} | Building experiment datasets'.format(args.seed), flush=True)
+    train_dataset, val_dataset, test_dataset = build_experiment_datasets(args, text_encoder)
+
+    print(
+        'Seed {} | Initializing BiGCN_UncertaintySemanticChange'.format(
+            args.seed
+        ),
+        flush=True,
+    )
+    base_model = BiGCN_UncertaintySemanticChange(
+        args.in_feats,
+        args.hidden_dim,
+        args.hidden_dim,
+        args.num_classes,
+        args,
+        device,
+    ).to(device)
+
+    optimizer = base_model.init_optimizer(args)
+    datasets = [train_dataset, val_dataset, test_dataset]
+    trainer = EINTrainer(datasets, base_model, optimizer, args, device)
+
+    print('Seed {} | Start training'.format(args.seed), flush=True)
+    return trainer.train_process()
+
+
+def EIN_ResGCN_UncertaintySemanticChange_supervisor(args):
+    init_seed(args.seed, need_deepfix=True)
+
+    device = resolve_device(args)
+
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
+    text_encoder = build_text_encoder(args, device, label_source_path)
+
+    print('Seed {} | Building experiment datasets'.format(args.seed), flush=True)
+    train_dataset, val_dataset, test_dataset = build_experiment_datasets(args, text_encoder)
+
+    print(
+        'Seed {} | Initializing ResGCN_UncertaintySemanticChange'.format(
+            args.seed
+        ),
+        flush=True,
+    )
+    base_model = ResGCN_UncertaintySemanticChange(
+        args.in_feats,
+        args.hidden_dim,
+        args.hidden_dim,
+        args.num_classes,
+        args,
+        device,
+    ).to(device)
+
+    optimizer = base_model.init_optimizer(args)
+    datasets = [train_dataset, val_dataset, test_dataset]
+    trainer = EINTrainer(datasets, base_model, optimizer, args, device)
+
+    print('Seed {} | Start training'.format(args.seed), flush=True)
+    return trainer.train_process()
+
+
+def EIN_GCN_UncertaintySemanticChange_supervisor(args):
+    init_seed(args.seed, need_deepfix=True)
+
+    device = resolve_device(args)
+
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
+    text_encoder = build_text_encoder(args, device, label_source_path)
+
+    print('Seed {} | Building experiment datasets'.format(args.seed), flush=True)
+    train_dataset, val_dataset, test_dataset = build_experiment_datasets(args, text_encoder)
+
+    print(
+        'Seed {} | Initializing GCN_UncertaintySemanticChange'.format(
+            args.seed
+        ),
+        flush=True,
+    )
+    base_model = GCN_UncertaintySemanticChange(
+        args.in_feats,
+        args.hidden_dim,
+        args.hidden_dim,
+        args.num_classes,
+        args,
+        device,
+    ).to(device)
+
+    optimizer = base_model.init_optimizer(args)
+    datasets = [train_dataset, val_dataset, test_dataset]
+    trainer = EINTrainer(datasets, base_model, optimizer, args, device)
+
+    print('Seed {} | Start training'.format(args.seed), flush=True)
+    return trainer.train_process()
+
+
+def EIN_GIN_UncertaintySemanticChange_supervisor(args):
+    init_seed(args.seed, need_deepfix=True)
+
+    device = resolve_device(args)
+
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
+    text_encoder = build_text_encoder(args, device, label_source_path)
+
+    print('Seed {} | Building experiment datasets'.format(args.seed), flush=True)
+    train_dataset, val_dataset, test_dataset = build_experiment_datasets(args, text_encoder)
+
+    print(
+        'Seed {} | Initializing GIN_UncertaintySemanticChange'.format(
+            args.seed
+        ),
+        flush=True,
+    )
+    base_model = GIN_UncertaintySemanticChange(
+        args.in_feats,
+        args.hidden_dim,
+        args.hidden_dim,
+        args.num_classes,
+        args,
+        device,
+    ).to(device)
+
+    optimizer = base_model.init_optimizer(args)
+    datasets = [train_dataset, val_dataset, test_dataset]
+    trainer = EINTrainer(datasets, base_model, optimizer, args, device)
+
+    print('Seed {} | Start training'.format(args.seed), flush=True)
+    return trainer.train_process()
+
+
+def EIN_SEEGraphMAE_supervisor(args):
+    init_seed(args.seed, need_deepfix=True)
+
+    device = resolve_device(args)
+
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
+    text_encoder = build_text_encoder(args, device, label_source_path)
+
+    print('Seed {} | Building experiment datasets'.format(args.seed), flush=True)
+    train_dataset, val_dataset, test_dataset = build_experiment_datasets(args, text_encoder)
+
+    print(
+        'Seed {} | Initializing SEEGraphMAE'.format(args.seed),
+        flush=True,
+    )
+    base_model = SEEGraphMAE(
+        args.in_feats,
+        args.hidden_dim,
+        args.num_classes,
+        args,
+        device,
+    ).to(device)
+
+    optimizer = base_model.init_optimizer(args)
+    datasets = [train_dataset, val_dataset, test_dataset]
+    trainer = SEEGraphMAETrainer(datasets, base_model, optimizer, args, device)
+
+    print('Seed {} | Start training'.format(args.seed), flush=True)
+    return trainer.train_process()
+
+
+def EIN_KAGNN_supervisor(args):
+    init_seed(args.seed, need_deepfix=True)
+
+    device = resolve_device(args)
+
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
+    text_encoder = build_text_encoder(args, device, label_source_path)
+
+    print('Seed {} | Building experiment datasets'.format(args.seed), flush=True)
+    train_dataset, val_dataset, test_dataset = build_experiment_datasets(args, text_encoder)
+
+    print(
+        'Seed {} | Initializing KAGNN ({})'.format(
+            args.seed,
+            getattr(args, 'kagnn_variant', 'KAGCN'),
+        ),
+        flush=True,
+    )
+    base_model = KAGNN(
+        args.in_feats,
+        args.hidden_dim,
+        args.num_classes,
+        args,
+        device,
+    ).to(device)
+
+    optimizer = base_model.init_optimizer(args)
+    datasets = [train_dataset, val_dataset, test_dataset]
+    trainer = EINTrainer(datasets, base_model, optimizer, args, device)
+
+    print('Seed {} | Start training'.format(args.seed), flush=True)
+    return trainer.train_process()
+
+
 def EIN_LIRS_supervisor(args):
     init_seed(args.seed, need_deepfix=False)
 
-    device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
+    device = resolve_device(args)
 
     label_source_path, _ = dataset_paths(args, args.dataset)
     print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)

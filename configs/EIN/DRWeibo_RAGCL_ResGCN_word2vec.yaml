@@ -7,7 +7,7 @@ word_embedding: word2vec
 e5_model_name: intfloat/multilingual-e5-base
 e5_max_length: 128
 e5_batch_size: 64
-result_name: ragcl_resgcn_directed_valacc # set a name to save logs under experiments/EIN/DRWeibo/<result_name>
+result_name: base_resgcn_directed_valloss_layer2 # set a name to save logs under experiments/EIN/DRWeibo/<result_name>
 experiment_mode: id
 ood_source_datasets: []
 ood_val_domain: source
@@ -20,7 +20,7 @@ lr: 0.0005
 weight_decay: 0.0001
 patience: 10
 n_epochs: 100
-selection_metric: val_acc 
+selection_metric: val_loss
 split: '622'
 
 # model parameters
@@ -32,7 +32,7 @@ tokenize_mode: jieba
 k: 10000
 vector_size: 200
 in_feats: 200
-n_layers_conv: 3
+n_layers_conv: 2
 aug1: DropEdge,mean,0.2,0.7
 aug2: NodeDrop,0.2,0.7
 n_layers_feat: 1
@@ -44,8 +44,8 @@ edge_norm: True
 global_pool: sum
 undirected: False
 
-base_model:  RAGCL_ResGCN   #RAGCL_ResGCN or Plain_ResGCN
+base_model:  Plain_ResGCN   #RAGCL_ResGCN or Plain_ResGCN
 max_hop: 20
-use_unsup_loss: True
+use_unsup_loss: False
 ragcl_lamda: 0.001
 centrality: PageRank
