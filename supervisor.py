@@ -16,6 +16,7 @@ from model.BiGCN_UncertaintySemanticChange import BiGCN_UncertaintySemanticChang
 from model.ResGCN_UncertaintySemanticChange import ResGCN_UncertaintySemanticChange
 from model.GCN_UncertaintySemanticChange import GCN_UncertaintySemanticChange
 from model.GIN_UncertaintySemanticChange import GIN_UncertaintySemanticChange
+from model.KAGNN_UncertaintySemanticChange import KAGNN_UncertaintySemanticChange
 from model.SEEGraphMAE import SEEGraphMAE
 from model.KAGNN import KAGNN
 from model.LIRS import LIRSGIN
@@ -204,6 +205,7 @@ def load_graph_dataset(args, path, text_encoder):
         'ResGCN_UncertaintySemanticChange',
         'GCN_UncertaintySemanticChange',
         'GIN_UncertaintySemanticChange',
+        'KAGNN_UncertaintySemanticChange',
         'SEEGraphMAE',
         'KAGNN',
         'NEGT',
@@ -561,6 +563,8 @@ def EIN_ResGCN_SameDiffFusion_supervisor(args):
     train_dataset, val_dataset, test_dataset = build_experiment_datasets(args, text_encoder)
 
     print('Seed {} | Initializing ResGCN_SameDiffFusion'.format(args.seed), flush=True)
+    
+    #这里的base_model是模型的实例化对象，里面包含了模型的forward方法和loss计算方法的定义以及各个模型的具体实现
     base_model = EINResGCNSameDiffFusion(
         dataset=train_dataset,
         num_classes=args.num_classes,
@@ -581,6 +585,8 @@ def EIN_ResGCN_SameDiffFusion_supervisor(args):
 
     optimizer = base_model.init_optimizer(args)
     datasets = [train_dataset, val_dataset, test_dataset]
+
+    #这里的Trainer类是整个训练验证测试的总控制器，里面会调用base_model参数的forward方法和loss计算方法
     trainer = EINTrainer(datasets, base_model, optimizer, args, device)
 
     print('Seed {} | Start training'.format(args.seed), flush=True)
@@ -741,6 +747,42 @@ def EIN_GIN_UncertaintySemanticChange_supervisor(args):
         flush=True,
     )
     base_model = GIN_UncertaintySemanticChange(
+        args.in_feats,
+        args.hidden_dim,
+        args.hidden_dim,
+        args.num_classes,
+        args,
+        device,
+    ).to(device)
+
+    optimizer = base_model.init_optimizer(args)
+    datasets = [train_dataset, val_dataset, test_dataset]
+    trainer = EINTrainer(datasets, base_model, optimizer, args, device)
+
+    print('Seed {} | Start training'.format(args.seed), flush=True)
+    return trainer.train_process()
+
+
+def EIN_KAGNN_UncertaintySemanticChange_supervisor(args):
+    init_seed(args.seed, need_deepfix=True)
+
+    device = resolve_device(args)
+
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
+    text_encoder = build_text_encoder(args, device, label_source_path)
+
+    print('Seed {} | Building experiment datasets'.format(args.seed), flush=True)
+    train_dataset, val_dataset, test_dataset = build_experiment_datasets(args, text_encoder)
+
+    print(
+        'Seed {} | Initializing KAGNN_UncertaintySemanticChange ({})'.format(
+            args.seed,
+            getattr(args, 'kagnn_variant', 'KAGCN'),
+        ),
+        flush=True,
+    )
+    base_model = KAGNN_UncertaintySemanticChange(
         args.in_feats,
         args.hidden_dim,
         args.hidden_dim,

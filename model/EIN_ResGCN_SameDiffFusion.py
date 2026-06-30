@@ -136,7 +136,8 @@ class EINResGCNSameDiffFusion(torch.nn.Module):
             lr=args.lr,
             weight_decay=args.weight_decay,
         )
-
+    
+    #这里的这个额外损失是我的same/diff模型自己添加的模块带入的，ein原模型不使用这个损失
     def auxiliary_loss(self):
         losses = []
         for enhancer in self.enhancers:

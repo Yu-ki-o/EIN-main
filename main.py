@@ -20,6 +20,7 @@ from supervisor import (
     EIN_ResGCN_UncertaintySemanticChange_supervisor,
     EIN_GCN_UncertaintySemanticChange_supervisor,
     EIN_GIN_UncertaintySemanticChange_supervisor,
+    EIN_KAGNN_UncertaintySemanticChange_supervisor,
     EIN_SEEGraphMAE_supervisor,
     EIN_KAGNN_supervisor,
     EIN_RAGCL_BiGCN_supervisor,
@@ -182,7 +183,8 @@ def summarize_results(results, args):
 if __name__ == '__main__':
 
     dataset = 'DRWeibo'
-    
+    print(f'运行到这')
+
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--config_filename', default='configs/EIN/' + dataset +'.yaml', 
@@ -211,8 +213,11 @@ if __name__ == '__main__':
         print('Command line device override: {}'.format(args.device))
 
     results = []
+    
+
+    #对应上该main文件开头从supervisor中import的对应模型的监督器
     supervisor = globals()['EIN_' + args.base_model + '_supervisor']
-    for i in range(5):
+    for i in range(1):
         args.seed = i
         result = supervisor(args)
         if result is not None:

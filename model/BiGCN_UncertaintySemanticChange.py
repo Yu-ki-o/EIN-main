@@ -13,6 +13,7 @@ from torch_geometric.nn import (
     global_max_pool,
     global_mean_pool,
 )
+from torch_geometric.utils import softmax, to_dense_batch
 
 from model.semantic_change_encoder import build_semantic_change_encoder
 
@@ -47,6 +48,9 @@ class EdgeRelationUncertaintyRouter(nn.Module):
         )
         self.hard_stance_route = bool(
             getattr(args, "stance_route_hard", True)
+        )
+        self.use_uncertainty_sampling = bool(
+            getattr(args, "use_uncertainty_sampling", True)
         )
         self.keep_floor = min(
             max(
@@ -154,11 +158,10 @@ class EdgeRelationUncertaintyRouter(nn.Module):
             ).to(dtype=probabilities.dtype)
         return probabilities
 
-    def forward(
+    def relation_outputs(
         self,
         node_hidden,
         edge_index,
-        child_degree_importance=None,
     ):
         if edge_index.numel() == 0:
             empty_logits = node_hidden.new_zeros((0, 2))
@@ -166,9 +169,6 @@ class EdgeRelationUncertaintyRouter(nn.Module):
             return (
                 empty_logits,
                 empty_logits,
-                empty_scalar,
-                empty_scalar,
-                empty_scalar,
                 empty_scalar,
             )
 
@@ -187,14 +187,30 @@ class EdgeRelationUncertaintyRouter(nn.Module):
         logits = self.logit_head(self.relation_encoder(edge_features))
         probabilities = self.relation_probabilities(logits)
         uncertainty = self.normalized_entropy(probabilities)
+        return logits, probabilities, uncertainty
 
-        keep_probability = self.reliability_probability(
-            uncertainty,
-            child_degree_importance,
-        )
-        if self.current_epoch < self.warmup_epochs:
+    def route_edges(
+        self,
+        logits,
+        probabilities,
+        uncertainty,
+        child_degree_importance=None,
+    ):
+        if logits.numel() == 0:
+            empty_scalar = uncertainty.new_zeros((0,))
+            return empty_scalar, empty_scalar, empty_scalar
+
+        if (
+            not self.use_uncertainty_sampling
+            or self.current_epoch < self.warmup_epochs
+        ):
+            keep_probability = uncertainty.new_ones(uncertainty.size())
             keep_sample = torch.ones_like(keep_probability)
         else:
+            keep_probability = self.reliability_probability(
+                uncertainty,
+                child_degree_importance,
+            )
             keep_sample = self.soft_bernoulli_sample(keep_probability)
 
         # Two-stage routing:
@@ -203,6 +219,24 @@ class EdgeRelationUncertaintyRouter(nn.Module):
         route = self.stance_route(logits, probabilities)
         support_weight = keep_sample * route[:, 0]
         deny_weight = keep_sample * route[:, 1]
+        return keep_sample, support_weight, deny_weight
+
+    def forward(
+        self,
+        node_hidden,
+        edge_index,
+        child_degree_importance=None,
+    ):
+        logits, probabilities, uncertainty = self.relation_outputs(
+            node_hidden,
+            edge_index,
+        )
+        keep_sample, support_weight, deny_weight = self.route_edges(
+            logits,
+            probabilities,
+            uncertainty,
+            child_degree_importance,
+        )
         return (
             logits,
             probabilities,
@@ -211,6 +245,377 @@ class EdgeRelationUncertaintyRouter(nn.Module):
             support_weight,
             deny_weight,
         )
+
+
+class RootPathUncertaintyAttention(nn.Module):
+    """
+    Updates each non-root node from the nodes on its root path.
+
+    For query node u and path node v, the attention bias is controlled by
+    distance(u, v), the learned uncertainty of v, and their interaction. The
+    uncertainty is local node uncertainty: root is 0, and every other node uses
+    the entropy of its incoming parent edge.
+    """
+
+    def __init__(self, hidden_dim, args=None):
+        super().__init__()
+        self.hidden_dim = int(hidden_dim)
+        self.heads = max(
+            1,
+            int(getattr(args, "vertical_path_attention_heads", 4)),
+        )
+        if self.hidden_dim % self.heads != 0:
+            raise ValueError(
+                "hidden_dim {} must be divisible by "
+                "vertical_path_attention_heads {}".format(
+                    self.hidden_dim,
+                    self.heads,
+                )
+            )
+        self.head_dim = self.hidden_dim // self.heads
+        self.score_scale = self.head_dim ** -0.5
+        self.max_distance = max(
+            0,
+            int(
+                getattr(
+                    args,
+                    "vertical_path_attention_max_distance",
+                    getattr(args, "max_hop", 32),
+                )
+            ),
+        )
+        dropout = float(
+            getattr(
+                args,
+                "vertical_path_attention_dropout",
+                getattr(args, "dropout", 0.0),
+            )
+        )
+
+        self.q_proj = nn.Linear(self.hidden_dim, self.hidden_dim)
+        self.k_proj = nn.Linear(self.hidden_dim, self.hidden_dim)
+        self.v_proj = nn.Linear(self.hidden_dim, self.hidden_dim)
+        self.out_proj = nn.Linear(self.hidden_dim, self.hidden_dim)
+        self.attention_dropout = nn.Dropout(dropout)
+        self.output_dropout = nn.Dropout(dropout)
+        self.norm = nn.LayerNorm(self.hidden_dim)
+
+        self.distance_bias = nn.Embedding(
+            self.max_distance + 1,
+            self.heads,
+        )
+        self.distance_uncertainty_bias = nn.Embedding(
+            self.max_distance + 1,
+            self.heads,
+        )
+        nn.init.zeros_(self.distance_bias.weight)
+        nn.init.zeros_(self.distance_uncertainty_bias.weight)
+
+        uncertainty_scale = max(
+            1e-6,
+            float(
+                getattr(
+                    args,
+                    "vertical_path_attention_uncertainty_scale",
+                    1.0,
+                )
+            ),
+        )
+        if uncertainty_scale > 20.0:
+            uncertainty_raw = uncertainty_scale
+        else:
+            uncertainty_raw = math.log(math.expm1(uncertainty_scale))
+        self.uncertainty_scale_raw = nn.Parameter(
+            torch.full((self.heads,), uncertainty_raw)
+        )
+
+        gate = float(
+            getattr(args, "vertical_path_attention_residual_gate", 1.0)
+        )
+        gate = min(max(gate, 1e-4), 1.0 - 1e-4)
+        self.residual_gate_raw = nn.Parameter(
+            torch.tensor(math.log(gate / (1.0 - gate)))
+        )
+
+    def forward(
+        self,
+        node_hidden,
+        parent,
+        depth,
+        node_uncertainty,
+    ):
+        query_index, key_index, distance = self._build_path_pairs(
+            parent,
+            depth,
+        )
+        if query_index.numel() == 0:
+            return node_hidden
+
+        num_nodes = node_hidden.size(0)
+        query = self.q_proj(node_hidden).view(
+            num_nodes,
+            self.heads,
+            self.head_dim,
+        )
+        key = self.k_proj(node_hidden).view(
+            num_nodes,
+            self.heads,
+            self.head_dim,
+        )
+        value = self.v_proj(node_hidden).view(
+            num_nodes,
+            self.heads,
+            self.head_dim,
+        )
+
+        attention_score = (
+            query[query_index] * key[key_index]
+        ).sum(dim=-1) * self.score_scale
+        distance = distance.clamp(0, self.max_distance)
+        key_uncertainty = node_uncertainty[key_index].clamp(
+            0.0,
+            1.0,
+        )
+        distance_bias = self.distance_bias(distance)
+        distance_uncertainty_bias = (
+            self.distance_uncertainty_bias(distance)
+            * key_uncertainty.unsqueeze(-1)
+        )
+        uncertainty_penalty = (
+            F.softplus(self.uncertainty_scale_raw).view(1, -1)
+            * key_uncertainty.unsqueeze(-1)
+        )
+        attention_score = (
+            attention_score
+            + distance_bias
+            + distance_uncertainty_bias
+            - uncertainty_penalty
+        )
+
+        attention = softmax(
+            attention_score,
+            query_index,
+            num_nodes=num_nodes,
+        )
+        attention = self.attention_dropout(attention)
+        message = attention.unsqueeze(-1) * value[key_index]
+
+        path_hidden = node_hidden.new_zeros(
+            num_nodes,
+            self.heads,
+            self.head_dim,
+        )
+        path_hidden.index_add_(0, query_index, message)
+        path_hidden = path_hidden.reshape(num_nodes, self.hidden_dim)
+        path_hidden = self.out_proj(path_hidden)
+        path_hidden = self.output_dropout(path_hidden)
+
+        updated = node_hidden.clone()
+        query_nodes = query_index.unique()
+        gate = torch.sigmoid(self.residual_gate_raw)
+        updated[query_nodes] = self.norm(
+            node_hidden[query_nodes] + gate * path_hidden[query_nodes]
+        )
+        return updated
+
+    def _build_path_pairs(self, parent, depth):
+        query_nodes = (depth > 0).nonzero(as_tuple=False).view(-1)
+        if query_nodes.numel() == 0:
+            empty = parent.new_zeros((0,))
+            return empty, empty, empty
+
+        max_steps = int(depth[query_nodes].max().item()) + 1
+        current = query_nodes.clone()
+        query_parts = []
+        key_parts = []
+        distance_parts = []
+        for _ in range(max_steps):
+            active = current >= 0
+            if not active.any():
+                break
+            active_query = query_nodes[active]
+            active_key = current[active]
+            valid_depth = depth[active_key] >= 0
+            if valid_depth.any():
+                active_query = active_query[valid_depth]
+                active_key = active_key[valid_depth]
+                query_parts.append(active_query)
+                key_parts.append(active_key)
+                distance_parts.append(
+                    (depth[active_query] - depth[active_key])
+                    .clamp_min(0)
+                    .long()
+                )
+
+            next_current = current.new_full(current.size(), -1)
+            next_current[active] = parent[current[active]]
+            current = next_current
+
+        if not query_parts:
+            empty = parent.new_zeros((0,))
+            return empty, empty, empty
+        return (
+            torch.cat(query_parts, dim=0),
+            torch.cat(key_parts, dim=0),
+            torch.cat(distance_parts, dim=0),
+        )
+
+
+class SemanticTreeTransformerBranch(nn.Module):
+    """
+    Encodes the original propagation tree after injecting support/deny node
+    semantics and depth embeddings into each node.
+    """
+
+    def __init__(self, hidden_dim, args=None):
+        super().__init__()
+        self.hidden_dim = int(hidden_dim)
+        self.max_depth = max(
+            0,
+            int(
+                getattr(
+                    args,
+                    "semantic_tree_transformer_max_depth",
+                    getattr(args, "max_hop", 32),
+                )
+            ),
+        )
+        depth_dim = max(
+            1,
+            int(
+                getattr(
+                    args,
+                    "semantic_tree_depth_dim",
+                    self.hidden_dim,
+                )
+            ),
+        )
+        heads = max(
+            1,
+            int(getattr(args, "semantic_tree_transformer_heads", 4)),
+        )
+        if self.hidden_dim % heads != 0:
+            raise ValueError(
+                "hidden_dim {} must be divisible by "
+                "semantic_tree_transformer_heads {}".format(
+                    self.hidden_dim,
+                    heads,
+                )
+            )
+        layers = max(
+            1,
+            int(getattr(args, "semantic_tree_transformer_layers", 1)),
+        )
+        feedforward_dim = max(
+            self.hidden_dim,
+            int(
+                getattr(
+                    args,
+                    "semantic_tree_transformer_ffn_dim",
+                    self.hidden_dim * 2,
+                )
+            ),
+        )
+        dropout = float(
+            getattr(
+                args,
+                "semantic_tree_transformer_dropout",
+                getattr(args, "dropout", 0.0),
+            )
+        )
+        self.pool = str(
+            getattr(args, "semantic_tree_transformer_pool", "mean")
+        ).strip().lower()
+        if self.pool not in {"mean", "sum", "root"}:
+            raise ValueError(
+                "semantic_tree_transformer_pool must be one of "
+                "['mean', 'root', 'sum'], got {}".format(self.pool)
+            )
+
+        self.depth_embedding = nn.Embedding(self.max_depth + 2, depth_dim)
+        self.support_missing = nn.Parameter(torch.zeros(self.hidden_dim))
+        self.deny_missing = nn.Parameter(torch.zeros(self.hidden_dim))
+        self.input_projection = nn.Sequential(
+            nn.Linear(self.hidden_dim * 3 + depth_dim, self.hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.LayerNorm(self.hidden_dim),
+        )
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=self.hidden_dim,
+            nhead=heads,
+            dim_feedforward=feedforward_dim,
+            dropout=dropout,
+            activation="gelu",
+            batch_first=True,
+            norm_first=True,
+        )
+        self.encoder = nn.TransformerEncoder(
+            encoder_layer,
+            num_layers=layers,
+            enable_nested_tensor=False,
+        )
+        self.output_norm = nn.LayerNorm(self.hidden_dim)
+
+    def _inject_missing_view(self, view_nodes, node_weight, missing):
+        if node_weight is None:
+            return view_nodes
+        weight = node_weight.to(dtype=view_nodes.dtype).clamp(0.0, 1.0)
+        weight = weight.unsqueeze(-1)
+        return view_nodes * weight + missing.view(1, -1) * (1.0 - weight)
+
+    def _depth_indices(self, depth):
+        # Unknown/unreachable depth -1 maps to 0. Root depth 0 maps to 1.
+        return depth.long().clamp(-1, self.max_depth) + 1
+
+    def forward(
+        self,
+        original_nodes,
+        support_nodes,
+        deny_nodes,
+        depth,
+        batch,
+        support_node_weight=None,
+        deny_node_weight=None,
+    ):
+        support_nodes = self._inject_missing_view(
+            support_nodes,
+            support_node_weight,
+            self.support_missing,
+        )
+        deny_nodes = self._inject_missing_view(
+            deny_nodes,
+            deny_node_weight,
+            self.deny_missing,
+        )
+        depth_nodes = self.depth_embedding(self._depth_indices(depth))
+        node_input = torch.cat(
+            (
+                original_nodes,
+                support_nodes,
+                deny_nodes,
+                depth_nodes,
+            ),
+            dim=-1,
+        )
+        node_hidden = self.input_projection(node_input)
+        dense_hidden, valid_mask = to_dense_batch(node_hidden, batch)
+        encoded_dense = self.encoder(
+            dense_hidden,
+            src_key_padding_mask=~valid_mask,
+        )
+        encoded_dense = self.output_norm(encoded_dense)
+
+        if self.pool == "root":
+            graph_hidden = encoded_dense[:, 0]
+        else:
+            mask = valid_mask.unsqueeze(-1).to(dtype=encoded_dense.dtype)
+            graph_hidden = (encoded_dense * mask).sum(dim=1)
+            if self.pool == "mean":
+                graph_hidden = graph_hidden / mask.sum(dim=1).clamp_min(1.0)
+
+        encoded_nodes = encoded_dense[valid_mask]
+        return graph_hidden, encoded_nodes
 
 
 class BiGCN_UncertaintySemanticChange(nn.Module):
@@ -251,6 +656,12 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self.use_trend_graph = bool(
             getattr(args, "use_trend_graph", True)
         )
+        self.use_vertical_path_attention = bool(
+            getattr(args, "use_vertical_path_attention", False)
+        )
+        self.use_semantic_tree_transformer = bool(
+            getattr(args, "use_semantic_tree_transformer", False)
+        )
         self.use_node_keep_in_change_pool = bool(
             getattr(args, "use_node_keep_in_change_pool", True)
         )
@@ -260,27 +671,52 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             None,
         )
         if requested_fusion_mode is None:
-            requested_fusion_mode = (
-                "original_change_trend"
-                if self.use_trend_graph
-                else "original_change"
-            )
+            requested_branches = ["original", "change"]
+            if self.use_trend_graph:
+                requested_branches.append("trend")
+            if self.use_vertical_path_attention:
+                requested_branches.append("vertical")
+            if self.use_semantic_tree_transformer:
+                requested_branches.append("semantic_tree")
+            requested_fusion_mode = "_".join(requested_branches)
         self.classification_fusion_mode = str(
             requested_fusion_mode
         ).strip().lower()
         fusion_mode_branches = {
+            "change": ("change",),
             "original_change": ("original", "change"),
             "original_change_trend": (
                 "original",
                 "change",
                 "trend",
             ),
+            "original_change_vertical": (
+                "original",
+                "change",
+                "vertical",
+            ),
+            "original_change_trend_vertical": (
+                "original",
+                "change",
+                "trend",
+                "vertical",
+            ),
             "support_deny_change": (
                 "support",
                 "deny",
                 "change",
             ),
+            "support_deny_change_vertical": (
+                "support",
+                "deny",
+                "change",
+                "vertical",
+            ),
         }
+        for mode_name, branch_names in list(fusion_mode_branches.items()):
+            fusion_mode_branches[mode_name + "_semantic_tree"] = (
+                branch_names + ("semantic_tree",)
+            )
         if self.classification_fusion_mode not in fusion_mode_branches:
             raise ValueError(
                 "classification_fusion_mode must be one of {}, got {}".format(
@@ -291,6 +727,14 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self.classification_branch_names = fusion_mode_branches[
             self.classification_fusion_mode
         ]
+        self.vertical_path_active = (
+            self.use_vertical_path_attention
+            or "vertical" in self.classification_branch_names
+        )
+        self.semantic_tree_active = (
+            self.use_semantic_tree_transformer
+            or "semantic_tree" in self.classification_branch_names
+        )
         self.lambda_edge_relation = max(
             0.0,
             float(getattr(args, "lambda_edge_relation_aux", 0.1)),
@@ -304,6 +748,14 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                     self.lambda_edge_relation,
                 )
             ),
+        )
+        self.lambda_view_mi = max(
+            0.0,
+            float(getattr(args, "lambda_view_mi_aux", 0.0)),
+        )
+        self.view_mi_eps = max(
+            1e-12,
+            float(getattr(args, "view_mi_eps", 1e-6)),
         )
         class_weights = getattr(args, "classification_class_weights", None)
         if class_weights is None:
@@ -354,6 +806,22 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             hidden_dim=change_hidden,
             dropout=self.dropout,
         )
+        self.vertical_path_attention = (
+            RootPathUncertaintyAttention(
+                hid_feats,
+                args=args,
+            )
+            if self.vertical_path_active
+            else None
+        )
+        self.semantic_tree_transformer = (
+            SemanticTreeTransformerBranch(
+                hid_feats,
+                args=args,
+            )
+            if self.semantic_tree_active
+            else None
+        )
 
         trend_hidden = int(
             getattr(args, "uncertainty_trend_hidden_dim", hid_feats)
@@ -384,6 +852,8 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self.classifier = nn.Linear(hid_feats, num_classes)
 
         self._last_aux_loss = None
+        self._last_edge_relation_loss = None
+        self._last_view_mi_loss = None
         self._last_edge_probabilities = None
         self._last_edge_uncertainty = None
         self._last_keep_sample = None
@@ -394,6 +864,12 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_deny_graph = None
         self._last_change_nodes = None
         self._last_change_graph = None
+        self._last_vertical_nodes = None
+        self._last_vertical_graph = None
+        self._last_semantic_tree_nodes = None
+        self._last_semantic_tree_graph = None
+        self._last_semantic_tree_depth = None
+        self._last_node_uncertainty = None
         self._last_trend_sequence = None
         self._last_node_state_sequence = None
         self._last_node_keep = None
@@ -558,6 +1034,50 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             weight=class_weight,
         )
 
+    def _view_mutual_information_loss(
+        self,
+        support_graph,
+        deny_graph,
+    ):
+        zero = self.classifier.weight.new_zeros(())
+        if self.lambda_view_mi <= 0.0:
+            return zero
+        if support_graph is None or deny_graph is None:
+            return zero
+        if support_graph.numel() == 0 or deny_graph.numel() == 0:
+            return zero
+
+        support = support_graph.float()
+        deny = deny_graph.float()
+        if support.size(0) > 1:
+            support = support - support.mean(dim=0, keepdim=True)
+            deny = deny - deny.mean(dim=0, keepdim=True)
+            support = support / support.pow(2).mean(
+                dim=0,
+                keepdim=True,
+            ).add(self.view_mi_eps).sqrt()
+            deny = deny / deny.pow(2).mean(
+                dim=0,
+                keepdim=True,
+            ).add(self.view_mi_eps).sqrt()
+            cross_covariance = support.t().matmul(deny) / support.size(0)
+            mi_proxy = cross_covariance.pow(2).mean()
+        else:
+            support = F.normalize(
+                support,
+                p=2,
+                dim=-1,
+                eps=self.view_mi_eps,
+            )
+            deny = F.normalize(
+                deny,
+                p=2,
+                dim=-1,
+                eps=self.view_mi_eps,
+            )
+            mi_proxy = (support * deny).sum(dim=-1).pow(2).mean()
+        return self.lambda_view_mi * mi_proxy
+
     def _node_depths(self, data, edge_index):
         num_nodes = data.x.size(0)
         depth = torch.full(
@@ -670,6 +1190,42 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 continue
             node_weight[dst[edge_ids]] = edge_weight[edge_ids]
         return node_weight
+
+    def _build_path_parent_and_uncertainty(
+        self,
+        data,
+        edge_uncertainty,
+    ):
+        num_nodes = data.x.size(0)
+        parent = torch.full(
+            (num_nodes,),
+            -1,
+            dtype=torch.long,
+            device=data.x.device,
+        )
+        node_uncertainty = data.x.new_zeros(num_nodes)
+        depth = self._node_depths(data, data.edge_index)
+        roots = self._root_indices(data)
+        parent[roots] = -1
+        node_uncertainty[roots] = 0.0
+        if data.edge_index.numel() == 0 or edge_uncertainty.numel() == 0:
+            return parent, depth, node_uncertainty
+
+        src, dst = data.edge_index
+        valid_edge = (
+            (depth[src] >= 0)
+            & (depth[dst] == depth[src] + 1)
+        )
+        edge_ids = valid_edge.nonzero(as_tuple=False).view(-1)
+        if edge_ids.numel() == 0:
+            return parent, depth, node_uncertainty
+
+        child = dst[edge_ids]
+        parent[child] = src[edge_ids]
+        node_uncertainty[child] = edge_uncertainty[edge_ids]
+        parent[roots] = -1
+        node_uncertainty[roots] = 0.0
+        return parent, depth, node_uncertainty
 
     def _encode_original_graph(self, data, node_hidden):
         # The original-graph branch keeps every propagation edge. It shares the
@@ -840,12 +1396,39 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             relation_logits,
             probabilities,
             edge_uncertainty,
+        ) = self.edge_router.relation_outputs(
+            node_hidden,
+            data.edge_index,
+        )
+        vertical_nodes = None
+        vertical_graph = None
+        node_uncertainty = None
+        path_depth = None
+        if self.vertical_path_attention is not None:
+            (
+                path_parent,
+                path_depth,
+                node_uncertainty,
+            ) = self._build_path_parent_and_uncertainty(
+                data,
+                edge_uncertainty,
+            )
+            vertical_nodes = self.vertical_path_attention(
+                node_hidden,
+                path_parent,
+                path_depth,
+                node_uncertainty,
+            )
+            vertical_graph = self.global_pool(vertical_nodes, data.batch)
+
+        (
             keep_sample,
             support_weight,
             deny_weight,
-        ) = self.edge_router(
-            node_hidden,
-            data.edge_index,
+        ) = self.edge_router.route_edges(
+            relation_logits,
+            probabilities,
+            edge_uncertainty,
             child_degree_importance,
         )
         node_keep = self._build_root_connected_keep(
@@ -901,6 +1484,28 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         else:
             change_graph = self.global_pool(change_nodes, data.batch)
 
+        semantic_tree_graph = None
+        semantic_tree_nodes = None
+        semantic_tree_depth = None
+        if self.semantic_tree_transformer is not None:
+            semantic_tree_depth = (
+                path_depth
+                if path_depth is not None
+                else self._node_depths(data, data.edge_index)
+            )
+            (
+                semantic_tree_graph,
+                semantic_tree_nodes,
+            ) = self.semantic_tree_transformer(
+                node_hidden,
+                support_nodes,
+                deny_nodes,
+                semantic_tree_depth,
+                data.batch,
+                support_node_weight=support_node_weight,
+                deny_node_weight=deny_node_weight,
+            )
+
         trend_sequence = self._build_uncertainty_trend(
             data,
             probabilities,
@@ -917,6 +1522,8 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             "deny": deny_graph,
             "change": change_graph,
             "trend": trend_graph,
+            "vertical": vertical_graph,
+            "semantic_tree": semantic_tree_graph,
         }
         classification_graphs = [
             graph_branches[name]
@@ -927,10 +1534,17 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         )
         logits = self.classifier(fused)
 
-        self._last_aux_loss = self._edge_relation_loss(
+        edge_relation_loss = self._edge_relation_loss(
             relation_logits,
             getattr(data, "edge_stance", None),
         )
+        view_mi_loss = self._view_mutual_information_loss(
+            support_graph,
+            deny_graph,
+        )
+        self._last_aux_loss = edge_relation_loss + view_mi_loss
+        self._last_edge_relation_loss = edge_relation_loss.detach()
+        self._last_view_mi_loss = view_mi_loss.detach()
         self._last_edge_probabilities = probabilities.detach()
         self._last_edge_uncertainty = edge_uncertainty.detach()
         self._last_keep_sample = keep_sample.detach()
@@ -943,6 +1557,30 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_deny_graph = deny_graph.detach()
         self._last_change_nodes = change_nodes.detach()
         self._last_change_graph = change_graph.detach()
+        self._last_vertical_nodes = (
+            None if vertical_nodes is None else vertical_nodes.detach()
+        )
+        self._last_vertical_graph = (
+            None if vertical_graph is None else vertical_graph.detach()
+        )
+        self._last_semantic_tree_nodes = (
+            None
+            if semantic_tree_nodes is None
+            else semantic_tree_nodes.detach()
+        )
+        self._last_semantic_tree_graph = (
+            None
+            if semantic_tree_graph is None
+            else semantic_tree_graph.detach()
+        )
+        self._last_semantic_tree_depth = (
+            None
+            if semantic_tree_depth is None
+            else semantic_tree_depth.detach()
+        )
+        self._last_node_uncertainty = (
+            None if node_uncertainty is None else node_uncertainty.detach()
+        )
         self._last_trend_sequence = trend_sequence.detach()
         self._last_node_keep = node_keep.detach()
         self._last_child_degree_importance = (

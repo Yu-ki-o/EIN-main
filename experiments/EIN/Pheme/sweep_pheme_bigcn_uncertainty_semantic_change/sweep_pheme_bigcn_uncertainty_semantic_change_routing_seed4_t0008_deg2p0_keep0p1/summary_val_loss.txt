@@ -1,0 +1,14 @@
+Experiment setting:
+Target dataset: Pheme
+Mode: id
+OOD source datasets: []
+Validation domain: source
+Checkpoint selection metric: val_loss
+
+Seed results:
+Seed 4: Acc 0.8049 | AUC 0.8053 | F1 0.7443
+
+Average results over 1 runs:
+ACC: 80.49+/-0.00 (%)
+AUC: 80.53+/-0.00 (%)
+F1: 74.43+/-0.00 (%)

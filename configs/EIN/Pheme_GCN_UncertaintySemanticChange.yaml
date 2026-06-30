@@ -7,7 +7,7 @@ word_embedding: word2vec
 e5_model_name: intfloat/multilingual-e5-base
 e5_max_length: 128
 e5_batch_size: 64
-result_name: UncertaintySemanticChange_GCN_degree_1
+result_name: UncertaintySemanticChange_GCN_degree_1_view_mi
 experiment_mode: id
 ood_source_datasets: []
 ood_val_domain: source
@@ -46,6 +46,7 @@ stance_route_temperature: 0.5
 stance_route_hard: True
 lambda_edge_relation_aux: 0.1
 lambda_edge_relation_warmup: 0.5
+lambda_view_mi_aux: 0.01
 
 # entropy-guided differentiable Bernoulli sampling
 uncertainty_sample_temperature: 0.5

@@ -18,6 +18,9 @@ from model.GCN_UncertaintySemanticChange import (
 from model.GIN_UncertaintySemanticChange import (
     GIN_UncertaintySemanticChange,
 )
+from model.KAGNN_UncertaintySemanticChange import (
+    KAGNN_UncertaintySemanticChange,
+)
 
 
 def make_args():
@@ -35,6 +38,7 @@ def make_args():
         use_degree_importance=True,
         degree_importance_strength=1.0,
         lambda_edge_relation_aux=0.1,
+        lambda_view_mi_aux=0.0,
         semantic_change_encoder="mlp",
         semantic_change_hidden_dim=8,
         uncertainty_trend_hidden_dim=8,
@@ -136,6 +140,28 @@ class EdgeRelationUncertaintyRouterTest(unittest.TestCase):
         self.assertTrue(
             (float(support) == 0.0) ^ (float(deny) == 0.0)
         )
+
+    def test_uncertainty_sampling_can_be_disabled(self):
+        args = make_args()
+        args.use_uncertainty_sampling = False
+        router = EdgeRelationUncertaintyRouter(4, args).eval()
+        router.set_epoch(router.warmup_epochs)
+        with torch.no_grad():
+            for parameter in router.parameters():
+                parameter.zero_()
+        nodes = torch.randn(2, 4)
+        edge_index = torch.tensor([[0], [1]])
+
+        _, probabilities, uncertainty, keep, support, deny = router(
+            nodes,
+            edge_index,
+        )
+        self.assertTrue(
+            torch.allclose(probabilities, torch.tensor([[0.5, 0.5]]))
+        )
+        self.assertAlmostEqual(float(uncertainty), 1.0, places=6)
+        self.assertAlmostEqual(float(keep), 1.0, places=6)
+        self.assertAlmostEqual(float(support + deny), 1.0, places=6)
 
     def test_warmup_uses_soft_stance_route_without_edge_filtering(self):
         router = EdgeRelationUncertaintyRouter(4, make_args()).eval()
@@ -292,6 +318,172 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
         self.assertIsNone(model._last_original_graph)
         self.assertEqual(tuple(model._last_support_graph.shape), (2, 8))
         self.assertEqual(tuple(model._last_deny_graph.shape), (2, 8))
+
+    def test_view_mi_auxiliary_loss_penalizes_correlated_views(self):
+        args = make_args()
+        args.lambda_view_mi_aux = 0.5
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).eval()
+        support_graph = torch.tensor(
+            [
+                [1.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [-1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            ]
+        )
+        deny_graph = support_graph.clone()
+
+        loss = model._view_mutual_information_loss(
+            support_graph,
+            deny_graph,
+        )
+        self.assertGreater(float(loss), 0.0)
+
+        model(make_batch())
+        self.assertGreaterEqual(float(model._last_view_mi_loss), 0.0)
+        self.assertTrue(
+            torch.allclose(
+                model.auxiliary_loss().detach(),
+                model._last_edge_relation_loss + model._last_view_mi_loss,
+                atol=1e-6,
+            )
+        )
+
+    def test_vertical_path_attention_updates_only_non_root_nodes(self):
+        args = make_args()
+        args.use_vertical_path_attention = True
+        args.classification_fusion_mode = "original_change_vertical"
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).eval()
+        data = make_batch()
+
+        output, _, _, _ = model(data)
+        roots = model._root_indices(data)
+        non_root = torch.ones(data.x.size(0), dtype=torch.bool)
+        non_root[roots.cpu()] = False
+        node_hidden = model.node_projection(data.x.float())
+        node_hidden = model._add_root_context(node_hidden, data)
+
+        self.assertEqual(tuple(output.shape), (2, 2))
+        self.assertEqual(
+            model.classification_branch_names,
+            ("original", "change", "vertical"),
+        )
+        self.assertEqual(model.fusion[0].in_features, 24)
+        self.assertEqual(tuple(model._last_vertical_graph.shape), (2, 8))
+        self.assertTrue(
+            torch.allclose(
+                model._last_vertical_nodes[roots],
+                node_hidden[roots],
+                atol=1e-6,
+            )
+        )
+        self.assertFalse(
+            torch.allclose(
+                model._last_vertical_nodes[non_root],
+                node_hidden[non_root],
+            )
+        )
+        self.assertTrue(
+            torch.allclose(
+                model._last_node_uncertainty[roots],
+                torch.zeros_like(model._last_node_uncertainty[roots]),
+            )
+        )
+        self.assertTrue(
+            torch.allclose(
+                model._last_node_uncertainty[
+                    torch.tensor([1, 2, 4])
+                ],
+                model._last_edge_uncertainty,
+            )
+        )
+
+    def test_semantic_tree_transformer_fuses_views_and_depth(self):
+        args = make_args()
+        args.use_trend_graph = False
+        args.use_vertical_path_attention = True
+        args.use_semantic_tree_transformer = True
+        args.semantic_tree_transformer_heads = 2
+        args.semantic_tree_transformer_layers = 1
+        args.semantic_tree_depth_dim = 4
+        args.classification_fusion_mode = (
+            "original_change_vertical_semantic_tree"
+        )
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).eval()
+        data = make_batch()
+
+        output, _, _, _ = model(data)
+        expected_depth = model._node_depths(data, data.edge_index)
+        self.assertEqual(tuple(output.shape), (2, 2))
+        self.assertEqual(
+            model.classification_branch_names,
+            ("original", "change", "vertical", "semantic_tree"),
+        )
+        self.assertEqual(model.fusion[0].in_features, 32)
+        self.assertEqual(
+            tuple(model._last_semantic_tree_graph.shape),
+            (2, 8),
+        )
+        self.assertEqual(
+            tuple(model._last_semantic_tree_nodes.shape),
+            (5, 8),
+        )
+        self.assertTrue(
+            torch.equal(model._last_semantic_tree_depth, expected_depth)
+        )
+        self.assertTrue(torch.isfinite(model._last_semantic_tree_graph).all())
+
+    def test_change_semantic_tree_classification_fusion(self):
+        args = make_args()
+        args.use_trend_graph = False
+        args.use_vertical_path_attention = False
+        args.use_semantic_tree_transformer = True
+        args.semantic_tree_transformer_heads = 2
+        args.semantic_tree_transformer_layers = 1
+        args.semantic_tree_depth_dim = 4
+        args.classification_fusion_mode = "change_semantic_tree"
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).eval()
+
+        output, _, _, _ = model(make_batch())
+        self.assertEqual(tuple(output.shape), (2, 2))
+        self.assertEqual(
+            model.classification_branch_names,
+            ("change", "semantic_tree"),
+        )
+        self.assertEqual(model.fusion[0].in_features, 16)
+        self.assertIsNone(model._last_original_graph)
+        self.assertIsNone(model._last_vertical_graph)
+        self.assertEqual(tuple(model._last_change_graph.shape), (2, 8))
+        self.assertEqual(
+            tuple(model._last_semantic_tree_graph.shape),
+            (2, 8),
+        )
 
     def test_view_pooling_uses_incoming_semantic_edge_weight(self):
         model = BiGCN_UncertaintySemanticChange(
@@ -479,6 +671,45 @@ class GINUncertaintySemanticChangeTest(unittest.TestCase):
         self.assertEqual(tuple(model._last_support_graph.shape), (2, 8))
         self.assertEqual(tuple(model._last_deny_graph.shape), (2, 8))
         self.assertEqual(len(model.convs), make_args().n_layers_conv)
+
+
+class KAGNNUncertaintySemanticChangeTest(unittest.TestCase):
+    def test_kagcn_variants_forward_use_weighted_semantic_views(self):
+        for variant in ("KAGCN", "FASTKAGCN"):
+            with self.subTest(variant=variant):
+                args = make_args()
+                args.kagnn_variant = variant
+                args.kagnn_num_layers = 2
+                args.kagnn_grid_size = 3
+                args.kagnn_spline_order = 2
+                args.use_vertical_path_attention = True
+                args.vertical_path_attention_heads = 2
+                args.classification_fusion_mode = "original_change_vertical"
+                model = KAGNN_UncertaintySemanticChange(
+                    in_feats=5,
+                    hid_feats=8,
+                    out_feats=8,
+                    num_classes=2,
+                    args=args,
+                    device=torch.device("cpu"),
+                ).train()
+                data = make_batch()
+
+                output, unknown, support, deny = model(data)
+                loss = F.nll_loss(output, data.y) + model.auxiliary_loss()
+                loss.backward()
+
+                self.assertEqual(tuple(output.shape), (2, 2))
+                self.assertEqual(tuple(unknown.shape), (2, 4, 1))
+                self.assertEqual(tuple(support.shape), (2, 4, 1))
+                self.assertEqual(tuple(deny.shape), (2, 4, 1))
+                self.assertEqual(len(model.kagnn_convs), 2)
+                self.assertEqual(model.fusion[0].in_features, 24)
+                self.assertEqual(
+                    tuple(model._last_vertical_graph.shape),
+                    (2, 8),
+                )
+                self.assertTrue(torch.isfinite(output).all())
 
 
 if __name__ == "__main__":
