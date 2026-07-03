@@ -320,7 +320,7 @@ def EIN_ResGCN_Uncertainty_supervisor(args):
 
 
 def EIN_BiGCN_supervisor(args):
-    init_seed(args.seed, need_deepfix=False)
+    init_seed(args.seed, need_deepfix=True)
 
     device = resolve_device(args)
     
@@ -346,7 +346,7 @@ def EIN_BiGCN_supervisor(args):
 
 
 def EIN_BiGCN_Uncertainty_supervisor(args):
-    init_seed(args.seed, need_deepfix=False)
+    init_seed(args.seed, need_deepfix=True)
 
     device = resolve_device(args)
 
@@ -413,7 +413,7 @@ def EIN_RAGCL_ResGCN_supervisor(args):
 
 
 def EIN_RAGCL_BiGCN_supervisor(args):
-    init_seed(args.seed, need_deepfix=False)
+    init_seed(args.seed, need_deepfix=True)
 
     device = resolve_device(args)
 
@@ -453,7 +453,7 @@ def EIN_Plain_BiGCN_supervisor(args):
 
 
 def EIN_NEGT_supervisor(args):
-    init_seed(args.seed, need_deepfix=False)
+    init_seed(args.seed, need_deepfix=True)
 
     device = resolve_device(args)
 
@@ -482,7 +482,7 @@ def EIN_NEGT_supervisor(args):
 
 
 def EIN_BiGCN_StateAuxSameDiff_supervisor(args):
-    init_seed(args.seed, need_deepfix=False)
+    init_seed(args.seed, need_deepfix=True)
 
     device = resolve_device(args)
 
@@ -594,7 +594,7 @@ def EIN_ResGCN_SameDiffFusion_supervisor(args):
 
 
 def EIN_BiGCN_SameDiffFusion_supervisor(args):
-    init_seed(args.seed, need_deepfix=False)
+    init_seed(args.seed, need_deepfix=True)
 
     device = resolve_device(args)
 
@@ -624,7 +624,7 @@ def EIN_BiGCN_SameDiffFusion_supervisor(args):
 
 
 def EIN_BiGCN_UncertaintySemanticChange_supervisor(args):
-    init_seed(args.seed, need_deepfix=False)
+    init_seed(args.seed, need_deepfix=True)
 
     device = resolve_device(args)
 
@@ -867,7 +867,7 @@ def EIN_KAGNN_supervisor(args):
 
 
 def EIN_LIRS_supervisor(args):
-    init_seed(args.seed, need_deepfix=False)
+    init_seed(args.seed, need_deepfix=True)
 
     device = resolve_device(args)
 

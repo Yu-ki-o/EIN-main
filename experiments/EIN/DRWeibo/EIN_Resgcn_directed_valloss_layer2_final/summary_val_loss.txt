@@ -1,0 +1,18 @@
+Experiment setting:
+Target dataset: DRWeibo
+Mode: id
+OOD source datasets: []
+Validation domain: source
+Checkpoint selection metric: val_loss
+
+Seed results:
+Seed 0: Acc 0.8779 | AUC 0.8781 | F1 0.8743
+Seed 1: Acc 0.8738 | AUC 0.8721 | F1 0.8633
+Seed 2: Acc 0.8804 | AUC 0.8807 | F1 0.8820
+Seed 3: Acc 0.8821 | AUC 0.8808 | F1 0.8734
+Seed 4: Acc 0.8895 | AUC 0.8872 | F1 0.8770
+
+Average results over 5 runs:
+ACC: 88.07+/-0.52 (%)
+AUC: 87.98+/-0.49 (%)
+F1: 87.40+/-0.61 (%)

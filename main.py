@@ -217,7 +217,7 @@ if __name__ == '__main__':
 
     #对应上该main文件开头从supervisor中import的对应模型的监督器
     supervisor = globals()['EIN_' + args.base_model + '_supervisor']
-    for i in range(1):
+    for i in range(5):
         args.seed = i
         result = supervisor(args)
         if result is not None:
