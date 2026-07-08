@@ -143,9 +143,25 @@ def dataset_paths(args, dataset):
     return label_source_path, label_dataset_path
 
 
+def split_manifest_path(args, dataset):
+    filename = 'split_{}_k{}_seed{}.json'.format(
+        args.split,
+        args.k,
+        args.seed,
+    )
+    return os.path.join('dataset', dataset, 'splits', filename)
+
+
 def split_and_get_paths(args, dataset):
     label_source_path, label_dataset_path = dataset_paths(args, dataset)
-    split_dataset(label_source_path, label_dataset_path, k_shot=args.k, split=args.split)
+    split_dataset(
+        label_source_path,
+        label_dataset_path,
+        k_shot=args.k,
+        split=args.split,
+        seed=args.seed,
+        split_manifest_path=split_manifest_path(args, dataset),
+    )
     train_path = os.path.join(label_dataset_path, 'train')
     val_path = os.path.join(label_dataset_path, 'val')
     test_path = os.path.join(label_dataset_path, 'test')
@@ -154,14 +170,24 @@ def split_and_get_paths(args, dataset):
 
 def build_id_paths(args):
     label_source_path, label_dataset_path = dataset_paths(args, args.dataset)
-    train_post, val_post, test_post = build_split_posts(label_source_path, args.k, args.split)
+    train_post, val_post, test_post = build_split_posts(
+        label_source_path,
+        args.k,
+        args.split,
+        seed=args.seed,
+        split_manifest_path=split_manifest_path(args, args.dataset),
+    )
     return write_split_posts(label_dataset_path, train_post, val_post, test_post)
 
 
 def build_strict_ood_paths(args):
     target_source_path, target_dataset_path = dataset_paths(args, args.dataset)
     target_train_post, target_val_post, target_test_post = build_split_posts(
-        target_source_path, args.k, args.split
+        target_source_path,
+        args.k,
+        args.split,
+        seed=args.seed,
+        split_manifest_path=split_manifest_path(args, args.dataset),
     )
 
     source_datasets = parse_ood_source_datasets(args)
@@ -174,7 +200,13 @@ def build_strict_ood_paths(args):
     source_val_post = []
     for domain_id, source_dataset in enumerate(source_datasets):
         source_path = os.path.join('dataset', source_dataset, 'source')
-        train_post, val_post, _ = build_split_posts(source_path, args.k, args.split)
+        train_post, val_post, _ = build_split_posts(
+            source_path,
+            args.k,
+            args.split,
+            seed=args.seed,
+            split_manifest_path=split_manifest_path(args, source_dataset),
+        )
         source_train_post.extend(assign_domain_id(train_post, domain_id))
         source_val_post.extend(assign_domain_id(val_post, domain_id))
 

@@ -4,7 +4,7 @@ dataset: Weibo
 num_classes: 2
 language: ch
 word_embedding: word2vec
-result_name: negt_directed_valloss_word2vec_final
+result_name: negt_directed_valloss_word2vec_manifest
 experiment_mode: id
 ood_source_datasets: []
 ood_val_domain: source

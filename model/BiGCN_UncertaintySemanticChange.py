@@ -22,10 +22,14 @@ class EdgeRelationUncertaintyRouter(nn.Module):
     """
     Predicts support/deny edge relations and samples edge reliability.
 
-    Relation uncertainty is the normalized entropy of the two-class
+    By default, relation uncertainty is the normalized entropy of the two-class
     distribution. A differentiable Binary Concrete sample decides how much of
     the edge remains reliable before its mass is divided between the support
     and deny semantic views.
+
+    When Dempster-Shafer mass routing is enabled, the edge head instead emits
+    non-negative evidence for support/deny. The residual mass is assigned to
+    the unknown set and the semantic views receive only support/deny masses.
     """
 
     def __init__(self, hidden_dim, args=None):
@@ -51,6 +55,13 @@ class EdgeRelationUncertaintyRouter(nn.Module):
         )
         self.use_uncertainty_sampling = bool(
             getattr(args, "use_uncertainty_sampling", True)
+        )
+        self.use_ds_mass_routing = bool(
+            getattr(args, "use_ds_mass_routing", False)
+        )
+        self.ds_unknown_prior = max(
+            1e-6,
+            float(getattr(args, "ds_unknown_prior", 2.0)),
         )
         self.keep_floor = min(
             max(
@@ -86,6 +97,29 @@ class EdgeRelationUncertaintyRouter(nn.Module):
 
     def relation_probabilities(self, logits):
         return F.softmax(logits / self.relation_temperature, dim=-1)
+
+    def relation_masses(self, logits):
+        if logits.numel() == 0:
+            empty = logits.new_zeros((0,))
+            return logits.new_zeros((0, 3)), logits, empty
+
+        evidence = F.softplus(logits / self.relation_temperature)
+        total_evidence = evidence.sum(dim=-1, keepdim=True)
+        denominator = total_evidence + self.ds_unknown_prior
+        class_mass = evidence / denominator.clamp_min(self.eps)
+        unknown_mass = (
+            self.ds_unknown_prior
+            / denominator.squeeze(-1).clamp_min(self.eps)
+        )
+        masses = torch.stack(
+            (
+                class_mass[:, 0],
+                unknown_mass,
+                class_mass[:, 1],
+            ),
+            dim=-1,
+        )
+        return masses, class_mass, unknown_mass
 
     def normalized_entropy(self, probabilities):
         probabilities = probabilities.clamp_min(self.eps)
@@ -185,8 +219,13 @@ class EdgeRelationUncertaintyRouter(nn.Module):
             dim=-1,
         )
         logits = self.logit_head(self.relation_encoder(edge_features))
-        probabilities = self.relation_probabilities(logits)
-        uncertainty = self.normalized_entropy(probabilities)
+        if self.use_ds_mass_routing:
+            _, class_mass, uncertainty = self.relation_masses(logits)
+            known_mass = class_mass.sum(dim=-1, keepdim=True)
+            probabilities = class_mass / known_mass.clamp_min(self.eps)
+        else:
+            probabilities = self.relation_probabilities(logits)
+            uncertainty = self.normalized_entropy(probabilities)
         return logits, probabilities, uncertainty
 
     def route_edges(
@@ -199,6 +238,12 @@ class EdgeRelationUncertaintyRouter(nn.Module):
         if logits.numel() == 0:
             empty_scalar = uncertainty.new_zeros((0,))
             return empty_scalar, empty_scalar, empty_scalar
+
+        if self.use_ds_mass_routing:
+            known_mass = (1.0 - uncertainty).clamp(0.0, 1.0)
+            support_weight = known_mass * probabilities[:, 0]
+            deny_weight = known_mass * probabilities[:, 1]
+            return known_mass, support_weight, deny_weight
 
         if (
             not self.use_uncertainty_sampling
@@ -244,6 +289,135 @@ class EdgeRelationUncertaintyRouter(nn.Module):
             keep_sample,
             support_weight,
             deny_weight,
+        )
+
+
+class GlobalDSFusionHead(nn.Module):
+    """
+    Graph-level Dempster-Shafer fusion over classification branches.
+
+    Each branch emits singleton class masses plus one full-frame unknown mass.
+    The branch masses are then combined by Dempster's rule, or by Yager's rule
+    when high conflict should remain unknown instead of being normalized away.
+    """
+
+    def __init__(self, hidden_dim, num_classes, branch_names, args=None):
+        super().__init__()
+        self.hidden_dim = int(hidden_dim)
+        self.num_classes = int(num_classes)
+        if self.num_classes < 2:
+            raise ValueError("GlobalDSFusionHead requires at least 2 classes")
+        self.branch_names = tuple(branch_names)
+        self.temperature = max(
+            1e-6,
+            float(getattr(args, "global_ds_temperature", 1.0)),
+        )
+        self.unknown_prior = max(
+            1e-6,
+            float(getattr(args, "global_ds_unknown_prior", 1.0)),
+        )
+        self.eps = max(
+            1e-12,
+            float(getattr(args, "global_ds_eps", 1e-6)),
+        )
+        self.fusion_rule = str(
+            getattr(args, "global_ds_fusion_rule", "dempster")
+        ).strip().lower()
+        if self.fusion_rule not in {"dempster", "yager"}:
+            raise ValueError(
+                "global_ds_fusion_rule must be 'dempster' or 'yager', "
+                "got {}".format(self.fusion_rule)
+            )
+        head_hidden = int(
+            getattr(args, "global_ds_hidden_dim", hidden_dim)
+        )
+        self.mass_heads = nn.ModuleDict()
+        for branch_name in self.branch_names:
+            self.mass_heads[branch_name] = nn.Sequential(
+                nn.Linear(self.hidden_dim, head_hidden),
+                nn.ReLU(),
+                nn.Dropout(float(getattr(args, "dropout", 0.0))),
+                nn.Linear(head_hidden, self.num_classes),
+            )
+
+    def branch_mass(self, branch_name, graph_repr):
+        logits = self.mass_heads[branch_name](graph_repr)
+        evidence = F.softplus(logits / self.temperature)
+        total_evidence = evidence.sum(dim=-1, keepdim=True)
+        denominator = total_evidence + self.unknown_prior
+        class_mass = evidence / denominator.clamp_min(self.eps)
+        unknown_mass = (
+            self.unknown_prior / denominator.clamp_min(self.eps)
+        )
+        masses = torch.cat((class_mass, unknown_mass), dim=-1)
+        return masses
+
+    def combine_pair(self, first, second):
+        first_class = first[:, : self.num_classes]
+        second_class = second[:, : self.num_classes]
+        first_unknown = first[:, self.num_classes :]
+        second_unknown = second[:, self.num_classes :]
+
+        agreement = first_class * second_class
+        class_numerator = (
+            agreement
+            + first_class * second_unknown
+            + first_unknown * second_class
+        )
+        unknown_numerator = first_unknown * second_unknown
+        conflict = (
+            first_class.sum(dim=-1, keepdim=True)
+            * second_class.sum(dim=-1, keepdim=True)
+            - agreement.sum(dim=-1, keepdim=True)
+        ).clamp_min(0.0)
+
+        if self.fusion_rule == "yager":
+            return torch.cat(
+                (
+                    class_numerator,
+                    unknown_numerator + conflict,
+                ),
+                dim=-1,
+            ), conflict
+
+        normalizer = (1.0 - conflict).clamp_min(self.eps)
+        return torch.cat(
+            (
+                class_numerator / normalizer,
+                unknown_numerator / normalizer,
+            ),
+            dim=-1,
+        ), conflict
+
+    def pignistic_probabilities(self, masses):
+        class_mass = masses[:, : self.num_classes]
+        unknown_mass = masses[:, self.num_classes :]
+        probabilities = class_mass + unknown_mass / float(self.num_classes)
+        probabilities = probabilities.clamp_min(self.eps)
+        return probabilities / probabilities.sum(dim=-1, keepdim=True)
+
+    def forward(self, graph_branches):
+        branch_masses = []
+        for branch_name in self.branch_names:
+            branch_masses.append(
+                self.branch_mass(branch_name, graph_branches[branch_name])
+            )
+        stacked_branch_masses = torch.stack(branch_masses, dim=1)
+        combined = branch_masses[0]
+        conflicts = []
+        for branch_mass in branch_masses[1:]:
+            combined, conflict = self.combine_pair(combined, branch_mass)
+            conflicts.append(conflict.squeeze(-1))
+        probabilities = self.pignistic_probabilities(combined)
+        if conflicts:
+            conflict_trace = torch.stack(conflicts, dim=1)
+        else:
+            conflict_trace = combined.new_zeros((combined.size(0), 0))
+        return (
+            probabilities.log(),
+            combined,
+            stacked_branch_masses,
+            conflict_trace,
         )
 
 
@@ -735,6 +909,9 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             self.use_semantic_tree_transformer
             or "semantic_tree" in self.classification_branch_names
         )
+        self.use_global_ds_fusion = bool(
+            getattr(args, "use_global_ds_fusion", False)
+        )
         self.lambda_edge_relation = max(
             0.0,
             float(getattr(args, "lambda_edge_relation_aux", 0.1)),
@@ -752,6 +929,10 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self.lambda_view_mi = max(
             0.0,
             float(getattr(args, "lambda_view_mi_aux", 0.0)),
+        )
+        self.lambda_ds_unknown_edge = max(
+            0.0,
+            float(getattr(args, "lambda_ds_unknown_edge_aux", 0.0)),
         )
         self.view_mi_eps = max(
             1e-12,
@@ -850,11 +1031,26 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             nn.LayerNorm(hid_feats),
         )
         self.classifier = nn.Linear(hid_feats, num_classes)
+        self.global_ds_fusion = (
+            GlobalDSFusionHead(
+                hid_feats,
+                num_classes,
+                self.classification_branch_names,
+                args=args,
+            )
+            if self.use_global_ds_fusion
+            else None
+        )
 
         self._last_aux_loss = None
         self._last_edge_relation_loss = None
         self._last_view_mi_loss = None
+        self._last_global_ds_masses = None
+        self._last_global_ds_branch_masses = None
+        self._last_global_ds_conflict = None
         self._last_edge_probabilities = None
+        self._last_edge_masses = None
+        self._last_edge_unknown_mass = None
         self._last_edge_uncertainty = None
         self._last_keep_sample = None
         self._last_support_weight = None
@@ -1028,6 +1224,26 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             if self.edge_router.current_epoch < self.edge_router.warmup_epochs
             else self.lambda_edge_relation
         )
+        if self.edge_router.use_ds_mass_routing:
+            masses, _, _ = self.edge_router.relation_masses(logits[valid])
+            pignistic = torch.stack(
+                (
+                    masses[:, 0] + 0.5 * masses[:, 1],
+                    masses[:, 2] + 0.5 * masses[:, 1],
+                ),
+                dim=-1,
+            ).clamp_min(self.view_mi_eps)
+            edge_loss = F.nll_loss(
+                pignistic.log(),
+                valid_labels,
+                weight=class_weight,
+            )
+            if self.lambda_ds_unknown_edge > 0.0:
+                edge_loss = (
+                    edge_loss
+                    + self.lambda_ds_unknown_edge * masses[:, 1].mean()
+                )
+            return relation_weight * edge_loss
         return relation_weight * F.cross_entropy(
             logits[valid],
             valid_labels,
@@ -1529,10 +1745,22 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             graph_branches[name]
             for name in self.classification_branch_names
         ]
-        fused = self.fusion(
-            torch.cat(classification_graphs, dim=-1)
-        )
-        logits = self.classifier(fused)
+        if self.global_ds_fusion is not None:
+            (
+                output_log_prob,
+                global_ds_masses,
+                global_ds_branch_masses,
+                global_ds_conflict,
+            ) = self.global_ds_fusion(graph_branches)
+        else:
+            fused = self.fusion(
+                torch.cat(classification_graphs, dim=-1)
+            )
+            logits = self.classifier(fused)
+            output_log_prob = F.log_softmax(logits, dim=-1)
+            global_ds_masses = None
+            global_ds_branch_masses = None
+            global_ds_conflict = None
 
         edge_relation_loss = self._edge_relation_loss(
             relation_logits,
@@ -1545,7 +1773,31 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_aux_loss = edge_relation_loss + view_mi_loss
         self._last_edge_relation_loss = edge_relation_loss.detach()
         self._last_view_mi_loss = view_mi_loss.detach()
+        self._last_global_ds_masses = (
+            None
+            if global_ds_masses is None
+            else global_ds_masses.detach()
+        )
+        self._last_global_ds_branch_masses = (
+            None
+            if global_ds_branch_masses is None
+            else global_ds_branch_masses.detach()
+        )
+        self._last_global_ds_conflict = (
+            None
+            if global_ds_conflict is None
+            else global_ds_conflict.detach()
+        )
         self._last_edge_probabilities = probabilities.detach()
+        if self.edge_router.use_ds_mass_routing:
+            edge_masses, _, edge_unknown_mass = (
+                self.edge_router.relation_masses(relation_logits)
+            )
+            self._last_edge_masses = edge_masses.detach()
+            self._last_edge_unknown_mass = edge_unknown_mass.detach()
+        else:
+            self._last_edge_masses = None
+            self._last_edge_unknown_mass = None
         self._last_edge_uncertainty = edge_uncertainty.detach()
         self._last_keep_sample = keep_sample.detach()
         self._last_support_weight = support_weight.detach()
@@ -1591,7 +1843,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         unknown_sequence = trend_sequence[:, :, 1:2]
         deny_sequence = trend_sequence[:, :, 2:3]
         return (
-            F.log_softmax(logits, dim=-1),
+            output_log_prob,
             unknown_sequence,
             support_sequence,
             deny_sequence,

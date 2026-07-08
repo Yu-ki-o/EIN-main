@@ -35,6 +35,14 @@ def make_args():
         stance_route_hard=True,
         uncertainty_sample_temperature=0.5,
         uncertainty_keep_floor=0.05,
+        use_ds_mass_routing=False,
+        ds_unknown_prior=2.0,
+        lambda_ds_unknown_edge_aux=0.0,
+        use_global_ds_fusion=False,
+        global_ds_unknown_prior=1.0,
+        global_ds_temperature=1.0,
+        global_ds_fusion_rule="dempster",
+        global_ds_hidden_dim=8,
         use_degree_importance=True,
         degree_importance_strength=1.0,
         lambda_edge_relation_aux=0.1,
@@ -177,6 +185,37 @@ class EdgeRelationUncertaintyRouterTest(unittest.TestCase):
         self.assertAlmostEqual(float(support), 0.5, places=6)
         self.assertAlmostEqual(float(deny), 0.5, places=6)
 
+    def test_ds_mass_routing_keeps_unknown_mass_out_of_views(self):
+        args = make_args()
+        args.use_ds_mass_routing = True
+        router = EdgeRelationUncertaintyRouter(4, args).eval()
+        with torch.no_grad():
+            for parameter in router.parameters():
+                parameter.zero_()
+        nodes = torch.randn(2, 4)
+        edge_index = torch.tensor([[0], [1]])
+
+        logits, probabilities, unknown, keep, support, deny = router(
+            nodes,
+            edge_index,
+        )
+        masses, _, unknown_mass = router.relation_masses(logits)
+
+        self.assertTrue(
+            torch.allclose(
+                masses.sum(dim=-1),
+                torch.ones_like(unknown),
+                atol=1e-6,
+            )
+        )
+        self.assertTrue(torch.allclose(unknown, unknown_mass, atol=1e-6))
+        self.assertTrue(
+            torch.allclose(probabilities, torch.tensor([[0.5, 0.5]]))
+        )
+        self.assertTrue(torch.allclose(keep, support + deny, atol=1e-6))
+        self.assertTrue(torch.allclose(keep + unknown, torch.ones_like(keep)))
+        self.assertGreater(float(unknown), float(support))
+
 
 class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
     def test_forward_outputs_all_framework_branches(self):
@@ -219,6 +258,8 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
             model.fusion[0].in_features,
             model.hidden_dim * 3,
         )
+        self.assertIsNone(model.global_ds_fusion)
+        self.assertIsNone(model._last_global_ds_masses)
         state_sequence = model._last_trend_sequence[:, :, :3]
         occupied_depth = state_sequence.sum(dim=-1) > 0
         occupied_mass = state_sequence.sum(dim=-1)[
@@ -318,6 +359,54 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
         self.assertIsNone(model._last_original_graph)
         self.assertEqual(tuple(model._last_support_graph.shape), (2, 8))
         self.assertEqual(tuple(model._last_deny_graph.shape), (2, 8))
+
+    def test_global_ds_fusion_outputs_mass_based_probabilities(self):
+        args = make_args()
+        args.use_global_ds_fusion = True
+        args.use_trend_graph = False
+        args.use_semantic_tree_transformer = True
+        args.classification_fusion_mode = "change_semantic_tree"
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).train()
+        data = make_batch()
+
+        output, unknown, support, deny = model(data)
+        loss = F.nll_loss(output, data.y) + model.auxiliary_loss()
+        loss.backward()
+
+        self.assertEqual(tuple(output.shape), (2, 2))
+        self.assertTrue(
+            torch.allclose(
+                output.exp().sum(dim=-1),
+                torch.ones(2),
+                atol=1e-6,
+            )
+        )
+        self.assertEqual(tuple(model._last_global_ds_masses.shape), (2, 3))
+        self.assertEqual(
+            tuple(model._last_global_ds_branch_masses.shape),
+            (2, 2, 3),
+        )
+        self.assertEqual(tuple(model._last_global_ds_conflict.shape), (2, 1))
+        self.assertTrue(
+            torch.allclose(
+                model._last_global_ds_masses.sum(dim=-1),
+                torch.ones(2),
+                atol=1e-6,
+            )
+        )
+        self.assertIsNotNone(
+            model.global_ds_fusion.mass_heads["change"][0].weight.grad
+        )
+        self.assertTrue(torch.isfinite(unknown).all())
+        self.assertTrue(torch.isfinite(support).all())
+        self.assertTrue(torch.isfinite(deny).all())
 
     def test_view_mi_auxiliary_loss_penalizes_correlated_views(self):
         args = make_args()
@@ -602,6 +691,43 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
             float(model.physics_loss(unknown, support, deny, data.user_state)),
             0.0,
         )
+
+    def test_ds_mass_routing_forward_records_edge_masses(self):
+        args = make_args()
+        args.use_ds_mass_routing = True
+        args.use_trend_graph = False
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).train()
+        data = make_batch()
+
+        output, unknown, support, deny = model(data)
+        loss = F.nll_loss(output, data.y) + model.auxiliary_loss()
+        loss.backward()
+
+        self.assertEqual(tuple(model._last_edge_masses.shape), (3, 3))
+        self.assertTrue(
+            torch.allclose(
+                model._last_edge_masses.sum(dim=-1),
+                torch.ones(3),
+                atol=1e-6,
+            )
+        )
+        self.assertTrue(
+            torch.allclose(
+                model._last_edge_unknown_mass,
+                model._last_edge_uncertainty,
+                atol=1e-6,
+            )
+        )
+        self.assertTrue(torch.isfinite(unknown).all())
+        self.assertTrue(torch.isfinite(support).all())
+        self.assertTrue(torch.isfinite(deny).all())
 
 
 class ResGCNUncertaintySemanticChangeTest(unittest.TestCase):

@@ -20,26 +20,31 @@ env/
 
 # Large local data/model artifacts
 dataset/
+datasets/
+data/
 word2vec/
+
 *.pt
 *.pth
 *.pth.*
 *.ckpt
 *.model
 *.npy
+*.npz
+*.pkl
+
+# Do not track experiment records or generated experiment files
+experiments/
 
 # Always keep project configs and model source files trackable.
 !configs/
 !configs/**
 !model/
 !model/**
+
+# Ignore cache files inside model source directories.
 model/**/__pycache__/
 model/**/*.py[cod]
-
-# Experiment outputs: keep lightweight summaries/visualizations, ignore runs.
-experiments/**/seed_*/
-experiments/**/*.log
-experiments/**/best_model*
 
 # OS files
 .DS_Store

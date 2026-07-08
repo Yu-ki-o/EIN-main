@@ -240,7 +240,170 @@ def assign_domain_id(post_list, domain_id):
     return assigned
 
 
-def build_split_posts(label_source_path, k_shot=10000, split='622'):
+def normalize_post_id(post_id):
+    return str(post_id)
+
+
+class SplitPost(object):
+    def __init__(self, post_id, post, source_file=None):
+        self.post_id = normalize_post_id(post_id)
+        self.post = post
+        self.source_file = source_file
+
+    def __iter__(self):
+        yield self.post_id
+        yield self.post
+
+    def __getitem__(self, index):
+        if index == 0:
+            return self.post_id
+        if index == 1:
+            return self.post
+        raise IndexError(index)
+
+    def __len__(self):
+        return 2
+
+
+def seed_shuffled_filenames(path, seed=None):
+    if seed is None:
+        return os.listdir(path)
+    filenames = sorted(os.listdir(path))
+    if seed is not None:
+        random.Random(seed).shuffle(filenames)
+    return filenames
+
+
+def load_source_posts(label_source_path, seed=None):
+    all_post = []
+    for filename in seed_shuffled_filenames(label_source_path, seed):
+        filepath = os.path.join(label_source_path, filename)
+        post = json.load(open(filepath, 'r', encoding='utf-8'))
+        all_post.append(SplitPost(post['source']['tweet id'], post, filename))
+    return all_post
+
+
+def posts_by_file(post_list):
+    post_map = {}
+    for post in post_list:
+        key = getattr(post, 'source_file', None)
+        if key is None:
+            continue
+        if key in post_map:
+            raise ValueError('Duplicate source file in source posts: {}'.format(key))
+        post_map[key] = post
+    return post_map
+
+
+def posts_by_id(post_list):
+    post_map = {}
+    for post in post_list:
+        key = normalize_post_id(post[0])
+        post_map.setdefault(key, []).append(post)
+    return post_map
+
+
+def split_ids(post_list):
+    return [normalize_post_id(post[0]) for post in post_list]
+
+
+def split_files(post_list):
+    files = []
+    for post in post_list:
+        files.append(getattr(post, 'source_file', None))
+    return files
+
+
+def write_split_manifest(split_manifest_path, label_source_path, k_shot, split, seed,
+                         train_post, val_post, test_post):
+    manifest_dir = os.path.dirname(split_manifest_path)
+    if manifest_dir:
+        os.makedirs(manifest_dir, exist_ok=True)
+
+    manifest = {
+        'source_path': label_source_path,
+        'split': split,
+        'k_shot': k_shot,
+        'seed': seed,
+        'train': split_ids(train_post),
+        'val': split_ids(val_post),
+        'test': split_ids(test_post),
+        'train_files': split_files(train_post),
+        'val_files': split_files(val_post),
+        'test_files': split_files(test_post),
+    }
+    with open(split_manifest_path, 'w', encoding='utf-8') as file_obj:
+        json.dump(manifest, file_obj, indent=4, ensure_ascii=False)
+
+
+def load_split_posts_from_manifest(split_manifest_path, source_posts):
+    with open(split_manifest_path, 'r', encoding='utf-8') as file_obj:
+        manifest = json.load(file_obj)
+
+    file_map = posts_by_file(source_posts)
+    id_map = posts_by_id(source_posts)
+    id_offsets = {}
+
+    def collect_by_files(split_name):
+        missing = []
+        collected = []
+        for filename in manifest.get('{}_files'.format(split_name), []):
+            if filename not in file_map:
+                missing.append(filename)
+                continue
+            collected.append(file_map[filename])
+        if missing:
+            raise ValueError(
+                'Split manifest {} references missing {} files: {}'.format(
+                    split_manifest_path,
+                    split_name,
+                    missing[:10],
+                )
+            )
+        return collected
+
+    def collect_by_ids(split_name):
+        missing = []
+        collected = []
+        for post_id in manifest.get(split_name, []):
+            key = normalize_post_id(post_id)
+            candidates = id_map.get(key, [])
+            offset = id_offsets.get(key, 0)
+            if offset >= len(candidates):
+                missing.append(key)
+                continue
+            collected.append(candidates[offset])
+            id_offsets[key] = offset + 1
+        if missing:
+            raise ValueError(
+                'Split manifest {} references missing {} ids: {}'.format(
+                    split_manifest_path,
+                    split_name,
+                    missing[:10],
+                )
+            )
+        return collected
+
+    if all('{}_files'.format(name) in manifest for name in ['train', 'val', 'test']):
+        return collect_by_files('train'), collect_by_files('val'), collect_by_files('test')
+    train_post = collect_by_ids('train')
+    val_post = collect_by_ids('val')
+    test_post = collect_by_ids('test')
+    write_split_manifest(
+        split_manifest_path,
+        manifest.get('source_path', ''),
+        manifest.get('k_shot'),
+        manifest.get('split'),
+        manifest.get('seed'),
+        train_post,
+        val_post,
+        test_post,
+    )
+    return train_post, val_post, test_post
+
+
+def build_split_posts(label_source_path, k_shot=10000, split='622', seed=None,
+                      split_manifest_path=None):
     if split == '622':
         train_split = 0.6
         test_split = 0.8
@@ -250,16 +413,25 @@ def build_split_posts(label_source_path, k_shot=10000, split='622'):
     else:
         raise ValueError('Unsupported split: {}'.format(split))
 
-    label_file_paths = []
-    for filename in os.listdir(label_source_path):
-        label_file_paths.append(os.path.join(label_source_path, filename))
+    all_post = load_source_posts(label_source_path, seed)
+    if split_manifest_path and os.path.exists(split_manifest_path):
+        train_post, val_post, test_post = load_split_posts_from_manifest(
+            split_manifest_path,
+            all_post,
+        )
+        print(
+            'Using cached split manifest: {} | train {} val {} test {}'.format(
+                split_manifest_path,
+                len(train_post),
+                len(val_post),
+                len(test_post),
+            ),
+            flush=True,
+        )
+        return train_post, val_post, test_post
 
-    all_post = []
-    for filepath in label_file_paths:
-        post = json.load(open(filepath, 'r', encoding='utf-8'))
-        all_post.append((post['source']['tweet id'], post))
-
-    random.shuffle(all_post)
+    if seed is None:
+        random.shuffle(all_post)
     train_post = []
 
     multi_class = False
@@ -298,6 +470,27 @@ def build_split_posts(label_source_path, k_shot=10000, split='622'):
         val_post = all_post[-1:]
         test_post = all_post[int(len(all_post) * test_split):]
 
+    if split_manifest_path:
+        write_split_manifest(
+            split_manifest_path,
+            label_source_path,
+            k_shot,
+            split,
+            seed,
+            train_post,
+            val_post,
+            test_post,
+        )
+        print(
+            'Saved split manifest: {} | train {} val {} test {}'.format(
+                split_manifest_path,
+                len(train_post),
+                len(val_post),
+                len(test_post),
+            ),
+            flush=True,
+        )
+
     return train_post, val_post, test_post
 
 
@@ -326,7 +519,7 @@ class ResGCNTreeDataset(InMemoryDataset):
 
     @property
     def raw_file_names(self):
-        return os.listdir(self.raw_dir)
+        return seed_shuffled_filenames(self.raw_dir, getattr(self.args, 'seed', None))
 
     @property
     def processed_file_names(self):
@@ -419,7 +612,7 @@ class TreeDataset(InMemoryDataset):
 
     @property
     def raw_file_names(self):
-        return os.listdir(self.raw_dir)
+        return seed_shuffled_filenames(self.raw_dir, getattr(self.args, 'seed', None))
 
     @property
     def processed_file_names(self):
@@ -499,8 +692,15 @@ class TreeDataset(InMemoryDataset):
         all_data, slices = self.collate(data_list)
         torch.save((all_data, slices), self.processed_paths[0])
 
-def split_dataset(label_source_path, label_dataset_path, k_shot=10000, split='622'):
+def split_dataset(label_source_path, label_dataset_path, k_shot=10000, split='622',
+                  seed=None, split_manifest_path=None):
     print('Spliting data...')
-    train_post, val_post, test_post = build_split_posts(label_source_path, k_shot, split)
+    train_post, val_post, test_post = build_split_posts(
+        label_source_path,
+        k_shot,
+        split,
+        seed=seed,
+        split_manifest_path=split_manifest_path,
+    )
     write_split_posts(label_dataset_path, train_post, val_post, test_post)
     print('Finished.')

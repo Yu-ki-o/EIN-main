@@ -31,6 +31,9 @@ SWEEP_PARAM_ORDER = [
     "lambda_edge_relation_aux",
     "lambda_edge_relation_warmup",
     "lambda_view_mi_aux",
+    "use_ds_mass_routing",
+    "ds_unknown_prior",
+    "lambda_ds_unknown_edge_aux",
     "uncertainty_sample_temperature",
     "uncertainty_keep_floor",
     "uncertainty_sampling_warmup_epochs",
@@ -51,9 +54,16 @@ SWEEP_PARAM_ORDER = [
     "vertical_path_attention_residual_gate",
     "vertical_path_attention_dropout",
     "classification_fusion_hidden_dim",
+    "classification_class_weights",
+    "use_global_ds_fusion",
+    "global_ds_unknown_prior",
+    "global_ds_temperature",
+    "global_ds_fusion_rule",
+    "global_ds_hidden_dim",
     "dropout",
     "lr",
     "weight_decay",
+    "patience",
     "n_layers_conv",
 ]
 
@@ -123,6 +133,9 @@ ALIASES = {
     "lambda_edge_relation_aux": "laux",
     "lambda_edge_relation_warmup": "lwarm",
     "lambda_view_mi_aux": "lmi",
+    "use_ds_mass_routing": "ds",
+    "ds_unknown_prior": "du",
+    "lambda_ds_unknown_edge_aux": "ldsu",
     "uncertainty_sample_temperature": "samp",
     "uncertainty_keep_floor": "keep",
     "uncertainty_sampling_warmup_epochs": "warm",
@@ -143,9 +156,16 @@ ALIASES = {
     "vertical_path_attention_residual_gate": "vgate",
     "vertical_path_attention_dropout": "vdrop",
     "classification_fusion_hidden_dim": "fhid",
+    "classification_class_weights": "cw",
+    "use_global_ds_fusion": "gds",
+    "global_ds_unknown_prior": "gdu",
+    "global_ds_temperature": "gdt",
+    "global_ds_fusion_rule": "gdrule",
+    "global_ds_hidden_dim": "gdhid",
     "dropout": "drop",
     "lr": "lr",
     "weight_decay": "wd",
+    "patience": "pat",
     "n_layers_conv": "layers",
 }
 
@@ -611,7 +631,22 @@ def run_cli(defaults):
     )
     base_config["classification_fusion_mode"] = fixed_fusion_mode
     base_config["result_group"] = defaults.get("result_group", defaults["sweep_name_prefix"])
-    if args.selection_metric is not None:
+    fixed_selection_metric = defaults.get("fixed_selection_metric")
+    if fixed_selection_metric is not None:
+        base_config["selection_metric"] = selection_metric_for(
+            {"selection_metric": fixed_selection_metric}
+        )
+        if (
+            args.selection_metric is not None
+            and args.selection_metric != base_config["selection_metric"]
+        ):
+            print(
+                "Ignoring --selection-metric {}; fixed to {} by this script.".format(
+                    args.selection_metric,
+                    base_config["selection_metric"],
+                )
+            )
+    elif args.selection_metric is not None:
         base_config["selection_metric"] = args.selection_metric
     else:
         base_config["selection_metric"] = selection_metric_for(base_config)

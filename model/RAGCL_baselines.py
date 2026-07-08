@@ -1,4 +1,3 @@
-import copy
 import random
 from functools import partial
 
@@ -12,6 +11,25 @@ from torch_geometric.nn.conv import MessagePassing
 from torch_geometric.nn.inits import glorot, zeros
 from torch_geometric.utils import add_self_loops, remove_self_loops
 from torch_scatter import scatter_add, scatter_mean
+
+
+def _extend_root_features(node_features, data):
+    if node_features.dim() != 2:
+        raise ValueError(
+            'RAGCL BiGCN expects 2D node features [num_nodes, num_features], '
+            'got shape {}. Regenerate the processed dataset cache or check the '
+            'text encoder output.'.format(tuple(node_features.shape))
+        )
+
+    batch = data.batch.long()
+    if hasattr(data, 'ptr') and data.ptr is not None:
+        root_index = data.ptr[:-1].to(device=batch.device)
+    else:
+        is_root = torch.ones(batch.size(0), dtype=torch.bool, device=batch.device)
+        if batch.numel() > 1:
+            is_root[1:] = batch[1:] != batch[:-1]
+        root_index = is_root.nonzero(as_tuple=False).view(-1)
+    return node_features[root_index][batch]
 
 
 class GCNConv(MessagePassing):
@@ -355,23 +373,16 @@ class TDrumorGCN(torch.nn.Module):
         x, edge_index = data.x, data.edge_index
         edge_index = self._drop_edges(edge_index, self.tddroprate, device)
 
-        x1 = copy.copy(x.float())
+        x1 = x.float()
         x = self.conv1(x, edge_index)
-        x2 = copy.copy(x)
-        root_extend = torch.zeros(len(data.batch), x1.size(1)).to(device)
-        batch_size = max(data.batch) + 1
-        for num_batch in range(batch_size):
-            index = torch.eq(data.batch, num_batch)
-            root_extend[index] = x1[index][0]
+        x2 = x
+        root_extend = _extend_root_features(x1, data)
         x = torch.cat((x, root_extend), 1)
         x = F.relu(x)
         x = F.dropout(x, training=self.training)
         x = self.conv2(x, edge_index)
         x = F.relu(x)
-        root_extend = torch.zeros(len(data.batch), x2.size(1)).to(device)
-        for num_batch in range(batch_size):
-            index = torch.eq(data.batch, num_batch)
-            root_extend[index] = x2[index][0]
+        root_extend = _extend_root_features(x2, data)
         x = torch.cat((x, root_extend), 1)
         return scatter_mean(x, data.batch, dim=0)
 
@@ -404,23 +415,16 @@ class BUrumorGCN(torch.nn.Module):
         edge_index[0], edge_index[1] = data.edge_index[1], data.edge_index[0]
         edge_index = TDrumorGCN._drop_edges(edge_index, self.budroprate, device)
 
-        x1 = copy.copy(x.float())
+        x1 = x.float()
         x = self.conv1(x, edge_index)
-        x2 = copy.copy(x)
-        root_extend = torch.zeros(len(data.batch), x1.size(1)).to(device)
-        batch_size = max(data.batch) + 1
-        for num_batch in range(batch_size):
-            index = torch.eq(data.batch, num_batch)
-            root_extend[index] = x1[index][0]
+        x2 = x
+        root_extend = _extend_root_features(x1, data)
         x = torch.cat((x, root_extend), 1)
         x = F.relu(x)
         x = F.dropout(x, training=self.training)
         x = self.conv2(x, edge_index)
         x = F.relu(x)
-        root_extend = torch.zeros(len(data.batch), x2.size(1)).to(device)
-        for num_batch in range(batch_size):
-            index = torch.eq(data.batch, num_batch)
-            root_extend[index] = x2[index][0]
+        root_extend = _extend_root_features(x2, data)
         x = torch.cat((x, root_extend), 1)
         return scatter_mean(x, data.batch, dim=0)
 
