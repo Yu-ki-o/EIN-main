@@ -40,6 +40,9 @@ global_pool: mean
 base_model: BiGCN_UncertaintySemanticChange
 max_hop: 47
 lamda: 0.0
+use_semantic_parity_gnn: True
+semantic_parity_residual: True
+semantic_node_weight_mode: local
 
 # edge support/deny relation encoder
 relation_hidden_dim: 64

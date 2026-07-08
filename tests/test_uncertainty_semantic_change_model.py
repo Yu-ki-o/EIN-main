@@ -8,6 +8,7 @@ from torch_geometric.data import Batch, Data
 from model.BiGCN_UncertaintySemanticChange import (
     BiGCN_UncertaintySemanticChange,
     EdgeRelationUncertaintyRouter,
+    SemanticParityDirectionEncoder,
 )
 from model.ResGCN_UncertaintySemanticChange import (
     ResGCN_UncertaintySemanticChange,
@@ -47,6 +48,9 @@ def make_args():
         degree_importance_strength=1.0,
         lambda_edge_relation_aux=0.1,
         lambda_view_mi_aux=0.0,
+        use_semantic_parity_gnn=True,
+        semantic_parity_residual=True,
+        semantic_node_weight_mode="local",
         semantic_change_encoder="mlp",
         semantic_change_hidden_dim=8,
         uncertainty_trend_hidden_dim=8,
@@ -215,6 +219,71 @@ class EdgeRelationUncertaintyRouterTest(unittest.TestCase):
         self.assertTrue(torch.allclose(keep, support + deny, atol=1e-6))
         self.assertTrue(torch.allclose(keep + unknown, torch.ones_like(keep)))
         self.assertGreater(float(unknown), float(support))
+
+
+class SemanticParityDirectionEncoderTest(unittest.TestCase):
+    def _identity_encoder(self, num_layers):
+        encoder = SemanticParityDirectionEncoder(
+            input_dim=2,
+            hidden_dim=2,
+            num_layers=num_layers,
+            dropout=0.0,
+            residual=False,
+        ).eval()
+        with torch.no_grad():
+            encoder.input_projection.weight.copy_(torch.eye(2))
+            encoder.input_projection.bias.zero_()
+            for layer in encoder.layers:
+                layer.weight.copy_(torch.eye(2))
+            for norm in encoder.norms:
+                norm.weight.fill_(1.0)
+                norm.bias.zero_()
+        return encoder
+
+    def _root_channels_for_path(self, signs):
+        num_layers = len(signs)
+        encoder = self._identity_encoder(num_layers)
+        num_nodes = num_layers + 1
+        x = torch.zeros(num_nodes, 2)
+        x[-1, 0] = 1.0
+        edge_index = torch.tensor(
+            [
+                list(range(num_layers, 0, -1)),
+                list(range(num_layers - 1, -1, -1)),
+            ],
+            dtype=torch.long,
+        )
+        support_weight = torch.tensor(
+            [1.0 if sign == "S" else 0.0 for sign in signs]
+        )
+        deny_weight = 1.0 - support_weight
+        support_nodes, deny_nodes = encoder(
+            x,
+            edge_index,
+            support_weight,
+            deny_weight,
+        )
+        return support_nodes[0].abs().sum(), deny_nodes[0].abs().sum()
+
+    def test_path_parity_is_valid_for_one_to_four_layers(self):
+        cases = [
+            ("S", "support"),
+            ("D", "deny"),
+            ("DD", "support"),
+            ("SSD", "deny"),
+            ("DSD", "support"),
+            ("SDSD", "support"),
+            ("SSSD", "deny"),
+        ]
+        for signs, expected in cases:
+            with self.subTest(signs=signs):
+                support_mass, deny_mass = self._root_channels_for_path(signs)
+                if expected == "support":
+                    self.assertGreater(float(support_mass), 0.0)
+                    self.assertEqual(float(deny_mass), 0.0)
+                else:
+                    self.assertEqual(float(support_mass), 0.0)
+                    self.assertGreater(float(deny_mass), 0.0)
 
 
 class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
@@ -646,6 +715,135 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
             torch.equal(
                 deny_node_weight,
                 torch.tensor([1.0, 0.0, 1.0]),
+            )
+        )
+
+    def test_parity_view_pooling_composes_root_paths(self):
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=make_args(),
+            device=torch.device("cpu"),
+        ).eval()
+        data = Batch.from_data_list(
+            [
+                Data(
+                    x=torch.randn(4, 5),
+                    edge_index=torch.tensor([[0, 1, 2], [1, 2, 3]]),
+                    edge_stance=torch.tensor([0, 0, 1]),
+                    y=torch.tensor([0]),
+                    num_hop=torch.tensor([3]),
+                    user_state=torch.zeros(1, 4, 3),
+                ),
+                Data(
+                    x=torch.randn(4, 5),
+                    edge_index=torch.tensor([[0, 1, 2], [1, 2, 3]]),
+                    edge_stance=torch.tensor([1, 0, 1]),
+                    y=torch.tensor([0]),
+                    num_hop=torch.tensor([3]),
+                    user_state=torch.zeros(1, 4, 3),
+                ),
+            ]
+        )
+        support_weight = torch.tensor([1.0, 1.0, 0.0, 0.0, 1.0, 0.0])
+        deny_weight = 1.0 - support_weight
+
+        support_node_weight, deny_node_weight = (
+            model._build_parity_view_node_weights(
+                data,
+                support_weight,
+                deny_weight,
+            )
+        )
+
+        self.assertTrue(
+            torch.equal(
+                support_node_weight,
+                torch.tensor([1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0]),
+            )
+        )
+        self.assertTrue(
+            torch.equal(
+                deny_node_weight,
+                torch.tensor([1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0]),
+            )
+        )
+
+    def test_semantic_node_weight_mode_defaults_to_local_edges(self):
+        args = make_args()
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).eval()
+        data = Batch.from_data_list(
+            [
+                Data(
+                    x=torch.randn(3, 5),
+                    edge_index=torch.tensor([[0, 1], [1, 2]]),
+                    edge_stance=torch.tensor([1, 1]),
+                    y=torch.tensor([0]),
+                    num_hop=torch.tensor([2]),
+                    user_state=torch.zeros(1, 4, 3),
+                )
+            ]
+        )
+        support_weight = torch.tensor([0.0, 0.0])
+        deny_weight = torch.tensor([1.0, 1.0])
+
+        support_node_weight, deny_node_weight = (
+            model._build_semantic_node_weights(
+                data,
+                support_weight,
+                deny_weight,
+            )
+        )
+
+        self.assertEqual(model.semantic_node_weight_mode, "local")
+        self.assertTrue(
+            torch.equal(
+                support_node_weight,
+                torch.tensor([1.0, 0.0, 0.0]),
+            )
+        )
+        self.assertTrue(
+            torch.equal(
+                deny_node_weight,
+                torch.tensor([1.0, 1.0, 1.0]),
+            )
+        )
+
+        args.semantic_node_weight_mode = "root_parity"
+        parity_model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).eval()
+        support_node_weight, deny_node_weight = (
+            parity_model._build_semantic_node_weights(
+                data,
+                support_weight,
+                deny_weight,
+            )
+        )
+        self.assertTrue(
+            torch.equal(
+                support_node_weight,
+                torch.tensor([1.0, 0.0, 1.0]),
+            )
+        )
+        self.assertTrue(
+            torch.equal(
+                deny_node_weight,
+                torch.tensor([1.0, 1.0, 0.0]),
             )
         )
 

@@ -292,6 +292,170 @@ class EdgeRelationUncertaintyRouter(nn.Module):
         )
 
 
+class SemanticParityDirectionEncoder(nn.Module):
+    """
+    Propagates support/deny semantics as composable path parity.
+
+    Support edges preserve the current semantic channel, while deny edges swap
+    the support and deny channels. Stacking this layer therefore keeps the
+    usual conflict algebra valid for arbitrary hop counts:
+
+        support + deny = deny
+        deny + deny = support
+    """
+
+    def __init__(
+        self,
+        input_dim,
+        hidden_dim,
+        num_layers,
+        dropout=0.0,
+        residual=True,
+    ):
+        super().__init__()
+        self.input_dim = int(input_dim)
+        self.hidden_dim = int(hidden_dim)
+        self.num_layers = max(1, int(num_layers))
+        self.dropout = float(dropout)
+        self.residual = bool(residual)
+
+        self.input_projection = nn.Linear(self.input_dim, self.hidden_dim)
+        self.layers = nn.ModuleList(
+            [
+                nn.Linear(self.hidden_dim, self.hidden_dim, bias=False)
+                for _ in range(self.num_layers)
+            ]
+        )
+        self.norms = nn.ModuleList(
+            [nn.LayerNorm(self.hidden_dim) for _ in range(self.num_layers)]
+        )
+
+    def forward(self, node_features, edge_index, support_weight, deny_weight):
+        same = self.input_projection(node_features.float())
+        diff = same.new_zeros(same.size())
+
+        for layer, norm in zip(self.layers, self.norms):
+            same_aggr, diff_aggr = self._aggregate_parity(
+                same,
+                diff,
+                edge_index,
+                support_weight,
+                deny_weight,
+            )
+            same_update = F.relu(norm(layer(same_aggr)))
+            diff_update = F.relu(norm(layer(diff_aggr)))
+            same_update = F.dropout(
+                same_update,
+                p=self.dropout,
+                training=self.training,
+            )
+            diff_update = F.dropout(
+                diff_update,
+                p=self.dropout,
+                training=self.training,
+            )
+            if self.residual:
+                same = same + same_update
+                diff = diff + diff_update
+            else:
+                same = same_update
+                diff = diff_update
+        return same, diff
+
+    def _aggregate_parity(
+        self,
+        same,
+        diff,
+        edge_index,
+        support_weight,
+        deny_weight,
+    ):
+        same_out = same.clone()
+        diff_out = diff.clone()
+        denom = same.new_ones(same.size(0), 1)
+        if edge_index.numel() == 0:
+            return same_out, diff_out
+
+        src, dst = edge_index
+        support = support_weight.to(dtype=same.dtype).view(-1, 1)
+        deny = deny_weight.to(dtype=same.dtype).view(-1, 1)
+
+        same_msg = support * same[src] + deny * diff[src]
+        diff_msg = support * diff[src] + deny * same[src]
+        edge_mass = (support + deny).clamp_min(0.0)
+
+        same_out.index_add_(0, dst, same_msg)
+        diff_out.index_add_(0, dst, diff_msg)
+        denom.index_add_(0, dst, edge_mass)
+        return same_out / denom.clamp_min(1e-6), diff_out / denom.clamp_min(
+            1e-6
+        )
+
+
+class SemanticParityEncoder(nn.Module):
+    """
+    Support/deny view encoder with optional bidirectional tree propagation.
+    """
+
+    def __init__(
+        self,
+        input_dim,
+        hidden_dim,
+        num_layers,
+        dropout=0.0,
+        bidirectional=False,
+        residual=True,
+    ):
+        super().__init__()
+        self.bidirectional = bool(bidirectional)
+        self.top_down = SemanticParityDirectionEncoder(
+            input_dim,
+            hidden_dim,
+            num_layers,
+            dropout=dropout,
+            residual=residual,
+        )
+        if self.bidirectional:
+            self.bottom_up = SemanticParityDirectionEncoder(
+                input_dim,
+                hidden_dim,
+                num_layers,
+                dropout=dropout,
+                residual=residual,
+            )
+            self.direction_fusion = nn.Sequential(
+                nn.Linear(hidden_dim * 2, hidden_dim, bias=False),
+                nn.ReLU(),
+            )
+        else:
+            self.bottom_up = None
+            self.direction_fusion = None
+
+    def forward(self, node_features, edge_index, support_weight, deny_weight):
+        same_td, diff_td = self.top_down(
+            node_features,
+            edge_index,
+            support_weight,
+            deny_weight,
+        )
+        if not self.bidirectional:
+            return same_td, diff_td
+
+        reverse_edge_index = torch.stack(
+            (edge_index[1], edge_index[0]),
+            dim=0,
+        )
+        same_bu, diff_bu = self.bottom_up(
+            node_features,
+            reverse_edge_index,
+            support_weight,
+            deny_weight,
+        )
+        same = self.direction_fusion(torch.cat((same_td, same_bu), dim=-1))
+        diff = self.direction_fusion(torch.cat((diff_td, diff_bu), dim=-1))
+        return same, diff
+
+
 class GlobalDSFusionHead(nn.Module):
     """
     Graph-level Dempster-Shafer fusion over classification branches.
@@ -975,6 +1139,35 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             out_feats,
             args,
         )
+        self.use_semantic_parity_gnn = bool(
+            getattr(args, "use_semantic_parity_gnn", True)
+        )
+        self.semantic_node_weight_mode = str(
+            getattr(args, "semantic_node_weight_mode", "local")
+        ).strip().lower()
+        valid_node_weight_modes = {"local", "root_parity", "parity"}
+        if self.semantic_node_weight_mode not in valid_node_weight_modes:
+            raise ValueError(
+                "semantic_node_weight_mode must be one of {}, got {}".format(
+                    sorted(valid_node_weight_modes),
+                    self.semantic_node_weight_mode,
+                )
+            )
+        parity_layers = max(1, int(getattr(args, "n_layers_conv", 2)))
+        self.semantic_parity_encoder = (
+            SemanticParityEncoder(
+                input_dim=in_feats,
+                hidden_dim=hid_feats,
+                num_layers=parity_layers,
+                dropout=self.dropout,
+                bidirectional=self.backbone_type == "bigcn",
+                residual=bool(
+                    getattr(args, "semantic_parity_residual", True)
+                ),
+            )
+            if self.use_semantic_parity_gnn
+            else None
+        )
 
         change_name = getattr(args, "semantic_change_encoder", "mlp")
         change_hidden = int(
@@ -1199,6 +1392,35 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             torch.cat((top_down, bottom_up), dim=-1)
         )
 
+    def _encode_semantic_views(
+        self,
+        data,
+        node_hidden,
+        edge_index,
+        support_weight,
+        deny_weight,
+    ):
+        if self.semantic_parity_encoder is not None:
+            return self.semantic_parity_encoder(
+                data.x.float(),
+                edge_index,
+                support_weight,
+                deny_weight,
+            )
+        support_nodes = self._encode_semantic_view(
+            data,
+            node_hidden,
+            edge_index,
+            support_weight,
+        )
+        deny_nodes = self._encode_semantic_view(
+            data,
+            node_hidden,
+            edge_index,
+            deny_weight,
+        )
+        return support_nodes, deny_nodes
+
     def _edge_relation_loss(self, logits, edge_stance):
         zero = self.classifier.weight.new_zeros(())
         if edge_stance is None or logits.numel() == 0:
@@ -1407,6 +1629,71 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 continue
             node_weight[dst[edge_ids]] = edge_weight[edge_ids]
         return node_weight
+
+    def _build_parity_view_node_weights(
+        self,
+        data,
+        support_weight,
+        deny_weight,
+    ):
+        support_node = support_weight.new_zeros(data.x.size(0))
+        deny_node = support_weight.new_zeros(data.x.size(0))
+        roots = self._root_indices(data)
+        support_node[roots] = 1.0
+        if data.edge_index.numel() == 0:
+            # Keep the source post as a shared anchor when a view is pooled or
+            # passed to the semantic tree branch.
+            deny_node[roots] = 1.0
+            return support_node, deny_node
+
+        src, dst = data.edge_index
+        depth = self._node_depths(data, data.edge_index)
+        depth_src = depth[src]
+        depth_dst = depth[dst]
+        for depth_id in range(1, self.max_hop + 1):
+            edge_mask = (
+                (depth_dst == depth_id)
+                & (depth_src == depth_id - 1)
+            )
+            edge_ids = edge_mask.nonzero(as_tuple=False).view(-1)
+            if edge_ids.numel() == 0:
+                continue
+            parent = src[edge_ids]
+            child = dst[edge_ids]
+            edge_support = support_weight[edge_ids].clamp(0.0, 1.0)
+            edge_deny = deny_weight[edge_ids].clamp(0.0, 1.0)
+            parent_support = support_node[parent]
+            parent_deny = deny_node[parent]
+            support_node[child] = (
+                parent_support * edge_support
+                + parent_deny * edge_deny
+            )
+            deny_node[child] = (
+                parent_support * edge_deny
+                + parent_deny * edge_support
+            )
+
+        # The root has no stance relative to itself, but downstream modules use
+        # it as an aligned source anchor for both views.
+        deny_node[roots] = 1.0
+        return support_node.clamp(0.0, 1.0), deny_node.clamp(0.0, 1.0)
+
+    def _build_semantic_node_weights(
+        self,
+        data,
+        support_weight,
+        deny_weight,
+    ):
+        if self.semantic_node_weight_mode in {"root_parity", "parity"}:
+            return self._build_parity_view_node_weights(
+                data,
+                support_weight,
+                deny_weight,
+            )
+        return (
+            self._build_view_node_weight(data, support_weight),
+            self._build_view_node_weight(data, deny_weight),
+        )
 
     def _build_path_parent_and_uncertainty(
         self,
@@ -1657,24 +1944,19 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             support_weight = support_weight * parent_keep
             deny_weight = deny_weight * parent_keep
 
-        support_nodes = self._encode_semantic_view(
+        support_nodes, deny_nodes = self._encode_semantic_views(
             data,
             node_hidden,
             data.edge_index,
             support_weight,
-        )
-        deny_nodes = self._encode_semantic_view(
-            data,
-            node_hidden,
-            data.edge_index,
             deny_weight,
         )
-        support_node_weight = self._build_view_node_weight(
+        (
+            support_node_weight,
+            deny_node_weight,
+        ) = self._build_semantic_node_weights(
             data,
             support_weight,
-        )
-        deny_node_weight = self._build_view_node_weight(
-            data,
             deny_weight,
         )
         support_graph = self._pool_root_connected_nodes(
