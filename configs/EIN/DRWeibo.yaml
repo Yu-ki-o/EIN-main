@@ -7,7 +7,7 @@ word_embedding: word2vec # word2vec or multilingual-e5-base
 e5_model_name: intfloat/multilingual-e5-base
 e5_max_length: 128
 e5_batch_size: 64
-result_name: EIN_Resgcn_directed_valloss_layer2_manifest # set a name to save logs under experiments/EIN/DRWeibo/<result_name>
+result_name: EIN_Bigcn_directed_valloss_layer2_manifest # set a name to save logs under experiments/EIN/DRWeibo/<result_name>
 experiment_mode: id # id or strict_ood
 ood_source_datasets: []
 ood_val_domain: source # source or target
@@ -43,7 +43,7 @@ edge_norm: True
 global_pool: sum
 undirected: False
 
-base_model: ResGCN
+base_model: BiGCN
 max_hop: 20
 init_alpha: 0.0
 init_beta: 0.0

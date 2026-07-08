@@ -3,6 +3,7 @@ import unittest
 import torch
 
 from model.semantic_change_encoder import (
+    DPGASemanticChangeEncoder,
     MLPSemanticChangeEncoder,
     build_semantic_change_encoder,
 )
@@ -60,6 +61,61 @@ class MLPSemanticChangeEncoderTest(unittest.TestCase):
         encoder = MLPSemanticChangeEncoder(input_dim=4)
         with self.assertRaises(ValueError):
             encoder(torch.randn(3, 4), torch.randn(4, 4))
+
+
+class DPGASemanticChangeEncoderTest(unittest.TestCase):
+    def test_output_shape_and_gradient_with_batch_context(self):
+        encoder = DPGASemanticChangeEncoder(
+            input_dim=4,
+            output_dim=6,
+            hidden_dim=8,
+            dropout=0.0,
+            pseudo_nodes=3,
+            layers=1,
+        )
+        support = torch.randn(5, 4, requires_grad=True)
+        deny = torch.randn(5, 4, requires_grad=True)
+        batch = torch.tensor([0, 0, 1, 1, 1])
+        support_weight = torch.tensor([1.0, 0.7, 1.0, 0.2, 0.4])
+        deny_weight = torch.tensor([1.0, 0.3, 1.0, 0.8, 0.6])
+        node_keep = torch.tensor([1.0, 0.5, 1.0, 1.0, 0.25])
+
+        change = encoder(
+            support,
+            deny,
+            batch=batch,
+            support_node_weight=support_weight,
+            deny_node_weight=deny_weight,
+            node_keep=node_keep,
+        )
+        self.assertEqual(tuple(change.shape), (5, 6))
+
+        change.sum().backward()
+        self.assertIsNotNone(support.grad)
+        self.assertIsNotNone(deny.grad)
+
+    def test_identical_views_produce_zero_change(self):
+        encoder = DPGASemanticChangeEncoder(
+            input_dim=4,
+            hidden_dim=8,
+            dropout=0.0,
+            pseudo_nodes=2,
+            layers=1,
+        ).eval()
+        nodes = torch.randn(7, 4)
+        batch = torch.tensor([0, 0, 0, 1, 1, 1, 1])
+
+        change = encoder(nodes, nodes, batch=batch)
+        self.assertTrue(torch.equal(change, torch.zeros_like(change)))
+
+    def test_factory_exposes_dpga_option(self):
+        encoder = build_semantic_change_encoder(
+            "dpga",
+            input_dim=4,
+            output_dim=4,
+            hidden_dim=8,
+        )
+        self.assertIsInstance(encoder, DPGASemanticChangeEncoder)
 
 
 if __name__ == "__main__":

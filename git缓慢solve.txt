@@ -3,5 +3,5 @@ VSCode Remote SSH 连接项目文件夹时，Source Control Changes 一直 scann
 
 VSCode 退出所有远程项目
 在终端 ssh 远程，并 pkill -u $USER -f vscode
-在终端再重新 ssh 远程，并 rm -rf ~/.vscode-*(这里会一并删除vscode远程的插件包括codex)
+在终端再重新 ssh 远程，并rm -rf ~/.vscode-* (这里会一并删除vscode远程的插件包括codex)
 打开 VSCode，重新 Remote 连接远程，将会重新下载 VSCode Remote Server，下载完毕后，打开项目文件，此时能正常的解析 git changes 了。

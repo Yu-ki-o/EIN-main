@@ -273,6 +273,38 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
             )
         )
 
+    def test_dpga_semantic_change_encoder_forward(self):
+        args = make_args()
+        args.semantic_change_encoder = "dpga"
+        args.dpga_pseudo_nodes = 3
+        args.dpga_layers = 1
+        args.dpga_attention_temperature = 1.0
+        args.dpga_modulation_scale = 0.5
+        args.dpga_use_node_weights = True
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).train()
+        data = make_batch()
+
+        output, unknown, support, deny = model(data)
+        loss = F.nll_loss(output, data.y) + model.auxiliary_loss()
+        loss.backward()
+
+        self.assertEqual(tuple(output.shape), (2, 2))
+        self.assertEqual(tuple(model._last_change_nodes.shape), (5, 8))
+        self.assertTrue(torch.isfinite(model._last_change_graph).all())
+        self.assertIsNotNone(
+            model.semantic_change_encoder.pseudo_nodes.grad
+        )
+        self.assertTrue(torch.isfinite(unknown).all())
+        self.assertTrue(torch.isfinite(support).all())
+        self.assertTrue(torch.isfinite(deny).all())
+
     def test_two_deny_edges_flip_state_back_to_support(self):
         args = make_args()
         model = BiGCN_UncertaintySemanticChange(

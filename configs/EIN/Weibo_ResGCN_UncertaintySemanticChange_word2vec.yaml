@@ -7,11 +7,13 @@ word_embedding: word2vec
 e5_model_name: intfloat/multilingual-e5-base
 e5_max_length: 128
 e5_batch_size: 64
-result_name: UncertaintySemanticChange_ResGCN_change_semantic_tree_no_sampling_manifest_patience15_ds_bigcn
+result_name: UncertaintySemanticChange_BiGCN_change_semantic_tree_no_sampling_manifest_ds
 experiment_mode: id
 ood_source_datasets: []
 ood_val_domain: source
 debug: False
+use_tensorboard: True
+tensorboard_log_dir: tensorboard
 
 # training parameters
 seed: 0
@@ -90,7 +92,7 @@ uncertainty_trend_hidden_dim: 128
 use_trend_graph: False
 
 # final branch fusion
-classification_fusion_mode: change_semantic_tree
+classification_fusion_mode: change_semantic_tree # change_semantic_tree
 classification_fusion_hidden_dim: 256
 classification_class_weights: [1.0, 1.5] #原来是[1.0, 1.0]
 

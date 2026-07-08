@@ -986,6 +986,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             output_dim=hid_feats,
             hidden_dim=change_hidden,
             dropout=self.dropout,
+            args=args,
         )
         self.vertical_path_attention = (
             RootPathUncertaintyAttention(
@@ -1689,6 +1690,11 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         change_nodes = self.semantic_change_encoder(
             support_nodes,
             deny_nodes,
+            batch=data.batch,
+            edge_index=data.edge_index,
+            support_node_weight=support_node_weight,
+            deny_node_weight=deny_node_weight,
+            node_keep=node_keep,
         )
 
         if self.use_node_keep_in_change_pool:
