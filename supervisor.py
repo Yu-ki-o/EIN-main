@@ -241,6 +241,7 @@ def load_graph_dataset(args, path, text_encoder):
         'ResGCN_StateAuxSameDiff',
         'ResGCN_SameDiffFusion',
         'ResGCN_UncertaintySemanticChange',
+        'ResGCN_RevisionAwareSemanticChange',
         'GCN_UncertaintySemanticChange',
         'GIN_UncertaintySemanticChange',
         'KAGNN_UncertaintySemanticChange',
@@ -255,6 +256,7 @@ def load_graph_dataset(args, path, text_encoder):
         'BiGCN_StateAuxSameDiff',
         'BiGCN_SameDiffFusion',
         'BiGCN_UncertaintySemanticChange',
+        'BiGCN_RevisionAwareSemanticChange',
         'LIRS',
     ]:
         return TreeDataset(path, args.word_embedding, text_encoder, args=args)
