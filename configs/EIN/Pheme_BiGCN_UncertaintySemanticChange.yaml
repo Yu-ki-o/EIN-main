@@ -65,7 +65,7 @@ use_degree_importance: True
 degree_importance_strength: 1.0
 
 # replaceable node-level semantic change encoder: mlp or dpga
-semantic_change_encoder: dpga
+semantic_change_encoder: mlp
 semantic_change_hidden_dim: 64
 dpga_pseudo_nodes: 4
 dpga_layers: 1

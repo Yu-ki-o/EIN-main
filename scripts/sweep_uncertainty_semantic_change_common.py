@@ -81,6 +81,7 @@ FIXED_TRACE_PARAMS = [
     "max_hop",
     "classification_fusion_mode",
     "classification_fusion_hidden_dim",
+    "semantic_change_encoder",
     "use_uncertainty_sampling",
     "use_semantic_tree_transformer",
     "use_vertical_path_attention",
@@ -174,6 +175,10 @@ def build_preset_grids(defaults):
     grids = deepcopy(BASE_PRESET_GRIDS)
     grids.update(deepcopy(defaults.get("extra_preset_grids", {})))
     return grids
+
+
+def build_fixed_config_overrides(defaults):
+    return deepcopy(defaults.get("fixed_config_overrides", {}))
 
 
 def parse_args(defaults):
@@ -624,6 +629,7 @@ def run_cli(defaults):
     args = parse_args(defaults)
     base_config = load_yaml(args.config)
     validate_base_config(base_config, defaults)
+    fixed_config_overrides = build_fixed_config_overrides(defaults)
 
     fixed_fusion_mode = defaults.get(
         "fixed_fusion_mode",
@@ -631,6 +637,7 @@ def run_cli(defaults):
     )
     base_config["classification_fusion_mode"] = fixed_fusion_mode
     base_config["result_group"] = defaults.get("result_group", defaults["sweep_name_prefix"])
+    base_config.update(fixed_config_overrides)
     fixed_selection_metric = defaults.get("fixed_selection_metric")
     if fixed_selection_metric is not None:
         base_config["selection_metric"] = selection_metric_for(
@@ -697,6 +704,15 @@ def run_cli(defaults):
     print("Preset/grid keys: {}".format(", ".join(grid.keys())))
     print("Result group: {}".format(base_config["result_group"]))
     print("Fixed fusion mode: {}".format(base_config["classification_fusion_mode"]))
+    if fixed_config_overrides:
+        print(
+            "Fixed config overrides: {}".format(
+                ", ".join(
+                    "{}={}".format(key, value)
+                    for key, value in sorted(fixed_config_overrides.items())
+                )
+            )
+        )
     print("Seed per trial: {}".format(args.seed))
     print("Checkpoint selection metric: {}".format(base_config["selection_metric"]))
     if args.device is not None:
@@ -716,6 +732,7 @@ def run_cli(defaults):
     for trial_index, overrides in selected:
         trial_config = deepcopy(base_config)
         trial_config.update(overrides)
+        trial_config.update(fixed_config_overrides)
         trial_config["seed"] = args.seed
         trial_config["classification_fusion_mode"] = fixed_fusion_mode
         result_name = build_trial_name(sweep_name, trial_index, overrides)
