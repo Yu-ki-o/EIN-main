@@ -13,7 +13,13 @@ from model.BiGCN_StateAuxSameDiff import BiGCN_StateAuxSameDiff
 from model.EIN_ResGCN_SameDiffFusion import EINResGCNSameDiffFusion
 from model.EIN_BiGCN_SameDiffFusion import EINBiGCNSameDiffFusion
 from model.BiGCN_UncertaintySemanticChange import BiGCN_UncertaintySemanticChange
+from model.BiGCN_RevisionAwareSemanticChange import (
+    BiGCN_RevisionAwareSemanticChange,
+)
 from model.ResGCN_UncertaintySemanticChange import ResGCN_UncertaintySemanticChange
+from model.ResGCN_RevisionAwareSemanticChange import (
+    ResGCN_RevisionAwareSemanticChange,
+)
 from model.GCN_UncertaintySemanticChange import GCN_UncertaintySemanticChange
 from model.GIN_UncertaintySemanticChange import GIN_UncertaintySemanticChange
 from model.KAGNN_UncertaintySemanticChange import KAGNN_UncertaintySemanticChange
@@ -690,6 +696,41 @@ def EIN_BiGCN_UncertaintySemanticChange_supervisor(args):
     return trainer.train_process()
 
 
+def EIN_BiGCN_RevisionAwareSemanticChange_supervisor(args):
+    init_seed(args.seed, need_deepfix=True)
+
+    device = resolve_device(args)
+
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
+    text_encoder = build_text_encoder(args, device, label_source_path)
+
+    print('Seed {} | Building experiment datasets'.format(args.seed), flush=True)
+    train_dataset, val_dataset, test_dataset = build_experiment_datasets(args, text_encoder)
+
+    print(
+        'Seed {} | Initializing BiGCN_RevisionAwareSemanticChange'.format(
+            args.seed
+        ),
+        flush=True,
+    )
+    base_model = BiGCN_RevisionAwareSemanticChange(
+        args.in_feats,
+        args.hidden_dim,
+        args.hidden_dim,
+        args.num_classes,
+        args,
+        device,
+    ).to(device)
+
+    optimizer = base_model.init_optimizer(args)
+    datasets = [train_dataset, val_dataset, test_dataset]
+    trainer = EINTrainer(datasets, base_model, optimizer, args, device)
+
+    print('Seed {} | Start training'.format(args.seed), flush=True)
+    return trainer.train_process()
+
+
 def EIN_ResGCN_UncertaintySemanticChange_supervisor(args):
     init_seed(args.seed, need_deepfix=True)
 
@@ -709,6 +750,41 @@ def EIN_ResGCN_UncertaintySemanticChange_supervisor(args):
         flush=True,
     )
     base_model = ResGCN_UncertaintySemanticChange(
+        args.in_feats,
+        args.hidden_dim,
+        args.hidden_dim,
+        args.num_classes,
+        args,
+        device,
+    ).to(device)
+
+    optimizer = base_model.init_optimizer(args)
+    datasets = [train_dataset, val_dataset, test_dataset]
+    trainer = EINTrainer(datasets, base_model, optimizer, args, device)
+
+    print('Seed {} | Start training'.format(args.seed), flush=True)
+    return trainer.train_process()
+
+
+def EIN_ResGCN_RevisionAwareSemanticChange_supervisor(args):
+    init_seed(args.seed, need_deepfix=True)
+
+    device = resolve_device(args)
+
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
+    text_encoder = build_text_encoder(args, device, label_source_path)
+
+    print('Seed {} | Building experiment datasets'.format(args.seed), flush=True)
+    train_dataset, val_dataset, test_dataset = build_experiment_datasets(args, text_encoder)
+
+    print(
+        'Seed {} | Initializing ResGCN_RevisionAwareSemanticChange'.format(
+            args.seed
+        ),
+        flush=True,
+    )
+    base_model = ResGCN_RevisionAwareSemanticChange(
         args.in_feats,
         args.hidden_dim,
         args.hidden_dim,
