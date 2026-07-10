@@ -11,12 +11,25 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import yaml
 from torch_geometric.data import Data
 from torch_geometric.data.separate import separate
 from torch_geometric.loader import DataLoader
 
 from model.model_tcsr import TCSRModel, compute_tcsr_loss
 from utils_metrics import classification_metrics, mean_std
+
+
+SELECTION_METRIC_ALIASES = {
+    "loss": "loss",
+    "val_loss": "loss",
+    "accuracy": "accuracy",
+    "acc": "accuracy",
+    "val_acc": "accuracy",
+    "macro_f1": "macro_f1",
+    "f1": "macro_f1",
+    "val_f1": "macro_f1",
+}
 
 
 def set_seed(seed):
@@ -157,7 +170,9 @@ def run_seed(seed, args, datasets, device):
 
     os.makedirs(args.checkpoint_dir, exist_ok=True)
     best_path = os.path.join(args.checkpoint_dir, f"tcsr_seed{seed}.pt")
-    best_val = -float("inf")
+    selection_metric = normalize_selection_metric(args.selection_metric)
+    selection_mode = "min" if selection_metric == "loss" else "max"
+    best_val = float("inf") if selection_mode == "min" else -float("inf")
     best_epoch = -1
     patience_counter = 0
 
@@ -177,8 +192,9 @@ def run_seed(seed, args, datasets, device):
             args.num_classes,
             stance_loss_weight=args.stance_loss_weight,
         )
-        score = val_metrics[args.selection_metric]
-        if score > best_val:
+        score = val_metrics[selection_metric]
+        improved = score < best_val if selection_mode == "min" else score > best_val
+        if improved:
             best_val = score
             best_epoch = epoch
             patience_counter = 0
@@ -236,7 +252,8 @@ def run_seed(seed, args, datasets, device):
     }
 
 
-def build_datasets(args, seed):
+def build_datasets(args, seed, device):
+    args.seed = int(seed)
     if args.train_path and args.val_path and args.test_path:
         return (
             load_graph_dataset(args.train_path),
@@ -251,9 +268,11 @@ def build_datasets(args, seed):
             load_graph_dataset(test_path),
         )
     if not args.data_path:
+        if getattr(args, "dataset", None):
+            return build_configured_datasets(args, device)
         raise ValueError(
             "Provide either --train_path/--val_path/--test_path, "
-            "--dataset_dir, or --data_path."
+            "--dataset_dir, --data_path, or --config_filename with dataset."
         )
 
     dataset = load_graph_dataset(args.data_path)
@@ -277,48 +296,61 @@ def split_dataset(dataset, train_ratio, val_ratio, seed):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train TCSR rumor detector")
-    parser.add_argument("--data_path", default=None, help="Single .pt dataset")
-    parser.add_argument("--dataset_dir", default=None, help="Directory with train/val/test processed data")
-    parser.add_argument("--train_path", default=None)
-    parser.add_argument("--val_path", default=None)
-    parser.add_argument("--test_path", default=None)
-    parser.add_argument("--checkpoint_dir", default="checkpoints/tcsr")
-    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--seeds", default="0,1,2,3,4")
-    parser.add_argument("--epochs", type=int, default=100)
-    parser.add_argument("--patience", type=int, default=20)
-    parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--num_workers", type=int, default=0)
-    parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--weight_decay", type=float, default=1e-4)
-    parser.add_argument("--grad_clip", type=float, default=5.0)
-    parser.add_argument("--hidden_dim", type=int, default=128)
-    parser.add_argument("--gnn_layers", type=int, default=2)
-    parser.add_argument("--dropout", type=float, default=0.2)
-    parser.add_argument("--conv_type", choices=["gcn", "gat"], default="gcn")
-    parser.add_argument("--num_classes", type=int, default=2)
-    parser.add_argument("--window_k", type=int, default=2)
-    parser.add_argument("--min_future_nodes", type=int, default=1)
-    parser.add_argument("--stance_loss_weight", type=float, default=1.0)
-    parser.add_argument("--selection_metric", choices=["accuracy", "macro_f1"], default="macro_f1")
-    parser.add_argument("--train_ratio", type=float, default=0.7)
-    parser.add_argument("--val_ratio", type=float, default=0.1)
-    parser.add_argument("--use_anomaly", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--use_isolation", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--use_dominance", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--use_threshold", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--use_external_stance", action=argparse.BooleanOptionalAction, default=True)
-    return parser.parse_args()
+    pre_parser = argparse.ArgumentParser(add_help=False)
+    pre_parser.add_argument("--config_filename", default=None)
+    pre_args, _ = pre_parser.parse_known_args()
+    config = load_config(pre_args.config_filename)
+
+    parser = argparse.ArgumentParser(
+        description="Train TCSR rumor detector",
+        parents=[pre_parser],
+    )
+    parser.add_argument("--data_path", default=config.get("data_path"), help="Single .pt dataset")
+    parser.add_argument("--dataset_dir", default=config.get("dataset_dir"), help="Directory with train/val/test processed data")
+    parser.add_argument("--train_path", default=config.get("train_path"))
+    parser.add_argument("--val_path", default=config.get("val_path"))
+    parser.add_argument("--test_path", default=config.get("test_path"))
+    parser.add_argument("--checkpoint_dir", default=config.get("checkpoint_dir", "checkpoints/tcsr"))
+    parser.add_argument("--device", default=config.get("device", "cuda" if torch.cuda.is_available() else "cpu"))
+    parser.add_argument("--seeds", default=config.get("seeds", "0,1,2,3,4"))
+    parser.add_argument("--epochs", type=int, default=config.get("epochs", 100))
+    parser.add_argument("--patience", type=int, default=config.get("patience", 20))
+    parser.add_argument("--batch_size", type=int, default=config.get("batch_size", 32))
+    parser.add_argument("--num_workers", type=int, default=config.get("num_workers", 0))
+    parser.add_argument("--lr", type=float, default=config.get("lr", 1e-3))
+    parser.add_argument("--weight_decay", type=float, default=config.get("weight_decay", 1e-4))
+    parser.add_argument("--grad_clip", type=float, default=config.get("grad_clip", 5.0))
+    parser.add_argument("--hidden_dim", type=int, default=config.get("hidden_dim", 128))
+    parser.add_argument("--gnn_layers", type=int, default=config.get("gnn_layers", 2))
+    parser.add_argument("--dropout", type=float, default=config.get("dropout", 0.2))
+    parser.add_argument("--conv_type", choices=["gcn", "gat"], default=config.get("conv_type", "gcn"))
+    parser.add_argument("--num_classes", type=int, default=config.get("num_classes", 2))
+    parser.add_argument("--window_k", type=int, default=config.get("window_k", 2))
+    parser.add_argument("--min_future_nodes", type=int, default=config.get("min_future_nodes", 1))
+    parser.add_argument("--stance_loss_weight", type=float, default=config.get("stance_loss_weight", 1.0))
+    parser.add_argument("--selection_metric", default=config.get("selection_metric", "macro_f1"))
+    parser.add_argument("--train_ratio", type=float, default=config.get("train_ratio", 0.7))
+    parser.add_argument("--val_ratio", type=float, default=config.get("val_ratio", 0.1))
+    parser.add_argument("--use_anomaly", action=argparse.BooleanOptionalAction, default=_as_bool(config.get("use_anomaly", True)))
+    parser.add_argument("--use_isolation", action=argparse.BooleanOptionalAction, default=_as_bool(config.get("use_isolation", True)))
+    parser.add_argument("--use_dominance", action=argparse.BooleanOptionalAction, default=_as_bool(config.get("use_dominance", True)))
+    parser.add_argument("--use_threshold", action=argparse.BooleanOptionalAction, default=_as_bool(config.get("use_threshold", True)))
+    parser.add_argument("--use_external_stance", action=argparse.BooleanOptionalAction, default=_as_bool(config.get("use_external_stance", True)))
+    args = parser.parse_args()
+
+    for key, value in config.items():
+        if not hasattr(args, key):
+            setattr(args, key, value)
+    return args
 
 
 def main():
     args = parse_args()
     device = torch.device(args.device if args.device != "cuda" or torch.cuda.is_available() else "cpu")
-    seeds = [int(seed.strip()) for seed in args.seeds.split(",") if seed.strip()]
+    seeds = parse_seeds(args.seeds)
     results = []
     for seed in seeds:
-        datasets = build_datasets(args, seed)
+        datasets = build_datasets(args, seed, device)
         if len(datasets[0]) == 0 or len(datasets[1]) == 0 or len(datasets[2]) == 0:
             raise ValueError("Train/val/test splits must all be non-empty.")
         results.append(run_seed(seed, args, datasets, device))
@@ -328,6 +360,92 @@ def main():
     print("TCSR {} seed summary".format(len(results)))
     print("Accuracy: {:.4f} +/- {:.4f}".format(acc_mean, acc_std))
     print("Macro-F1: {:.4f} +/- {:.4f}".format(f1_mean, f1_std))
+
+
+def load_config(config_filename):
+    if not config_filename:
+        return {}
+    with open(config_filename, "r", encoding="utf-8") as file_obj:
+        config = yaml.load(file_obj, Loader=yaml.FullLoader) or {}
+    if "n_epochs" in config and "epochs" not in config:
+        config["epochs"] = config["n_epochs"]
+    if "seed" in config and "seeds" not in config:
+        config["seeds"] = "0,1,2,3,4"
+    return config
+
+
+def parse_seeds(seeds):
+    if isinstance(seeds, (list, tuple)):
+        return [int(seed) for seed in seeds]
+    if isinstance(seeds, int):
+        return [int(seeds)]
+    return [int(seed.strip()) for seed in str(seeds).split(",") if seed.strip()]
+
+
+def normalize_selection_metric(metric):
+    key = str(metric).strip()
+    if key not in SELECTION_METRIC_ALIASES:
+        raise ValueError(
+            "selection_metric must be one of {}, got {}".format(
+                sorted(SELECTION_METRIC_ALIASES),
+                metric,
+            )
+        )
+    return SELECTION_METRIC_ALIASES[key]
+
+
+def build_configured_datasets(args, device):
+    from supervisor import (
+        build_id_paths,
+        build_strict_ood_paths,
+        build_text_encoder,
+        dataset_paths,
+    )
+    from utils.dataloader import ResGCNTreeDataset, TreeDataset
+
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    print(
+        "Seed {} | Building text encoder for {} on {}".format(
+            args.seed,
+            args.dataset,
+            device,
+        ),
+        flush=True,
+    )
+    text_encoder = build_text_encoder(args, device, label_source_path)
+
+    experiment_mode = getattr(args, "experiment_mode", "id")
+    if experiment_mode == "id":
+        train_path, val_path, test_path = build_id_paths(args)
+    elif experiment_mode == "strict_ood":
+        train_path, val_path, test_path = build_strict_ood_paths(args)
+    else:
+        raise ValueError("Unsupported experiment_mode: {}".format(experiment_mode))
+
+    dataset_cls = (
+        ResGCNTreeDataset
+        if str(getattr(args, "dataset_loader", "resgcn")).lower() == "resgcn"
+        else TreeDataset
+    )
+    if dataset_cls is ResGCNTreeDataset:
+        return (
+            dataset_cls(train_path, args.word_embedding, text_encoder, args.undirected, args=args),
+            dataset_cls(val_path, args.word_embedding, text_encoder, args.undirected, args=args),
+            dataset_cls(test_path, args.word_embedding, text_encoder, args.undirected, args=args),
+        )
+    return (
+        dataset_cls(train_path, args.word_embedding, text_encoder, args=args),
+        dataset_cls(val_path, args.word_embedding, text_encoder, args=args),
+        dataset_cls(test_path, args.word_embedding, text_encoder, args=args),
+    )
+
+
+def _as_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
 
 
 def _paths_from_dataset_dir(dataset_dir):

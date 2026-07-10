@@ -57,6 +57,14 @@ Example with existing processed split directories:
 python train_tcsr.py --dataset_dir data/Pheme --device cuda
 ```
 
+Example with an EIN-style config file that builds dataset paths automatically:
+
+```bash
+python train_tcsr.py --config_filename configs/EIN/DRWeibo_TCSR_word2vec.yaml
+python train_tcsr.py --config_filename configs/EIN/Weibo_TCSR_word2vec.yaml
+python train_tcsr.py --config_filename configs/EIN/Pheme_TCSR_word2vec.yaml
+```
+
 Example with explicit PyG `.pt` split files:
 
 ```bash
