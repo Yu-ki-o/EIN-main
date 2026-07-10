@@ -1028,6 +1028,12 @@ def EIN_TCSR_supervisor(args):
         args.min_future_nodes = 1
     if not hasattr(args, 'stance_loss_weight'):
         args.stance_loss_weight = 1.0
+    if not hasattr(args, 'revision_loss_weight'):
+        args.revision_loss_weight = 0.1
+    if not hasattr(args, 'use_revision_expectation'):
+        args.use_revision_expectation = True
+    if not hasattr(args, 'use_correction_semantics'):
+        args.use_correction_semantics = True
     if not hasattr(args, 'grad_clip'):
         args.grad_clip = 5.0
     if not hasattr(args, 'num_workers'):

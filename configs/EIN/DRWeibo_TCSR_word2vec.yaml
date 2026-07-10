@@ -47,8 +47,11 @@ dropout: 0.3
 window_k: 2
 min_future_nodes: 1
 stance_loss_weight: 1.0
+revision_loss_weight: 0.1
 use_anomaly: True
 use_isolation: True
 use_dominance: True
 use_threshold: True
+use_revision_expectation: True
+use_correction_semantics: True
 use_external_stance: True
