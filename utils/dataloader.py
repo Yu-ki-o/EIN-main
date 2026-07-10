@@ -131,6 +131,35 @@ def build_ragcl_centrality(post, x, edge_index, no_root_edge_index, metric):
     raise ValueError('Unsupported centrality metric: {}'.format(metric))
 
 
+def _config_bool(value, default=False):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {'1', 'true', 'yes', 'y', 'on'}
+    return bool(value)
+
+
+def should_build_ragcl_centrality(args):
+    base_model = str(getattr(args, 'base_model', '')).strip()
+    if base_model not in {'RAGCL_ResGCN', 'RAGCL_BiGCN'}:
+        return False
+    return _config_bool(getattr(args, 'use_unsup_loss', False))
+
+
+def build_optional_ragcl_centrality(post, x, edge_index, no_root_edge_index, args):
+    if not should_build_ragcl_centrality(args):
+        return None
+    return build_ragcl_centrality(
+        post,
+        x,
+        edge_index,
+        no_root_edge_index,
+        getattr(args, 'centrality', 'PageRank'),
+    )
+
+
 def attach_optional_fields(data, post):
     if 'domain_id' in post['source']:
         data.domain_id = torch.LongTensor([post['source']['domain_id']])
@@ -559,12 +588,12 @@ class ResGCNTreeDataset(InMemoryDataset):
             edge_index = torch.LongTensor(edge_index)
             directed_edge_index = edge_index.clone()
             no_root_edge_index = torch.LongTensor(no_root_edge_index)
-            centrality = build_ragcl_centrality(
+            centrality = build_optional_ragcl_centrality(
                 post,
                 x,
                 edge_index,
                 no_root_edge_index,
-                getattr(self.args, 'centrality', 'PageRank'),
+                self.args,
             )
             edge_index = to_undirected(edge_index) if self.undirected else edge_index
             edge_stance = build_edge_stances(post, edge_index)
@@ -652,12 +681,12 @@ class TreeDataset(InMemoryDataset):
             edge_index = torch.LongTensor(edge_index)
             directed_edge_index = edge_index.clone()
             no_root_edge_index = torch.LongTensor(no_root_edge_index)
-            centrality = build_ragcl_centrality(
+            centrality = build_optional_ragcl_centrality(
                 post,
                 x,
                 edge_index,
                 no_root_edge_index,
-                getattr(self.args, 'centrality', 'PageRank'),
+                self.args,
             )
             edge_stance = build_edge_stances(post, edge_index)
             
