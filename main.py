@@ -31,6 +31,7 @@ from supervisor import (
     EIN_Plain_BiGCN_supervisor,
     EIN_Plain_ResGCN_supervisor,
     EIN_NEGT_supervisor,
+    EIN_TCSR_supervisor,
 )
 
 

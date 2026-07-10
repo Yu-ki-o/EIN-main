@@ -8,7 +8,9 @@ case studies and ablation experiments.
 import torch
 import torch.nn.functional as F
 from torch import nn
-from torch_geometric.nn import GATConv, GCNConv, global_mean_pool
+from torch_geometric.nn import GATConv, GCNConv as PyGGCNConv, global_mean_pool
+
+from model.EIN_ResGCN import GCNConv as ProjectGCNConv
 
 
 def compute_depth(edge_index, num_nodes, root=0):
@@ -112,8 +114,21 @@ class StanceEstimator(nn.Module):
         return probs
 
 
+def _root_extend(node_features, batch):
+    if batch.numel() == 0:
+        return node_features
+    is_root = torch.ones(
+        batch.size(0),
+        dtype=torch.bool,
+        device=batch.device,
+    )
+    is_root[1:] = batch[1:] != batch[:-1]
+    root_index = is_root.nonzero(as_tuple=False).view(-1)
+    return node_features[root_index][batch.long()]
+
+
 class GraphEncoder(nn.Module):
-    """Encode node text features and pool a graph representation."""
+    """Plain GCN/GAT encoder used as the lightweight TCSR backbone."""
 
     def __init__(
         self,
@@ -139,7 +154,7 @@ class GraphEncoder(nn.Module):
                     concat=False,
                 )
             else:
-                conv = GCNConv(in_dim, hidden_dim)
+                conv = PyGGCNConv(in_dim, hidden_dim)
             self.convs.append(conv)
             self.norms.append(nn.LayerNorm(hidden_dim))
             in_dim = hidden_dim
@@ -155,6 +170,165 @@ class GraphEncoder(nn.Module):
             h = F.dropout(h, p=self.dropout, training=self.training)
         h_graph = global_mean_pool(h, batch)
         return h, h_graph
+
+
+class BiGCNGraphEncoder(nn.Module):
+    """BiGCN-style top-down/bottom-up propagation encoder.
+
+    This mirrors the project's BiGCN backbone idea, but returns node and graph
+    representations for the TCSR diagnostic modules instead of classification
+    logits.
+    """
+
+    def __init__(self, input_dim, hidden_dim=128, dropout=0.2):
+        super().__init__()
+        self.dropout = float(dropout)
+        self.td_conv1 = PyGGCNConv(input_dim, hidden_dim)
+        self.td_conv2 = PyGGCNConv(hidden_dim + input_dim, hidden_dim)
+        self.bu_conv1 = PyGGCNConv(input_dim, hidden_dim)
+        self.bu_conv2 = PyGGCNConv(hidden_dim + input_dim, hidden_dim)
+        self.td_projection = nn.Linear(hidden_dim * 2, hidden_dim)
+        self.bu_projection = nn.Linear(hidden_dim * 2, hidden_dim)
+        self.fusion = nn.Sequential(
+            nn.Linear(hidden_dim * 2, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+        )
+
+    def forward(self, x, edge_index, batch=None):
+        if batch is None:
+            batch = x.new_zeros(x.size(0), dtype=torch.long)
+        x = x.float()
+        td_nodes = self._direction_forward(
+            x,
+            edge_index,
+            batch,
+            self.td_conv1,
+            self.td_conv2,
+            self.td_projection,
+        )
+        reverse_edge_index = torch.stack((edge_index[1], edge_index[0]), dim=0)
+        bu_nodes = self._direction_forward(
+            x,
+            reverse_edge_index,
+            batch,
+            self.bu_conv1,
+            self.bu_conv2,
+            self.bu_projection,
+        )
+        h = self.fusion(torch.cat((td_nodes, bu_nodes), dim=-1))
+        h_graph = global_mean_pool(h, batch)
+        return h, h_graph
+
+    def _direction_forward(self, x, edge_index, batch, conv1, conv2, projection):
+        first_hidden = conv1(x, edge_index)
+        hidden = torch.cat((first_hidden, _root_extend(x, batch)), dim=-1)
+        hidden = F.relu(hidden)
+        hidden = F.dropout(hidden, p=self.dropout, training=self.training)
+        hidden = conv2(hidden, edge_index)
+        hidden = F.relu(hidden)
+        hidden = torch.cat((hidden, _root_extend(first_hidden, batch)), dim=-1)
+        return F.relu(projection(hidden))
+
+
+class ResGCNGraphEncoder(nn.Module):
+    """ResGCN-style residual graph encoder following the project backbone."""
+
+    def __init__(
+        self,
+        input_dim,
+        hidden_dim=128,
+        num_layers=2,
+        dropout=0.2,
+        residual=True,
+        edge_norm=True,
+    ):
+        super().__init__()
+        self.dropout = float(dropout)
+        self.residual = bool(residual)
+        self.bn_feat = nn.BatchNorm1d(input_dim)
+        self.conv_feat = ProjectGCNConv(input_dim, hidden_dim, gfn=True)
+        self.bns_conv = nn.ModuleList()
+        self.convs = nn.ModuleList()
+        for _ in range(max(1, int(num_layers))):
+            self.bns_conv.append(nn.BatchNorm1d(hidden_dim))
+            self.convs.append(
+                ProjectGCNConv(
+                    hidden_dim,
+                    hidden_dim,
+                    edge_norm=edge_norm,
+                )
+            )
+        self.output_norm = nn.LayerNorm(hidden_dim)
+
+        for module in self.modules():
+            if isinstance(module, nn.BatchNorm1d):
+                nn.init.constant_(module.weight, 1)
+                nn.init.constant_(module.bias, 0.0001)
+
+    def forward(self, x, edge_index, batch=None):
+        if batch is None:
+            batch = x.new_zeros(x.size(0), dtype=torch.long)
+        h = self._safe_batch_norm(self.bn_feat, x.float())
+        h = F.relu(self.conv_feat(h, edge_index))
+        for batch_norm, conv in zip(self.bns_conv, self.convs):
+            update = self._safe_batch_norm(batch_norm, h)
+            update = F.relu(conv(update, edge_index))
+            update = F.dropout(update, p=self.dropout, training=self.training)
+            h = h + update if self.residual else update
+        h = self.output_norm(h)
+        h_graph = global_mean_pool(h, batch)
+        return h, h_graph
+
+    @staticmethod
+    def _safe_batch_norm(batch_norm, x):
+        if batch_norm.training and x.size(0) <= 1:
+            return F.batch_norm(
+                x,
+                batch_norm.running_mean,
+                batch_norm.running_var,
+                batch_norm.weight,
+                batch_norm.bias,
+                training=False,
+                eps=batch_norm.eps,
+            )
+        return batch_norm(x)
+
+
+def build_graph_encoder(
+    input_dim,
+    hidden_dim=128,
+    num_layers=2,
+    dropout=0.2,
+    conv_type="gcn",
+    gat_heads=2,
+    resgcn_residual=True,
+    edge_norm=True,
+):
+    conv_type = str(conv_type).strip().lower()
+    if conv_type in {"bigcn", "bi-gcn", "bi_gcn"}:
+        return BiGCNGraphEncoder(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            dropout=dropout,
+        )
+    if conv_type in {"resgcn", "res-gcn", "res_gcn"}:
+        return ResGCNGraphEncoder(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            num_layers=num_layers,
+            dropout=dropout,
+            residual=resgcn_residual,
+            edge_norm=edge_norm,
+        )
+    return GraphEncoder(
+        input_dim=input_dim,
+        hidden_dim=hidden_dim,
+        num_layers=num_layers,
+        dropout=dropout,
+        conv_type=conv_type,
+        gat_heads=gat_heads,
+    )
 
 
 class DepthStateAggregator(nn.Module):
@@ -450,6 +624,9 @@ class TCSRModel(nn.Module):
         gnn_layers=2,
         dropout=0.2,
         conv_type="gcn",
+        gat_heads=2,
+        resgcn_residual=True,
+        edge_norm=True,
         window_k=2,
         min_future_nodes=1,
         use_anomaly=True,
@@ -474,12 +651,15 @@ class TCSRModel(nn.Module):
             hidden_dim=hidden_dim,
             dropout=dropout,
         )
-        self.graph_encoder = GraphEncoder(
+        self.graph_encoder = build_graph_encoder(
             input_dim=input_dim,
             hidden_dim=hidden_dim,
             num_layers=gnn_layers,
             dropout=dropout,
             conv_type=conv_type,
+            gat_heads=gat_heads,
+            resgcn_residual=resgcn_residual,
+            edge_norm=edge_norm,
         )
         self.depth_aggregator = DepthStateAggregator(eps=eps)
         self.reinforcement_estimator = ReinforcementEstimator(eps=eps)

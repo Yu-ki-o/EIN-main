@@ -23,12 +23,13 @@ from utils_metrics import classification_metrics, mean_std
 SELECTION_METRIC_ALIASES = {
     "loss": "loss",
     "val_loss": "loss",
-    "accuracy": "accuracy",
-    "acc": "accuracy",
-    "val_acc": "accuracy",
-    "macro_f1": "macro_f1",
-    "f1": "macro_f1",
-    "val_f1": "macro_f1",
+    "accuracy": "acc",
+    "acc": "acc",
+    "val_acc": "acc",
+    "auc": "auc",
+    "val_auc": "auc",
+    "f1": "f1",
+    "val_f1": "f1",
 }
 
 
@@ -89,7 +90,7 @@ def evaluate(model, loader, device, num_classes, stance_loss_weight=1.0):
     model.eval()
     total_loss = 0.0
     total_examples = 0
-    all_logits = []
+    all_predictions = []
     all_targets = []
     for data in loader:
         data = move_to_device(data, device)
@@ -104,19 +105,18 @@ def evaluate(model, loader, device, num_classes, stance_loss_weight=1.0):
         batch_size = int(target.size(0))
         total_loss += float(loss.item()) * batch_size
         total_examples += batch_size
-        all_logits.append(logits.detach())
+        all_predictions.append(logits.max(1).indices.detach())
         all_targets.append(target.detach())
 
-    if all_logits:
-        logits = torch.cat(all_logits, dim=0)
+    if all_predictions:
+        prediction = torch.cat(all_predictions, dim=0)
         target = torch.cat(all_targets, dim=0)
         metrics = classification_metrics(
-            logits,
+            prediction,
             target,
-            num_classes=num_classes,
         )
     else:
-        metrics = {"accuracy": 0.0, "macro_f1": 0.0}
+        metrics = {"acc": 0.0, "auc": np.nan, "f1": 0.0}
     metrics["loss"] = total_loss / max(1, total_examples)
     return metrics
 
@@ -154,6 +154,9 @@ def run_seed(seed, args, datasets, device):
         gnn_layers=args.gnn_layers,
         dropout=args.dropout,
         conv_type=args.conv_type,
+        gat_heads=args.gat_heads,
+        resgcn_residual=args.resgcn_residual,
+        edge_norm=args.edge_norm,
         window_k=args.window_k,
         min_future_nodes=args.min_future_nodes,
         use_anomaly=args.use_anomaly,
@@ -175,6 +178,8 @@ def run_seed(seed, args, datasets, device):
     best_val = float("inf") if selection_mode == "min" else -float("inf")
     best_epoch = -1
     patience_counter = 0
+    if os.path.exists(best_path):
+        os.remove(best_path)
 
     for epoch in range(1, args.epochs + 1):
         train_loss = train_one_epoch(
@@ -193,7 +198,14 @@ def run_seed(seed, args, datasets, device):
             stance_loss_weight=args.stance_loss_weight,
         )
         score = val_metrics[selection_metric]
-        improved = score < best_val if selection_mode == "min" else score > best_val
+        if np.isfinite(score):
+            improved = (
+                score < best_val
+                if selection_mode == "min"
+                else score > best_val
+            )
+        else:
+            improved = False
         if improved:
             best_val = score
             best_epoch = epoch
@@ -213,8 +225,8 @@ def run_seed(seed, args, datasets, device):
 
         print(
             "Seed {seed} Epoch {epoch:03d} | train loss {train_loss:.4f} "
-            "| val loss {loss:.4f} | val acc {accuracy:.4f} "
-            "| val macro-F1 {macro_f1:.4f}".format(
+            "| val loss {loss:.4f} | val acc {acc:.4f} "
+            "| val auc {auc:.4f} | val f1 {f1:.4f}".format(
                 seed=seed,
                 epoch=epoch,
                 train_loss=train_loss,
@@ -224,6 +236,11 @@ def run_seed(seed, args, datasets, device):
         if patience_counter >= args.patience:
             break
 
+    if not os.path.exists(best_path):
+        raise RuntimeError(
+            "No checkpoint was selected for seed {}. The validation {} "
+            "metric was never finite.".format(seed, args.selection_metric)
+        )
     checkpoint = _torch_load_checkpoint(best_path, device)
     model.load_state_dict(checkpoint["model_state_dict"])
     test_metrics = evaluate(
@@ -234,8 +251,8 @@ def run_seed(seed, args, datasets, device):
         stance_loss_weight=args.stance_loss_weight,
     )
     print(
-        "Seed {seed} best epoch {epoch} | test acc {accuracy:.4f} "
-        "| test macro-F1 {macro_f1:.4f}".format(
+        "Seed {seed} best epoch {epoch} | test acc {acc:.4f} "
+        "| test auc {auc:.4f} | test f1 {f1:.4f}".format(
             seed=seed,
             epoch=best_epoch,
             **test_metrics,
@@ -245,8 +262,9 @@ def run_seed(seed, args, datasets, device):
         "seed": seed,
         "best_epoch": best_epoch,
         "best_val": best_val,
-        "test_accuracy": test_metrics["accuracy"],
-        "test_macro_f1": test_metrics["macro_f1"],
+        "test_acc": test_metrics["acc"],
+        "test_auc": test_metrics["auc"],
+        "test_f1": test_metrics["f1"],
         "test_loss": test_metrics["loss"],
         "checkpoint": best_path,
     }
@@ -323,12 +341,15 @@ def parse_args():
     parser.add_argument("--hidden_dim", type=int, default=config.get("hidden_dim", 128))
     parser.add_argument("--gnn_layers", type=int, default=config.get("gnn_layers", 2))
     parser.add_argument("--dropout", type=float, default=config.get("dropout", 0.2))
-    parser.add_argument("--conv_type", choices=["gcn", "gat"], default=config.get("conv_type", "gcn"))
+    parser.add_argument("--conv_type", choices=["gcn", "gat", "bigcn", "resgcn"], default=config.get("conv_type", "gcn"))
+    parser.add_argument("--gat_heads", type=int, default=config.get("gat_heads", 2))
+    parser.add_argument("--resgcn_residual", action=argparse.BooleanOptionalAction, default=_as_bool(config.get("resgcn_residual", True)))
+    parser.add_argument("--edge_norm", action=argparse.BooleanOptionalAction, default=_as_bool(config.get("edge_norm", True)))
     parser.add_argument("--num_classes", type=int, default=config.get("num_classes", 2))
     parser.add_argument("--window_k", type=int, default=config.get("window_k", 2))
     parser.add_argument("--min_future_nodes", type=int, default=config.get("min_future_nodes", 1))
     parser.add_argument("--stance_loss_weight", type=float, default=config.get("stance_loss_weight", 1.0))
-    parser.add_argument("--selection_metric", default=config.get("selection_metric", "macro_f1"))
+    parser.add_argument("--selection_metric", default=config.get("selection_metric", "val_loss"))
     parser.add_argument("--train_ratio", type=float, default=config.get("train_ratio", 0.7))
     parser.add_argument("--val_ratio", type=float, default=config.get("val_ratio", 0.1))
     parser.add_argument("--use_anomaly", action=argparse.BooleanOptionalAction, default=_as_bool(config.get("use_anomaly", True)))
@@ -355,11 +376,13 @@ def main():
             raise ValueError("Train/val/test splits must all be non-empty.")
         results.append(run_seed(seed, args, datasets, device))
 
-    acc_mean, acc_std = mean_std([item["test_accuracy"] for item in results])
-    f1_mean, f1_std = mean_std([item["test_macro_f1"] for item in results])
+    acc_mean, acc_std = mean_std([item["test_acc"] for item in results])
+    auc_mean, auc_std = mean_std([item["test_auc"] for item in results])
+    f1_mean, f1_std = mean_std([item["test_f1"] for item in results])
     print("TCSR {} seed summary".format(len(results)))
-    print("Accuracy: {:.4f} +/- {:.4f}".format(acc_mean, acc_std))
-    print("Macro-F1: {:.4f} +/- {:.4f}".format(f1_mean, f1_std))
+    print("ACC: {:.4f} +/- {:.4f}".format(acc_mean, acc_std))
+    print("AUC: {:.4f} +/- {:.4f}".format(auc_mean, auc_std))
+    print("F1: {:.4f} +/- {:.4f}".format(f1_mean, f1_std))
 
 
 def load_config(config_filename):

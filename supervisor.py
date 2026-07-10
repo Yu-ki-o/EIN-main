@@ -33,6 +33,7 @@ from trainer.LIRS_trainer import LIRSTrainer
 from trainer.NEGT_trainer import NEGTTrainer
 from trainer.RAGCL_trainer import RAGCLTrainer
 from trainer.SEEGraphMAE_trainer import SEEGraphMAETrainer
+from train_tcsr import run_seed as run_tcsr_seed
 
 
 
@@ -248,6 +249,7 @@ def load_graph_dataset(args, path, text_encoder):
         'SEEGraphMAE',
         'KAGNN',
         'NEGT',
+        'TCSR',
     ]:
         return ResGCNTreeDataset(path, args.word_embedding, text_encoder, args.undirected, args=args)
     if args.base_model in [
@@ -1003,3 +1005,53 @@ def EIN_LIRS_supervisor(args):
 
     print('Seed {} | Start training'.format(args.seed), flush=True)
     return trainer.train_process()
+
+
+def EIN_TCSR_supervisor(args):
+    init_seed(args.seed, need_deepfix=True)
+
+    if not hasattr(args, 'epochs'):
+        args.epochs = getattr(args, 'n_epochs', 100)
+    if not hasattr(args, 'gnn_layers'):
+        args.gnn_layers = getattr(args, 'n_layers_conv', 2)
+    if not hasattr(args, 'conv_type'):
+        args.conv_type = 'gcn'
+    if not hasattr(args, 'gat_heads'):
+        args.gat_heads = 2
+    if not hasattr(args, 'resgcn_residual'):
+        args.resgcn_residual = True
+    if not hasattr(args, 'edge_norm'):
+        args.edge_norm = True
+    if not hasattr(args, 'window_k'):
+        args.window_k = 2
+    if not hasattr(args, 'min_future_nodes'):
+        args.min_future_nodes = 1
+    if not hasattr(args, 'stance_loss_weight'):
+        args.stance_loss_weight = 1.0
+    if not hasattr(args, 'grad_clip'):
+        args.grad_clip = 5.0
+    if not hasattr(args, 'num_workers'):
+        args.num_workers = 0
+    if not hasattr(args, 'checkpoint_dir'):
+        args.checkpoint_dir = os.path.join(
+            'checkpoints',
+            'tcsr',
+            args.dataset,
+        )
+
+    device = resolve_device(args)
+
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
+    text_encoder = build_text_encoder(args, device, label_source_path)
+
+    print('Seed {} | Building experiment datasets'.format(args.seed), flush=True)
+    datasets = build_experiment_datasets(args, text_encoder)
+
+    print('Seed {} | Initializing TCSR'.format(args.seed), flush=True)
+    result = run_tcsr_seed(args.seed, args, datasets, device)
+    return {
+        'acc': result['test_acc'],
+        'auc': result['test_auc'],
+        'f1': result['test_f1'],
+    }

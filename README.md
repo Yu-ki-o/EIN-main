@@ -30,7 +30,7 @@ Files:
 
 - `model/model_tcsr.py`: modular TCSR model and `compute_tcsr_loss`
 - `train_tcsr.py`: minimal multi-seed training script
-- `utils_metrics.py`: accuracy and macro-F1 helpers
+- `utils_metrics.py`: acc/auc/f1 helpers matching the existing trainer
 
 Each PyG `Data` object should contain:
 
@@ -46,6 +46,13 @@ Optional fields:
   support/challenge/uncertain order.
 - `data.stance_labels`: optional node stance labels for auxiliary supervision.
 
+Backbone selection is controlled by `conv_type` in the TCSR config:
+
+- `gcn`: lightweight PyG GCN encoder
+- `gat`: lightweight PyG GAT encoder
+- `bigcn`: BiGCN-style top-down + bottom-up propagation encoder
+- `resgcn`: ResGCN-style residual graph encoder
+
 GPU note: pass `--device cuda` to train on GPU. The training script moves each
 PyG batch to the selected device, and the model keeps depth expansion,
 aggregation, thresholding, and diagnostic scoring on that same device whenever
@@ -60,10 +67,14 @@ python train_tcsr.py --dataset_dir data/Pheme --device cuda
 Example with an EIN-style config file that builds dataset paths automatically:
 
 ```bash
-python train_tcsr.py --config_filename configs/EIN/DRWeibo_TCSR_word2vec.yaml
-python train_tcsr.py --config_filename configs/EIN/Weibo_TCSR_word2vec.yaml
-python train_tcsr.py --config_filename configs/EIN/Pheme_TCSR_word2vec.yaml
+python main.py --config_filename configs/EIN/DRWeibo_TCSR_word2vec.yaml
+python main.py --config_filename configs/EIN/Weibo_TCSR_word2vec.yaml
+python main.py --config_filename configs/EIN/Pheme_TCSR_word2vec.yaml
 ```
+
+The same config files can also be run through `train_tcsr.py`, but `main.py`
+is the preferred project-level entry point because it matches the existing
+five-seed experiment and summary flow.
 
 Example with explicit PyG `.pt` split files:
 

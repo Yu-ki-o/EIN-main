@@ -21,7 +21,7 @@ lr: 0.0005
 weight_decay: 0.0001
 patience: 10
 n_epochs: 100
-selection_metric: val_loss
+selection_metric: val_loss # val_loss, val_acc, val_auc, or val_f1
 split: '622'
 checkpoint_dir: checkpoints/tcsr/Pheme
 
@@ -39,7 +39,10 @@ max_hop: 47
 
 # TCSR parameters
 gnn_layers: 2
-conv_type: gcn
+conv_type: gcn # gcn, gat, bigcn, or resgcn
+gat_heads: 2
+resgcn_residual: True
+edge_norm: True
 dropout: 0.1
 window_k: 2
 min_future_nodes: 1
