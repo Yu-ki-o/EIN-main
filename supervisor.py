@@ -1,7 +1,7 @@
 import torch
 from utils.tools import get_obj_from_str
 import os
-from utils.logger import get_result_name
+import re
 from utils.word2vec import *
 from utils.dataloader import *
 from model.EIN_ResGCN import ResGCN
@@ -131,11 +131,108 @@ def parse_ood_source_datasets(args):
     return source_datasets
 
 
+def _as_bool(value, default=False):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        value = value.strip().lower()
+        if value in {'1', 'true', 'yes', 'y', 'on'}:
+            return True
+        if value in {'0', 'false', 'no', 'n', 'off'}:
+            return False
+    return bool(value)
+
+
+def _safe_cache_part(value):
+    value = str(value).strip()
+    value = re.sub(r'[^A-Za-z0-9_.-]+', '-', value)
+    value = value.strip('.-_')
+    return value or 'none'
+
+
+def _graph_dataset_cache_part(args):
+    base_model = str(getattr(args, 'base_model', '')).strip()
+    if base_model in {
+        'BiGCN',
+        'BiGCN_Uncertainty',
+        'BiGCN_StateAuxSameDiff',
+        'BiGCN_SameDiffFusion',
+        'BiGCN_UncertaintySemanticChange',
+        'BiGCN_RevisionAwareSemanticChange',
+        'LIRS',
+    }:
+        return 'tree'
+    if base_model in {
+        'ResGCN',
+        'ResGCN_Uncertainty',
+        'ResGCN_StateAuxSameDiff',
+        'ResGCN_SameDiffFusion',
+        'ResGCN_UncertaintySemanticChange',
+        'ResGCN_RevisionAwareSemanticChange',
+        'GCN_UncertaintySemanticChange',
+        'GIN_UncertaintySemanticChange',
+        'KAGNN_UncertaintySemanticChange',
+        'SEEGraphMAE',
+        'KAGNN',
+        'NEGT',
+        'TCSR',
+        'RAGCL_ResGCN',
+        'RAGCL_BiGCN',
+        'Plain_ResGCN',
+        'Plain_BiGCN',
+    }:
+        return 'resgcn-tree'
+    return base_model or 'unknown'
+
+
 def get_dataset_cache_name(args):
-    result_name = get_result_name(args)
-    if result_name:
-        return result_name
-    return 'pid_{}'.format(os.getpid())
+    word_embedding = str(getattr(args, 'word_embedding', 'unknown')).strip()
+    parts = [
+        'mode-{}'.format(getattr(args, 'experiment_mode', 'id')),
+        'graph-{}'.format(_graph_dataset_cache_part(args)),
+        'emb-{}'.format(word_embedding),
+        'lang-{}'.format(getattr(args, 'language', 'unknown')),
+        'hop-{}'.format(getattr(args, 'max_hop', 'na')),
+        'centrality-{}'.format(getattr(args, 'centrality', 'PageRank')),
+    ]
+
+    if _graph_dataset_cache_part(args) == 'resgcn-tree':
+        parts.append(
+            'undir-{}'.format(_as_bool(getattr(args, 'undirected', False)))
+        )
+
+    if word_embedding == 'word2vec':
+        parts.extend(
+            [
+                'tok-{}'.format(getattr(args, 'tokenize_mode', 'unknown')),
+                'vec-{}'.format(getattr(args, 'vector_size', 'unknown')),
+            ]
+        )
+    elif word_embedding == 'multilingual-e5-base':
+        parts.extend(
+            [
+                'e5-{}'.format(
+                    getattr(
+                        args,
+                        'e5_model_name',
+                        'intfloat/multilingual-e5-base',
+                    )
+                ),
+                'maxlen-{}'.format(getattr(args, 'e5_max_length', 128)),
+            ]
+        )
+
+    if str(getattr(args, 'experiment_mode', 'id')).strip() == 'strict_ood':
+        parts.extend(
+            [
+                'sources-{}'.format('-'.join(parse_ood_source_datasets(args))),
+                'val-{}'.format(getattr(args, 'ood_val_domain', 'source')),
+            ]
+        )
+
+    return '__'.join(_safe_cache_part(part) for part in parts)
 
 
 def dataset_paths(args, dataset):
@@ -145,9 +242,55 @@ def dataset_paths(args, dataset):
         dataset,
         'dataset_cache',
         get_dataset_cache_name(args),
+        'split_{}_k{}'.format(
+            _safe_cache_part(getattr(args, 'split', 'unknown')),
+            _safe_cache_part(getattr(args, 'k', 'unknown')),
+        ),
         'seed_{}'.format(args.seed)
     )
     return label_source_path, label_dataset_path
+
+
+def _split_dataset_paths(label_dataset_path):
+    return (
+        os.path.join(label_dataset_path, 'train'),
+        os.path.join(label_dataset_path, 'val'),
+        os.path.join(label_dataset_path, 'test'),
+    )
+
+
+def _processed_split_ready(path):
+    return (
+        os.path.isdir(os.path.join(path, 'raw'))
+        and os.path.isfile(os.path.join(path, 'processed', 'data.pt'))
+    )
+
+
+def _reuse_dataset_cache_enabled(args):
+    if _as_bool(getattr(args, 'rebuild_dataset_cache', False)):
+        return False
+    if _as_bool(getattr(args, 'force_rebuild_dataset_cache', False)):
+        return False
+    return _as_bool(getattr(args, 'reuse_dataset_cache', True), default=True)
+
+
+def load_cached_experiment_datasets(args, text_encoder, label_dataset_path):
+    if not _reuse_dataset_cache_enabled(args):
+        return None
+
+    train_path, val_path, test_path = _split_dataset_paths(label_dataset_path)
+    paths = (train_path, val_path, test_path)
+    if not all(_processed_split_ready(path) for path in paths):
+        return None
+
+    print(
+        'Seed {} | Reusing processed dataset cache: {}'.format(
+            args.seed,
+            label_dataset_path,
+        ),
+        flush=True,
+    )
+    return tuple(load_graph_dataset(args, path, text_encoder) for path in paths)
 
 
 def split_manifest_path(args, dataset):
@@ -270,6 +413,15 @@ def load_graph_dataset(args, path, text_encoder):
 def build_experiment_datasets(args, text_encoder):
     experiment_mode = getattr(args, 'experiment_mode', 'id')
     if experiment_mode == 'id':
+        _, label_dataset_path = dataset_paths(args, args.dataset)
+        cached_datasets = load_cached_experiment_datasets(
+            args,
+            text_encoder,
+            label_dataset_path,
+        )
+        if cached_datasets is not None:
+            return cached_datasets
+
         train_path, val_path, test_path = build_id_paths(args)
         return (
             load_graph_dataset(args, train_path, text_encoder),
@@ -282,6 +434,15 @@ def build_experiment_datasets(args, text_encoder):
 
     if args.word_embedding == 'word2vec':
         raise ValueError('Strict OOD requires a shared encoder. Use multilingual-e5-base for now.')
+
+    _, target_dataset_path = dataset_paths(args, args.dataset)
+    cached_datasets = load_cached_experiment_datasets(
+        args,
+        text_encoder,
+        target_dataset_path,
+    )
+    if cached_datasets is not None:
+        return cached_datasets
 
     train_path, val_path, test_path = build_strict_ood_paths(args)
     return (
