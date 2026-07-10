@@ -59,6 +59,7 @@ def train_one_epoch(
     optimizer,
     device,
     stance_loss_weight=1.0,
+    revision_loss_weight=0.0,
     grad_clip=0.0,
 ):
     model.train()
@@ -73,6 +74,7 @@ def train_one_epoch(
             data,
             aux_outputs,
             stance_loss_weight=stance_loss_weight,
+            revision_loss_weight=revision_loss_weight,
         )
         loss.backward()
         if grad_clip and grad_clip > 0.0:
@@ -86,7 +88,14 @@ def train_one_epoch(
 
 
 @torch.no_grad()
-def evaluate(model, loader, device, num_classes, stance_loss_weight=1.0):
+def evaluate(
+    model,
+    loader,
+    device,
+    num_classes,
+    stance_loss_weight=1.0,
+    revision_loss_weight=0.0,
+):
     model.eval()
     total_loss = 0.0
     total_examples = 0
@@ -100,6 +109,7 @@ def evaluate(model, loader, device, num_classes, stance_loss_weight=1.0):
             data,
             aux_outputs,
             stance_loss_weight=stance_loss_weight,
+            revision_loss_weight=revision_loss_weight,
         )
         target = data.y.view(-1).long()
         batch_size = int(target.size(0))
@@ -163,6 +173,8 @@ def run_seed(seed, args, datasets, device):
         use_isolation=args.use_isolation,
         use_dominance=args.use_dominance,
         use_threshold=args.use_threshold,
+        use_revision_expectation=args.use_revision_expectation,
+        use_correction_semantics=args.use_correction_semantics,
         use_external_stance=args.use_external_stance,
     ).to(device)
     optimizer = torch.optim.AdamW(
@@ -188,6 +200,7 @@ def run_seed(seed, args, datasets, device):
             optimizer,
             device,
             stance_loss_weight=args.stance_loss_weight,
+            revision_loss_weight=args.revision_loss_weight,
             grad_clip=args.grad_clip,
         )
         val_metrics = evaluate(
@@ -196,6 +209,7 @@ def run_seed(seed, args, datasets, device):
             device,
             args.num_classes,
             stance_loss_weight=args.stance_loss_weight,
+            revision_loss_weight=args.revision_loss_weight,
         )
         score = val_metrics[selection_metric]
         if np.isfinite(score):
@@ -249,6 +263,7 @@ def run_seed(seed, args, datasets, device):
         device,
         args.num_classes,
         stance_loss_weight=args.stance_loss_weight,
+        revision_loss_weight=args.revision_loss_weight,
     )
     print(
         "Seed {seed} best epoch {epoch} | test acc {acc:.4f} "
@@ -349,6 +364,7 @@ def parse_args():
     parser.add_argument("--window_k", type=int, default=config.get("window_k", 2))
     parser.add_argument("--min_future_nodes", type=int, default=config.get("min_future_nodes", 1))
     parser.add_argument("--stance_loss_weight", type=float, default=config.get("stance_loss_weight", 1.0))
+    parser.add_argument("--revision_loss_weight", type=float, default=config.get("revision_loss_weight", 0.1))
     parser.add_argument("--selection_metric", default=config.get("selection_metric", "val_loss"))
     parser.add_argument("--train_ratio", type=float, default=config.get("train_ratio", 0.7))
     parser.add_argument("--val_ratio", type=float, default=config.get("val_ratio", 0.1))
@@ -356,6 +372,8 @@ def parse_args():
     parser.add_argument("--use_isolation", action=argparse.BooleanOptionalAction, default=_as_bool(config.get("use_isolation", True)))
     parser.add_argument("--use_dominance", action=argparse.BooleanOptionalAction, default=_as_bool(config.get("use_dominance", True)))
     parser.add_argument("--use_threshold", action=argparse.BooleanOptionalAction, default=_as_bool(config.get("use_threshold", True)))
+    parser.add_argument("--use_revision_expectation", action=argparse.BooleanOptionalAction, default=_as_bool(config.get("use_revision_expectation", True)))
+    parser.add_argument("--use_correction_semantics", action=argparse.BooleanOptionalAction, default=_as_bool(config.get("use_correction_semantics", True)))
     parser.add_argument("--use_external_stance", action=argparse.BooleanOptionalAction, default=_as_bool(config.get("use_external_stance", True)))
     args = parser.parse_args()
 

@@ -424,36 +424,98 @@ class ReinforcementEstimator(nn.Module):
 
 
 class CorrectionPressureEstimator(nn.Module):
-    """Estimate how much challenge pressure exists at each depth."""
+    """Estimate correction pressure from stance, structure, and semantics."""
 
-    def __init__(self, hidden_dim=64, eps=1e-6):
+    def __init__(self, hidden_dim=64, use_semantics=True, eps=1e-6):
         super().__init__()
+        self.use_semantics = bool(use_semantics)
         self.eps = float(eps)
         self.scorer = nn.Sequential(
-            nn.Linear(4, hidden_dim),
+            nn.Linear(8, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, 1),
             nn.Sigmoid(),
         )
 
-    def forward(self, B, count, mask):
+    def forward(
+        self,
+        B,
+        count,
+        support_emb,
+        challenge_emb,
+        uncertain_emb,
+        root_emb,
+        mask,
+        return_components=False,
+    ):
+        support = B[..., 0]
         challenge = B[..., 1]
+        uncertain = B[..., 2]
         total_nodes = count.sum(dim=1, keepdim=True).clamp_min(1.0)
         volume = torch.log1p(count) / torch.log1p(total_nodes)
         depth_weight = _depth_weight(B.size(1), B.device, B.dtype)
         depth_weight = depth_weight.view(1, -1).expand_as(challenge)
         centrality_proxy = depth_weight
+
+        root_context = root_emb.unsqueeze(1).expand_as(challenge_emb)
+        root_contrast = 0.5 * (
+            1.0
+            - F.cosine_similarity(
+                challenge_emb,
+                root_context,
+                dim=-1,
+                eps=self.eps,
+            )
+        )
+        support_contrast = 0.5 * (
+            1.0
+            - F.cosine_similarity(
+                challenge_emb,
+                support_emb,
+                dim=-1,
+                eps=self.eps,
+            )
+        )
+        semantic_strength = challenge * torch.maximum(
+            root_contrast,
+            support_contrast,
+        )
+        challenge_dominance = (
+            challenge / (support + uncertain + self.eps)
+        ).clamp(max=10.0) / 10.0
+
+        if not self.use_semantics:
+            root_contrast = torch.zeros_like(root_contrast)
+            support_contrast = torch.zeros_like(support_contrast)
+            semantic_strength = torch.zeros_like(semantic_strength)
+            challenge_dominance = torch.zeros_like(challenge_dominance)
+
         features = torch.stack(
             (
                 challenge,
                 volume,
                 depth_weight,
                 challenge * centrality_proxy,
+                semantic_strength,
+                support_contrast * challenge,
+                uncertain,
+                challenge_dominance,
             ),
             dim=-1,
         )
         scores = self.scorer(features).squeeze(-1)
-        return scores * mask.to(dtype=scores.dtype)
+        scores = scores * mask.to(dtype=scores.dtype)
+        if not return_components:
+            return scores
+        return scores, {
+            "root_contrast": root_contrast * mask.to(dtype=root_contrast.dtype),
+            "support_contrast": support_contrast
+            * mask.to(dtype=support_contrast.dtype),
+            "semantic_strength": semantic_strength
+            * mask.to(dtype=semantic_strength.dtype),
+            "challenge_dominance": challenge_dominance
+            * mask.to(dtype=challenge_dominance.dtype),
+        }
 
 
 class RevisionOpportunityMask(nn.Module):
@@ -485,26 +547,104 @@ class CorrectionResistantAnomaly(nn.Module):
         self.pool = str(pool)
         self.eps = float(eps)
 
-    def forward(self, B, count, pressure, opportunity_mask):
+    def forward(self, B, count, pressure, opportunity_mask, expected_future_B=None):
         support = B[..., 0]
-        future_support_sum = support.new_zeros(support.size())
+        future_B_sum = B.new_zeros(B.size())
         future_count = count.new_zeros(count.size())
         for offset in range(1, self.window_k + 1):
             if offset >= support.size(1):
                 break
-            future_support_sum[:, :-offset] += (
-                support[:, offset:] * count[:, offset:]
-            )
+            future_B_sum[:, :-offset] += B[:, offset:] * count[
+                :, offset:
+            ].unsqueeze(-1)
             future_count[:, :-offset] += count[:, offset:]
-        support_future = future_support_sum / future_count.clamp_min(self.eps)
-        anomaly = opportunity_mask * pressure * F.relu(support_future - support)
+        future_B = future_B_sum / future_count.clamp_min(self.eps).unsqueeze(-1)
+
+        if expected_future_B is None:
+            expected_support = support
+            revision_residual = future_B - B
+        else:
+            expected_support = expected_future_B[..., 0]
+            revision_residual = future_B - expected_future_B
+
+        support_future = future_B[..., 0]
+        anomaly = opportunity_mask * pressure * F.relu(
+            support_future - expected_support
+        )
+        revision_residual = revision_residual * opportunity_mask.unsqueeze(-1)
 
         valid = opportunity_mask > 0
         if self.pool == "max":
             pooled = _masked_max(anomaly, valid, dim=1, keepdim=True)
         else:
             pooled = _masked_mean(anomaly, valid, dim=1, keepdim=True, eps=self.eps)
-        return anomaly, pooled
+        residual_graph = _masked_mean(
+            revision_residual,
+            valid,
+            dim=1,
+            eps=self.eps,
+        )
+        return anomaly, pooled, future_B, revision_residual, residual_graph
+
+
+class RevisionExpectationPredictor(nn.Module):
+    """Counterfactual stance expectation under reinforcement/correction."""
+
+    def __init__(self, graph_dim, hidden_dim=64, dropout=0.1, eps=1e-6):
+        super().__init__()
+        self.eps = float(eps)
+        self.gate_mlp = nn.Sequential(
+            nn.Linear(graph_dim + 6, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, 3),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, B, reinforcement, pressure, h_graph, mask):
+        batch_size, num_depths, _ = B.size()
+        graph_context = h_graph.unsqueeze(1).expand(
+            batch_size,
+            num_depths,
+            h_graph.size(-1),
+        )
+        depth_weight = _depth_weight(num_depths, B.device, B.dtype)
+        depth_weight = depth_weight.view(1, num_depths, 1).expand(
+            batch_size,
+            num_depths,
+            1,
+        )
+        features = torch.cat(
+            (
+                B,
+                reinforcement.unsqueeze(-1),
+                pressure.unsqueeze(-1),
+                depth_weight,
+                graph_context,
+            ),
+            dim=-1,
+        )
+        gates = self.gate_mlp(features)
+        adopt_gain = gates[..., 0]
+        revise_gain = gates[..., 1]
+        uncertain_gain = gates[..., 2]
+
+        conflict = torch.minimum(reinforcement, pressure)
+        delta_support = adopt_gain * reinforcement - revise_gain * pressure
+        delta_challenge = revise_gain * pressure - adopt_gain * reinforcement
+        delta_uncertain = uncertain_gain * conflict
+        deltas = torch.stack(
+            (delta_support, delta_challenge, delta_uncertain),
+            dim=-1,
+        )
+        expected = F.softmax(torch.log(B.clamp_min(self.eps)) + deltas, dim=-1)
+        expected = expected * mask.to(dtype=expected.dtype).unsqueeze(-1)
+        return expected, {
+            "adopt_gain": adopt_gain * mask.to(dtype=adopt_gain.dtype),
+            "revise_gain": revise_gain * mask.to(dtype=revise_gain.dtype),
+            "uncertain_gain": uncertain_gain
+            * mask.to(dtype=uncertain_gain.dtype),
+        }
 
 
 class CorrectionIsolation(nn.Module):
@@ -633,6 +773,8 @@ class TCSRModel(nn.Module):
         use_isolation=True,
         use_dominance=True,
         use_threshold=True,
+        use_revision_expectation=True,
+        use_correction_semantics=True,
         use_external_stance=True,
         eps=1e-6,
     ):
@@ -643,6 +785,8 @@ class TCSRModel(nn.Module):
         self.use_isolation = bool(use_isolation)
         self.use_dominance = bool(use_dominance)
         self.use_threshold = bool(use_threshold)
+        self.use_revision_expectation = bool(use_revision_expectation)
+        self.use_correction_semantics = bool(use_correction_semantics)
         self.use_external_stance = bool(use_external_stance)
         self.eps = float(eps)
 
@@ -663,10 +807,17 @@ class TCSRModel(nn.Module):
         )
         self.depth_aggregator = DepthStateAggregator(eps=eps)
         self.reinforcement_estimator = ReinforcementEstimator(eps=eps)
-        self.pressure_estimator = CorrectionPressureEstimator(eps=eps)
+        self.pressure_estimator = CorrectionPressureEstimator(
+            use_semantics=use_correction_semantics,
+            eps=eps,
+        )
         self.opportunity_masker = RevisionOpportunityMask(
             window_k=window_k,
             min_future_nodes=min_future_nodes,
+        )
+        self.revision_predictor = RevisionExpectationPredictor(
+            graph_dim=hidden_dim,
+            eps=eps,
         )
         self.anomaly_module = CorrectionResistantAnomaly(
             window_k=window_k,
@@ -679,7 +830,7 @@ class TCSRModel(nn.Module):
             eps=eps,
         )
 
-        classifier_dim = hidden_dim + 6 + 8
+        classifier_dim = hidden_dim + 6 + 11
         self.classifier = TCSRClassifier(
             input_dim=classifier_dim,
             hidden_dim=hidden_dim,
@@ -716,19 +867,56 @@ class TCSRModel(nn.Module):
             root_emb,
             depth_mask,
         )
-        pressure = self.pressure_estimator(B, count, depth_mask)
+        pressure, pressure_components = self.pressure_estimator(
+            B,
+            count,
+            depth_state["support_emb"],
+            depth_state["challenge_emb"],
+            depth_state["uncertain_emb"],
+            root_emb,
+            depth_mask,
+            return_components=True,
+        )
         opportunity_mask = self.opportunity_masker(count)
 
-        if self.use_anomaly:
-            anomaly, anomaly_graph = self.anomaly_module(
+        expected_future_B = None
+        revision_gates = self._empty_revision_gates(
+            pressure,
+            batch_size,
+            pressure.size(1),
+        )
+        if self.use_revision_expectation:
+            expected_future_B, revision_gates = self.revision_predictor(
                 B,
-                count,
+                reinforcement,
                 pressure,
-                opportunity_mask,
+                h_graph,
+                depth_mask,
             )
+
+        (
+            raw_anomaly,
+            raw_anomaly_graph,
+            future_B,
+            raw_revision_residual,
+            raw_revision_residual_graph,
+        ) = self.anomaly_module(
+            B,
+            count,
+            pressure,
+            opportunity_mask,
+            expected_future_B=expected_future_B,
+        )
+        if self.use_anomaly:
+            anomaly = raw_anomaly
+            anomaly_graph = raw_anomaly_graph
+            revision_residual = raw_revision_residual
+            revision_residual_graph = raw_revision_residual_graph
         else:
             anomaly = pressure.new_zeros(pressure.size())
             anomaly_graph = pressure.new_zeros(batch_size, 1)
+            revision_residual = pressure.new_zeros(B.size())
+            revision_residual_graph = pressure.new_zeros(batch_size, 3)
 
         if self.use_isolation:
             isolation, isolation_graph = self.isolation_module(
@@ -777,6 +965,7 @@ class TCSRModel(nn.Module):
                 reinforcement_graph,
                 pressure_graph,
                 anomaly_graph,
+                revision_residual_graph,
                 isolation_graph,
                 dominance_graph,
                 threshold_outputs["theta_adopt"],
@@ -801,6 +990,12 @@ class TCSRModel(nn.Module):
             "P": pressure,
             "R_graph": reinforcement_graph,
             "P_graph": pressure_graph,
+            "correction_pressure_components": pressure_components,
+            "expected_future_B": expected_future_B,
+            "future_B": future_B,
+            "revision_residual": revision_residual,
+            "revision_residual_graph": revision_residual_graph,
+            "revision_gates": revision_gates,
             "A_obs": anomaly,
             "A_obs_graph": anomaly_graph,
             "A_iso": isolation,
@@ -818,13 +1013,30 @@ class TCSRModel(nn.Module):
         }
         return logits, aux_outputs
 
-    def compute_loss(self, logits, data, aux_outputs, stance_loss_weight=1.0):
+    def compute_loss(
+        self,
+        logits,
+        data,
+        aux_outputs,
+        stance_loss_weight=1.0,
+        revision_loss_weight=0.0,
+    ):
         return compute_tcsr_loss(
             logits,
             data,
             aux_outputs,
             stance_loss_weight=stance_loss_weight,
+            revision_loss_weight=revision_loss_weight,
         )
+
+    @staticmethod
+    def _empty_revision_gates(reference, batch_size, num_depths):
+        zeros = reference.new_zeros(batch_size, num_depths)
+        return {
+            "adopt_gain": zeros,
+            "revise_gain": zeros,
+            "uncertain_gain": zeros,
+        }
 
     def _threshold_outputs(self, h_graph, reinforcement, pressure, depth_mask):
         if self.use_threshold:
@@ -985,15 +1197,17 @@ def compute_tcsr_loss(
     data,
     aux_outputs=None,
     stance_loss_weight=1.0,
+    revision_loss_weight=0.0,
     ignore_index=-100,
 ):
-    """Cross entropy rumor loss with optional node stance supervision."""
+    """Cross entropy rumor loss with optional stance/revision supervision."""
     labels = data.y.view(-1).long().to(device=logits.device)
     classification_loss = F.cross_entropy(logits, labels)
     loss = classification_loss
     components = {
         "classification_loss": classification_loss.detach(),
         "stance_loss": logits.new_zeros(()).detach(),
+        "revision_loss": logits.new_zeros(()).detach(),
     }
 
     stance_labels = getattr(data, "stance_labels", None)
@@ -1016,6 +1230,22 @@ def compute_tcsr_loss(
                 )
             loss = loss + float(stance_loss_weight) * stance_loss
             components["stance_loss"] = stance_loss.detach()
+
+    if (
+        aux_outputs is not None
+        and float(revision_loss_weight) > 0.0
+        and aux_outputs.get("expected_future_B") is not None
+    ):
+        expected_future = aux_outputs["expected_future_B"]
+        future = aux_outputs["future_B"]
+        opportunity = aux_outputs["opportunity_mask"] > 0
+        if bool(opportunity.any()):
+            revision_loss = F.mse_loss(
+                expected_future[opportunity],
+                future[opportunity].detach(),
+            )
+            loss = loss + float(revision_loss_weight) * revision_loss
+            components["revision_loss"] = revision_loss.detach()
 
     components["total_loss"] = loss.detach()
     return loss, components
