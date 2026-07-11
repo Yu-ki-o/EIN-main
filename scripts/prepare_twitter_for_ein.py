@@ -222,7 +222,7 @@ def stance_prompt(source_sentence: str, response_sentence: str, parent: int) -> 
             "The response comment does not believe or doubts the source post: 1.\n"
             "If the response comment only mentions someone with @ and has no other "
             "content, consider it believing the source post.\n"
-            "Return only one digit, 0 or 1."
+            "Return only one digit: 0 or 1."
         )
     return (
         f"Source sentence: '{source_sentence}'\n"
@@ -233,29 +233,54 @@ def stance_prompt(source_sentence: str, response_sentence: str, parent: int) -> 
         "The response sentence disagrees with or doubts the source sentence: 1.\n"
         "If the response sentence only mentions someone with @ and has no other "
         "content, consider it agreeing with the source sentence.\n"
-        "Return only one digit, 0 or 1."
+        "Return only one digit: 0 or 1."
     )
 
 
 @torch.no_grad()
 def predict_stance(model, tokenizer, prompt: str, max_new_tokens: int) -> int:
     device = next(model.parameters()).device
-    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=2048)
-    inputs = {key: value.to(device) for key, value in inputs.items()}
-    outputs = model.generate(
-        **inputs,
-        max_new_tokens=max_new_tokens,
-        do_sample=False,
-        pad_token_id=tokenizer.eos_token_id,
+    system_prompt = (
+        "You are a stance classifier. You must answer with exactly one "
+        "character: 0 or 1. Do not explain. Do not output code."
     )
-    generated = outputs[0][inputs["input_ids"].shape[-1] :]
-    decoded = tokenizer.decode(generated, skip_special_tokens=True)
-    match = re.search(r"\b[01]\b", decoded)
-    if match:
-        return int(match.group(0))
-    digits = re.findall(r"[01]", decoded)
-    if digits:
-        return int(digits[-1])
+    messages = [
+        {"role": "user", "content": system_prompt + "\n\n" + prompt},
+    ]
+    if hasattr(tokenizer, "apply_chat_template"):
+        input_ids = tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            return_tensors="pt",
+            tokenize=True,
+        )
+        if input_ids.shape[-1] > 2048:
+            input_ids = input_ids[:, -2048:]
+        inputs = {"input_ids": input_ids.to(device)}
+    else:
+        inputs = tokenizer(
+            system_prompt + "\n\n" + prompt,
+            return_tensors="pt",
+            truncation=True,
+            max_length=2048,
+        )
+        inputs = {key: value.to(device) for key, value in inputs.items()}
+
+    for attempt in range(2):
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=1 if attempt == 0 else max_new_tokens,
+            do_sample=False,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+        generated = outputs[0][inputs["input_ids"].shape[-1] :]
+        decoded = tokenizer.decode(generated, skip_special_tokens=True).strip()
+        if decoded in {"0", "1"}:
+            return int(decoded)
+        match = re.search(r"(?<!\d)[01](?!\d)", decoded)
+        if match:
+            return int(match.group(0))
+
     raise ValueError(f"Could not parse stance label from model output: {decoded!r}")
 
 
