@@ -1144,26 +1144,6 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 "classification_class_weights",
                 torch.tensor(class_weights, dtype=torch.float32),
             )
-        self.register_buffer(
-            "classification_branch_weights",
-            self._branch_weight_tensor(
-                getattr(args, "classification_branch_weights", None),
-                default_value=1.0,
-                weight_name="classification_branch_weights",
-            ),
-        )
-        self.register_buffer(
-            "classification_branch_loss_weights",
-            self._branch_weight_tensor(
-                getattr(args, "classification_branch_loss_weights", None),
-                default_value=1.0,
-                weight_name="classification_branch_loss_weights",
-            ),
-        )
-        self.lambda_branch_classification_loss = max(
-            0.0,
-            float(getattr(args, "lambda_branch_classification_loss", 0.0)),
-        )
 
         pool_name = str(getattr(args, "global_pool", "mean")).lower()
         self.pool_is_sum = "sum" in pool_name
@@ -1281,13 +1261,6 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             nn.LayerNorm(hid_feats),
         )
         self.classifier = nn.Linear(hid_feats, num_classes)
-        self.branch_classifiers = nn.ModuleDict()
-        if self.lambda_branch_classification_loss > 0.0:
-            for branch_name in self.classification_branch_names:
-                self.branch_classifiers[branch_name] = nn.Linear(
-                    hid_feats,
-                    num_classes,
-                )
         self.global_ds_fusion = (
             GlobalDSFusionHead(
                 hid_feats,
@@ -1302,8 +1275,6 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_aux_loss = None
         self._last_edge_relation_loss = None
         self._last_view_mi_loss = None
-        self._last_branch_log_probs = None
-        self._last_branch_classification_loss = None
         self._last_global_ds_masses = None
         self._last_global_ds_branch_masses = None
         self._last_global_ds_conflict = None
@@ -1368,161 +1339,13 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             return self.classifier.weight.new_zeros(())
         return self._last_aux_loss
 
-    def _branch_weight_tensor(
-        self,
-        raw_weights,
-        default_value,
-        weight_name,
-    ):
-        weights = [float(default_value)] * len(
-            self.classification_branch_names
-        )
-        if raw_weights is None:
-            return torch.tensor(weights, dtype=torch.float32)
-
-        if isinstance(raw_weights, str):
-            raw_weights = raw_weights.strip()
-            if raw_weights == "":
-                return torch.tensor(weights, dtype=torch.float32)
-            parts = [
-                part.strip()
-                for part in raw_weights.split(",")
-                if part.strip()
-            ]
-            if any(("=" in part or ":" in part) for part in parts):
-                parsed_weights = {}
-                for part in parts:
-                    if "=" in part:
-                        branch_name, value = part.split("=", 1)
-                    elif ":" in part:
-                        branch_name, value = part.split(":", 1)
-                    else:
-                        raise ValueError(
-                            "{} mixes named and positional branch "
-                            "weights: {}".format(weight_name, raw_weights)
-                        )
-                    parsed_weights[branch_name.strip()] = float(
-                        value.strip()
-                    )
-                raw_weights = parsed_weights
-            else:
-                raw_weights = [float(part) for part in parts]
-
-        if isinstance(raw_weights, dict):
-            branch_to_index = {
-                branch_name: index
-                for index, branch_name in enumerate(
-                    self.classification_branch_names
-                )
-            }
-            for raw_name, value in raw_weights.items():
-                branch_name = str(raw_name).strip().lower()
-                if branch_name not in branch_to_index:
-                    raise ValueError(
-                        "{} contains unknown branch '{}'; expected one "
-                        "of {}".format(
-                            weight_name,
-                            raw_name,
-                            list(self.classification_branch_names),
-                        )
-                    )
-                value = float(value)
-                if not math.isfinite(value):
-                    raise ValueError(
-                        "{} for branch '{}' must be finite".format(
-                            weight_name,
-                            raw_name,
-                        )
-                    )
-                weights[branch_to_index[branch_name]] = value
-        else:
-            if torch.is_tensor(raw_weights):
-                values = raw_weights.detach().cpu().view(-1).tolist()
-            else:
-                try:
-                    values = list(raw_weights)
-                except TypeError as exc:
-                    raise ValueError(
-                        "{} must be a dict, comma-separated string, "
-                        "or a sequence".format(weight_name)
-                    ) from exc
-            if len(values) != len(self.classification_branch_names):
-                raise ValueError(
-                    "{} must provide {} values for branches {}, got "
-                    "{}".format(
-                        weight_name,
-                        len(self.classification_branch_names),
-                        list(self.classification_branch_names),
-                        len(values),
-                    )
-                )
-            weights = [float(value) for value in values]
-            if not all(math.isfinite(value) for value in weights):
-                raise ValueError("{} values must be finite".format(weight_name))
-
-        return torch.tensor(weights, dtype=torch.float32)
-
-    def _weighted_classification_graphs(self, classification_graphs):
-        branch_weights = self.classification_branch_weights.to(
-            device=classification_graphs[0].device,
-            dtype=classification_graphs[0].dtype,
-        )
-        return [
-            graph * branch_weights[index]
-            for index, graph in enumerate(classification_graphs)
-        ]
-
-    def _branch_log_probs(self, graph_branches):
-        if len(self.branch_classifiers) == 0:
-            return None
-        return {
-            branch_name: F.log_softmax(
-                self.branch_classifiers[branch_name](
-                    graph_branches[branch_name]
-                ),
-                dim=-1,
-            )
-            for branch_name in self.classification_branch_names
-        }
-
-    def _branch_classification_loss(self, target, weight):
-        zero = self.classifier.weight.new_zeros(())
-        if (
-            self.lambda_branch_classification_loss <= 0.0
-            or self._last_branch_log_probs is None
-        ):
-            self._last_branch_classification_loss = zero
-            return zero
-
-        branch_loss = zero
-        branch_weights = self.classification_branch_loss_weights.to(
-            device=zero.device,
-            dtype=zero.dtype,
-        )
-        for index, branch_name in enumerate(self.classification_branch_names):
-            branch_loss = branch_loss + branch_weights[index] * F.nll_loss(
-                self._last_branch_log_probs[branch_name],
-                target,
-                weight=weight,
-            )
-        branch_loss = self.lambda_branch_classification_loss * branch_loss
-        self._last_branch_classification_loss = branch_loss
-        return branch_loss
-
     def classification_loss(self, output, target):
-        target = target.view(-1).long()
         weight = (
             self.classification_class_weights
             if self.classification_class_weights.numel() > 0
             else None
         )
-        main_loss = F.nll_loss(output, target, weight=weight)
-        return main_loss + self._branch_classification_loss(target, weight)
-
-    def branch_classification_loss(self):
-        if self._last_branch_classification_loss is None:
-            return self.classifier.weight.new_zeros(())
-        return self._last_branch_classification_loss
+        return F.nll_loss(output, target, weight=weight)
 
     def physics_loss(self, U, S, D, true_state):
         # This model replaces the fixed EIN compartment recurrence with a
@@ -2267,7 +2090,6 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             graph_branches[name]
             for name in self.classification_branch_names
         ]
-        self._last_branch_log_probs = self._branch_log_probs(graph_branches)
         if self.global_ds_fusion is not None:
             (
                 output_log_prob,
@@ -2276,11 +2098,8 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 global_ds_conflict,
             ) = self.global_ds_fusion(graph_branches)
         else:
-            weighted_classification_graphs = (
-                self._weighted_classification_graphs(classification_graphs)
-            )
             fused = self.fusion(
-                torch.cat(weighted_classification_graphs, dim=-1)
+                torch.cat(classification_graphs, dim=-1)
             )
             logits = self.classifier(fused)
             output_log_prob = F.log_softmax(logits, dim=-1)
