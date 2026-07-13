@@ -188,6 +188,64 @@ class EINTrainer(object):
                 branch_masses.detach().float()[..., -1].mean().item()
             )
 
+        conflict_field = getattr(self.model, '_last_conflict_field', None)
+        if torch.is_tensor(conflict_field) and conflict_field.numel() > 0:
+            diagnostics['conflict_field_abs'] = (
+                conflict_field.detach().float().abs().mean().item()
+            )
+
+        conflict_intensity = getattr(
+            self.model,
+            '_last_conflict_intensity',
+            None,
+        )
+        if (
+            torch.is_tensor(conflict_intensity)
+            and conflict_intensity.numel() > 0
+        ):
+            diagnostics['conflict_intensity'] = (
+                conflict_intensity.detach().float().mean().item()
+            )
+
+        conflict_high_frequency = getattr(
+            self.model,
+            '_last_conflict_high_frequency',
+            None,
+        )
+        if (
+            torch.is_tensor(conflict_high_frequency)
+            and conflict_high_frequency.numel() > 0
+        ):
+            diagnostics['conflict_high_frequency'] = (
+                conflict_high_frequency.detach().float().mean().item()
+            )
+
+        conflict_keep_probability = getattr(
+            self.model,
+            '_last_conflict_keep_probability',
+            None,
+        )
+        if (
+            torch.is_tensor(conflict_keep_probability)
+            and conflict_keep_probability.numel() > 0
+        ):
+            diagnostics['conflict_keep_probability'] = (
+                conflict_keep_probability.detach().float().mean().item()
+            )
+
+        conflict_keep_sample = getattr(
+            self.model,
+            '_last_conflict_keep_sample',
+            None,
+        )
+        if (
+            torch.is_tensor(conflict_keep_sample)
+            and conflict_keep_sample.numel() > 0
+        ):
+            diagnostics['conflict_keep_sample'] = (
+                conflict_keep_sample.detach().float().mean().item()
+            )
+
         return diagnostics
 
     def _accumulate_diagnostics(self, sums, counts):

@@ -108,3 +108,12 @@ global_ds_unknown_prior: 0.5
 global_ds_temperature: 1.0
 global_ds_fusion_rule: dempster
 global_ds_hidden_dim: 64
+
+
+use_conflict_field_bottleneck: true
+lambda_conflict_label_aux: 0.1
+lambda_conflict_size_aux: 0.01
+lambda_conflict_redundancy_aux: 0.01
+conflict_keep_threshold: 0.5
+conflict_balance_weight: 1.0
+conflict_high_frequency_weight: 0.5

@@ -961,6 +961,336 @@ class SemanticTreeTransformerBranch(nn.Module):
         return graph_hidden, encoded_nodes
 
 
+class ConflictFieldBottleneck(nn.Module):
+    """
+    Builds a signed support-deny semantic field and samples a compact
+    high-conflict subgraph.
+
+    The scalar field is close to 0 when support and deny semantics are
+    balanced, and close to +/-1 when one side dominates. The retained nodes
+    therefore form an interpretable conflict bottleneck around high-frequency
+    semantic changes rather than a second copy of the original propagation
+    graph.
+    """
+
+    def __init__(self, hidden_dim, num_classes, args=None):
+        super().__init__()
+        self.hidden_dim = int(hidden_dim)
+        field_hidden = int(
+            getattr(args, "conflict_field_hidden_dim", hidden_dim)
+        )
+        self.field_temperature = max(
+            1e-6,
+            float(getattr(args, "conflict_field_temperature", 1.0)),
+        )
+        self.score_temperature = max(
+            1e-6,
+            float(getattr(args, "conflict_score_temperature", 0.2)),
+        )
+        self.sample_temperature = max(
+            1e-6,
+            float(getattr(args, "conflict_sample_temperature", 0.5)),
+        )
+        self.keep_threshold = float(
+            getattr(args, "conflict_keep_threshold", 0.5)
+        )
+        self.keep_floor = min(
+            max(float(getattr(args, "conflict_keep_floor", 0.05)), 0.0),
+            1.0,
+        )
+        self.conflict_weight = max(
+            0.0,
+            float(getattr(args, "conflict_balance_weight", 1.0)),
+        )
+        self.high_frequency_weight = max(
+            0.0,
+            float(getattr(args, "conflict_high_frequency_weight", 0.5)),
+        )
+        self.use_local_high_frequency = bool(
+            getattr(args, "use_conflict_local_high_frequency", True)
+        )
+        self.use_energy_gate = bool(
+            getattr(args, "use_conflict_energy_gate", True)
+        )
+        self.force_root_keep = bool(
+            getattr(args, "conflict_force_root_keep", True)
+        )
+        self.hard_sample = bool(
+            getattr(args, "conflict_hard_sample", False)
+        )
+        self.eval_hard = bool(
+            getattr(args, "conflict_eval_hard", False)
+        )
+        self.warmup_epochs = max(
+            0,
+            int(getattr(args, "conflict_sampling_warmup_epochs", 0)),
+        )
+        self.lambda_label = max(
+            0.0,
+            float(getattr(args, "lambda_conflict_label_aux", 0.0)),
+        )
+        self.lambda_size = max(
+            0.0,
+            float(getattr(args, "lambda_conflict_size_aux", 0.0)),
+        )
+        self.lambda_redundancy = max(
+            0.0,
+            float(getattr(args, "lambda_conflict_redundancy_aux", 0.0)),
+        )
+        dropout = float(getattr(args, "dropout", 0.0))
+        self.eps = 1e-6
+        self.register_buffer(
+            "_current_epoch",
+            torch.zeros((), dtype=torch.long),
+        )
+
+        self.strength_head = nn.Sequential(
+            nn.Linear(hidden_dim, field_hidden),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(field_hidden, 1),
+        )
+        self.energy_head = nn.Sequential(
+            nn.Linear(hidden_dim * 4, field_hidden),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(field_hidden, 1),
+        )
+        self.node_encoder = nn.Sequential(
+            nn.Linear(hidden_dim * 3 + 3, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.LayerNorm(hidden_dim),
+        )
+        self.label_head = nn.Linear(hidden_dim, num_classes)
+
+    def set_epoch(self, epoch):
+        self._current_epoch.fill_(max(0, int(epoch)))
+
+    @property
+    def current_epoch(self):
+        return int(self._current_epoch.item())
+
+    def soft_bernoulli_sample(self, keep_probability):
+        keep_probability = keep_probability.clamp(
+            self.eps,
+            1.0 - self.eps,
+        )
+        if self.current_epoch < self.warmup_epochs:
+            return torch.ones_like(keep_probability)
+        if not self.training:
+            if self.eval_hard:
+                return (keep_probability >= self.keep_threshold).to(
+                    dtype=keep_probability.dtype
+                )
+            return keep_probability
+
+        uniform = torch.rand_like(keep_probability).clamp(
+            self.eps,
+            1.0 - self.eps,
+        )
+        logistic_noise = uniform.log() - torch.log1p(-uniform)
+        keep_logit = torch.logit(keep_probability, eps=self.eps)
+        sample = torch.sigmoid(
+            (keep_logit + logistic_noise) / self.sample_temperature
+        )
+        if self.hard_sample:
+            hard = (sample >= 0.5).to(dtype=sample.dtype)
+            sample = hard.detach() - sample.detach() + sample
+        return sample
+
+    def _local_high_frequency(self, field, edge_index):
+        if edge_index.numel() == 0:
+            return torch.zeros_like(field)
+        src, dst = edge_index
+        edge_variation = (field[src] - field[dst]).abs() * 0.5
+        variation_sum = torch.zeros_like(field)
+        variation_count = torch.zeros_like(field)
+        variation_sum.index_add_(0, src, edge_variation)
+        variation_sum.index_add_(0, dst, edge_variation)
+        ones = torch.ones_like(edge_variation)
+        variation_count.index_add_(0, src, ones)
+        variation_count.index_add_(0, dst, ones)
+        return variation_sum / variation_count.clamp_min(1.0)
+
+    def _pool_nodes(self, node_hidden, node_weight, batch, pool_is_sum):
+        weight = node_weight.unsqueeze(-1).to(dtype=node_hidden.dtype)
+        weighted_sum = global_add_pool(node_hidden * weight, batch)
+        if pool_is_sum:
+            return weighted_sum
+        weight_sum = global_add_pool(weight, batch)
+        return weighted_sum / weight_sum.clamp_min(1e-6)
+
+    def _regularizer_mask(self, num_nodes, roots, device, dtype):
+        mask = torch.ones(num_nodes, device=device, dtype=dtype)
+        if roots is not None and roots.numel() > 0:
+            mask[roots] = 0.0
+        return mask
+
+    def _masked_mean(self, value, mask):
+        if value.numel() == 0:
+            return value.new_zeros(())
+        denom = mask.sum().clamp_min(1.0)
+        return (value * mask).sum() / denom
+
+    def forward(
+        self,
+        support_nodes,
+        deny_nodes,
+        change_nodes,
+        edge_index,
+        batch,
+        roots,
+        pool_is_sum=False,
+        original_graph=None,
+        target=None,
+        base_node_keep=None,
+    ):
+        delta = support_nodes - deny_nodes
+        abs_delta = delta.abs()
+        support_strength = self.strength_head(support_nodes).squeeze(-1)
+        deny_strength = self.strength_head(deny_nodes).squeeze(-1)
+        field = torch.tanh(
+            (support_strength - deny_strength) / self.field_temperature
+        )
+
+        balance_conflict = (1.0 - field.abs()).clamp(0.0, 1.0)
+        energy_input = torch.cat(
+            (support_nodes, deny_nodes, delta, abs_delta),
+            dim=-1,
+        )
+        if self.use_energy_gate:
+            evidence_energy = torch.sigmoid(
+                self.energy_head(energy_input).squeeze(-1)
+            )
+        else:
+            evidence_energy = torch.ones_like(balance_conflict)
+        conflict_intensity = balance_conflict * evidence_energy
+
+        if self.use_local_high_frequency:
+            high_frequency = self._local_high_frequency(field, edge_index)
+        else:
+            high_frequency = torch.zeros_like(conflict_intensity)
+
+        score_denominator = (
+            self.conflict_weight
+            + (
+                self.high_frequency_weight
+                if self.use_local_high_frequency
+                else 0.0
+            )
+        )
+        if score_denominator <= 0.0:
+            score_denominator = 1.0
+        conflict_score = (
+            self.conflict_weight * conflict_intensity
+            + self.high_frequency_weight * high_frequency
+        ) / score_denominator
+        keep_probability = torch.sigmoid(
+            (conflict_score - self.keep_threshold)
+            / self.score_temperature
+        )
+        keep_probability = (
+            self.keep_floor
+            + (1.0 - self.keep_floor) * keep_probability
+        )
+        if base_node_keep is not None:
+            keep_probability = keep_probability * base_node_keep.clamp(
+                0.0,
+                1.0,
+            )
+        if self.force_root_keep and roots is not None and roots.numel() > 0:
+            keep_probability = keep_probability.clone()
+            keep_probability[roots] = 1.0
+
+        keep_sample = self.soft_bernoulli_sample(keep_probability)
+        if self.force_root_keep and roots is not None and roots.numel() > 0:
+            keep_sample = keep_sample.clone()
+            keep_sample[roots] = 1.0
+
+        scalar_features = torch.stack(
+            (field, conflict_intensity, high_frequency),
+            dim=-1,
+        )
+        node_input = torch.cat(
+            (change_nodes, delta, abs_delta, scalar_features),
+            dim=-1,
+        )
+        conflict_nodes = self.node_encoder(node_input)
+        graph_hidden = self._pool_nodes(
+            conflict_nodes,
+            keep_sample,
+            batch,
+            pool_is_sum,
+        )
+
+        zero = graph_hidden.new_zeros(())
+        label_loss = zero
+        if target is not None and self.lambda_label > 0.0:
+            label_logits = self.label_head(graph_hidden)
+            label_loss = self.lambda_label * F.cross_entropy(
+                label_logits,
+                target,
+            )
+
+        roots_mask = self._regularizer_mask(
+            keep_probability.size(0),
+            roots,
+            keep_probability.device,
+            keep_probability.dtype,
+        )
+        size_loss = zero
+        if self.lambda_size > 0.0:
+            size_loss = self.lambda_size * self._masked_mean(
+                keep_probability,
+                roots_mask,
+            )
+
+        redundancy_loss = zero
+        if (
+            original_graph is not None
+            and self.lambda_redundancy > 0.0
+            and original_graph.numel() > 0
+        ):
+            conflict_norm = F.normalize(
+                graph_hidden,
+                p=2,
+                dim=-1,
+                eps=self.eps,
+            )
+            original_norm = F.normalize(
+                original_graph.detach(),
+                p=2,
+                dim=-1,
+                eps=self.eps,
+            )
+            redundancy_loss = (
+                self.lambda_redundancy
+                * (conflict_norm * original_norm).sum(dim=-1).pow(2).mean()
+            )
+
+        aux_loss = label_loss + size_loss + redundancy_loss
+        outputs = {
+            "field": field,
+            "support_strength": support_strength,
+            "deny_strength": deny_strength,
+            "balance_conflict": balance_conflict,
+            "evidence_energy": evidence_energy,
+            "conflict_intensity": conflict_intensity,
+            "high_frequency": high_frequency,
+            "conflict_score": conflict_score,
+            "keep_probability": keep_probability,
+            "keep_sample": keep_sample,
+            "nodes": conflict_nodes,
+            "graph": graph_hidden,
+            "aux_loss": aux_loss,
+            "label_loss": label_loss,
+            "size_loss": size_loss,
+            "redundancy_loss": redundancy_loss,
+        }
+        return graph_hidden, conflict_nodes, outputs
+
+
 class BiGCN_UncertaintySemanticChange(nn.Module):
     """
     Uncertainty-routed support/deny dual-view rumor detector.
@@ -1009,6 +1339,9 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self.use_node_keep_in_change_pool = bool(
             getattr(args, "use_node_keep_in_change_pool", True)
         )
+        self.use_conflict_field_bottleneck = bool(
+            getattr(args, "use_conflict_field_bottleneck", False)
+        )
         requested_fusion_mode = getattr(
             args,
             "classification_fusion_mode",
@@ -1022,21 +1355,41 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 requested_branches.append("vertical")
             if self.use_semantic_tree_transformer:
                 requested_branches.append("semantic_tree")
+            if self.use_conflict_field_bottleneck:
+                requested_branches.append("conflict")
             requested_fusion_mode = "_".join(requested_branches)
         self.classification_fusion_mode = str(
             requested_fusion_mode
         ).strip().lower()
         fusion_mode_branches = {
             "change": ("change",),
+            "conflict": ("conflict",),
+            "change_conflict": ("change", "conflict"),
             "collective_revision": ("collective_revision",),
             "change_collective_revision": (
                 "change",
                 "collective_revision",
             ),
+            "change_conflict_collective_revision": (
+                "change",
+                "conflict",
+                "collective_revision",
+            ),
             "original_change": ("original", "change"),
+            "original_change_conflict": (
+                "original",
+                "change",
+                "conflict",
+            ),
             "original_change_collective_revision": (
                 "original",
                 "change",
+                "collective_revision",
+            ),
+            "original_change_conflict_collective_revision": (
+                "original",
+                "change",
+                "conflict",
                 "collective_revision",
             ),
             "original_change_trend": (
@@ -1044,10 +1397,23 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 "change",
                 "trend",
             ),
+            "original_change_trend_conflict": (
+                "original",
+                "change",
+                "trend",
+                "conflict",
+            ),
             "original_change_trend_collective_revision": (
                 "original",
                 "change",
                 "trend",
+                "collective_revision",
+            ),
+            "original_change_trend_conflict_collective_revision": (
+                "original",
+                "change",
+                "trend",
+                "conflict",
                 "collective_revision",
             ),
             "original_change_vertical": (
@@ -1055,21 +1421,52 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 "change",
                 "vertical",
             ),
+            "original_change_vertical_conflict": (
+                "original",
+                "change",
+                "vertical",
+                "conflict",
+            ),
             "original_change_trend_vertical": (
                 "original",
                 "change",
                 "trend",
                 "vertical",
             ),
+            "original_change_trend_vertical_conflict": (
+                "original",
+                "change",
+                "trend",
+                "vertical",
+                "conflict",
+            ),
+            "support_deny_conflict": (
+                "support",
+                "deny",
+                "conflict",
+            ),
             "support_deny_change": (
                 "support",
                 "deny",
                 "change",
             ),
+            "support_deny_change_conflict": (
+                "support",
+                "deny",
+                "change",
+                "conflict",
+            ),
             "support_deny_change_collective_revision": (
                 "support",
                 "deny",
                 "change",
+                "collective_revision",
+            ),
+            "support_deny_change_conflict_collective_revision": (
+                "support",
+                "deny",
+                "change",
+                "conflict",
                 "collective_revision",
             ),
             "support_deny_change_vertical": (
@@ -1078,11 +1475,40 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 "change",
                 "vertical",
             ),
+            "support_deny_change_vertical_conflict": (
+                "support",
+                "deny",
+                "change",
+                "vertical",
+                "conflict",
+            ),
         }
         for mode_name, branch_names in list(fusion_mode_branches.items()):
             fusion_mode_branches[mode_name + "_semantic_tree"] = (
                 branch_names + ("semantic_tree",)
             )
+        fusion_mode_branches.update(
+            {
+                "change_semantic_tree_conflict": (
+                    "change",
+                    "semantic_tree",
+                    "conflict",
+                ),
+                "original_change_semantic_tree_conflict": (
+                    "original",
+                    "change",
+                    "semantic_tree",
+                    "conflict",
+                ),
+                "support_deny_change_semantic_tree_conflict": (
+                    "support",
+                    "deny",
+                    "change",
+                    "semantic_tree",
+                    "conflict",
+                ),
+            }
+        )
         if self.classification_fusion_mode not in fusion_mode_branches:
             raise ValueError(
                 "classification_fusion_mode must be one of {}, got {}".format(
@@ -1100,6 +1526,10 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self.semantic_tree_active = (
             self.use_semantic_tree_transformer
             or "semantic_tree" in self.classification_branch_names
+        )
+        self.conflict_field_active = (
+            self.use_conflict_field_bottleneck
+            or "conflict" in self.classification_branch_names
         )
         self.collective_revision_active = (
             "collective_revision" in self.classification_branch_names
@@ -1245,6 +1675,15 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             if self.semantic_tree_active
             else None
         )
+        self.conflict_field_bottleneck = (
+            ConflictFieldBottleneck(
+                hid_feats,
+                num_classes,
+                args=args,
+            )
+            if self.conflict_field_active
+            else None
+        )
 
         trend_hidden = int(
             getattr(args, "uncertainty_trend_hidden_dim", hid_feats)
@@ -1331,6 +1770,22 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_collective_revision_outputs = None
         self._last_node_keep = None
         self._last_child_degree_importance = None
+        self._last_conflict_field = None
+        self._last_conflict_support_strength = None
+        self._last_conflict_deny_strength = None
+        self._last_conflict_balance = None
+        self._last_conflict_energy = None
+        self._last_conflict_intensity = None
+        self._last_conflict_high_frequency = None
+        self._last_conflict_score = None
+        self._last_conflict_keep_probability = None
+        self._last_conflict_keep_sample = None
+        self._last_conflict_nodes = None
+        self._last_conflict_graph = None
+        self._last_conflict_aux_loss = None
+        self._last_conflict_label_loss = None
+        self._last_conflict_size_loss = None
+        self._last_conflict_redundancy_loss = None
 
     def _build_view_backbone(
         self,
@@ -1355,6 +1810,8 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
 
     def set_epoch(self, epoch):
         self.edge_router.set_epoch(epoch)
+        if self.conflict_field_bottleneck is not None:
+            self.conflict_field_bottleneck.set_epoch(epoch)
 
     def init_optimizer(self, args):
         return torch.optim.Adam(
@@ -2192,6 +2649,32 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 deny_node_weight=deny_node_weight,
             )
 
+        conflict_graph = None
+        conflict_nodes = None
+        conflict_outputs = None
+        if self.conflict_field_bottleneck is not None:
+            original_context = (
+                original_graph
+                if original_graph is not None
+                else self.global_pool(node_hidden, data.batch)
+            )
+            (
+                conflict_graph,
+                conflict_nodes,
+                conflict_outputs,
+            ) = self.conflict_field_bottleneck(
+                support_nodes,
+                deny_nodes,
+                change_nodes,
+                data.edge_index,
+                data.batch,
+                self._root_indices(data),
+                pool_is_sum=self.pool_is_sum,
+                original_graph=original_context,
+                target=getattr(data, "y", None),
+                base_node_keep=node_keep,
+            )
+
         trend_sequence = self._build_uncertainty_trend(
             data,
             probabilities,
@@ -2223,6 +2706,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             "collective_revision": collective_revision_graph,
             "vertical": vertical_graph,
             "semantic_tree": semantic_tree_graph,
+            "conflict": conflict_graph,
         }
         classification_graphs = [
             graph_branches[name]
@@ -2257,9 +2741,19 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             support_graph,
             deny_graph,
         )
-        self._last_aux_loss = edge_relation_loss + view_mi_loss
+        conflict_aux_loss = (
+            relation_logits.new_zeros(())
+            if conflict_outputs is None
+            else conflict_outputs["aux_loss"]
+        )
+        self._last_aux_loss = (
+            edge_relation_loss
+            + view_mi_loss
+            + conflict_aux_loss
+        )
         self._last_edge_relation_loss = edge_relation_loss.detach()
         self._last_view_mi_loss = view_mi_loss.detach()
+        self._last_conflict_aux_loss = conflict_aux_loss.detach()
         self._last_global_ds_masses = (
             None
             if global_ds_masses is None
@@ -2317,6 +2811,62 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             if semantic_tree_depth is None
             else semantic_tree_depth.detach()
         )
+        if conflict_outputs is None:
+            self._last_conflict_field = None
+            self._last_conflict_support_strength = None
+            self._last_conflict_deny_strength = None
+            self._last_conflict_balance = None
+            self._last_conflict_energy = None
+            self._last_conflict_intensity = None
+            self._last_conflict_high_frequency = None
+            self._last_conflict_score = None
+            self._last_conflict_keep_probability = None
+            self._last_conflict_keep_sample = None
+            self._last_conflict_nodes = None
+            self._last_conflict_graph = None
+            self._last_conflict_label_loss = None
+            self._last_conflict_size_loss = None
+            self._last_conflict_redundancy_loss = None
+        else:
+            self._last_conflict_field = conflict_outputs["field"].detach()
+            self._last_conflict_support_strength = (
+                conflict_outputs["support_strength"].detach()
+            )
+            self._last_conflict_deny_strength = (
+                conflict_outputs["deny_strength"].detach()
+            )
+            self._last_conflict_balance = (
+                conflict_outputs["balance_conflict"].detach()
+            )
+            self._last_conflict_energy = (
+                conflict_outputs["evidence_energy"].detach()
+            )
+            self._last_conflict_intensity = (
+                conflict_outputs["conflict_intensity"].detach()
+            )
+            self._last_conflict_high_frequency = (
+                conflict_outputs["high_frequency"].detach()
+            )
+            self._last_conflict_score = (
+                conflict_outputs["conflict_score"].detach()
+            )
+            self._last_conflict_keep_probability = (
+                conflict_outputs["keep_probability"].detach()
+            )
+            self._last_conflict_keep_sample = (
+                conflict_outputs["keep_sample"].detach()
+            )
+            self._last_conflict_nodes = conflict_outputs["nodes"].detach()
+            self._last_conflict_graph = conflict_outputs["graph"].detach()
+            self._last_conflict_label_loss = (
+                conflict_outputs["label_loss"].detach()
+            )
+            self._last_conflict_size_loss = (
+                conflict_outputs["size_loss"].detach()
+            )
+            self._last_conflict_redundancy_loss = (
+                conflict_outputs["redundancy_loss"].detach()
+            )
         self._last_node_uncertainty = (
             None if node_uncertainty is None else node_uncertainty.detach()
         )
