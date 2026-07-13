@@ -1144,6 +1144,23 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 "classification_class_weights",
                 torch.tensor(class_weights, dtype=torch.float32),
             )
+        self.classification_head_mode = str(
+            getattr(args, "classification_head_mode", "fusion")
+        ).strip().lower()
+        valid_head_modes = {"fusion", "branch_sum"}
+        if self.classification_head_mode not in valid_head_modes:
+            raise ValueError(
+                "classification_head_mode must be one of {}, got {}".format(
+                    sorted(valid_head_modes),
+                    self.classification_head_mode,
+                )
+            )
+        self.register_buffer(
+            "classification_branch_weights",
+            self._classification_branch_weight_tensor(
+                getattr(args, "classification_branch_weights", None),
+            ),
+        )
 
         pool_name = str(getattr(args, "global_pool", "mean")).lower()
         self.pool_is_sum = "sum" in pool_name
@@ -1261,6 +1278,17 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             nn.LayerNorm(hid_feats),
         )
         self.classifier = nn.Linear(hid_feats, num_classes)
+        self.branch_classifiers = nn.ModuleDict()
+        if self.classification_head_mode == "branch_sum":
+            for branch_name in self.classification_branch_names:
+                self.branch_classifiers[branch_name] = nn.Linear(
+                    hid_feats,
+                    num_classes,
+                    bias=False,
+                )
+            self.branch_sum_bias = nn.Parameter(torch.zeros(num_classes))
+        else:
+            self.register_parameter("branch_sum_bias", None)
         self.global_ds_fusion = (
             GlobalDSFusionHead(
                 hid_feats,
@@ -1275,6 +1303,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_aux_loss = None
         self._last_edge_relation_loss = None
         self._last_view_mi_loss = None
+        self._last_branch_logits = None
         self._last_global_ds_masses = None
         self._last_global_ds_branch_masses = None
         self._last_global_ds_conflict = None
@@ -1338,6 +1367,115 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         if self._last_aux_loss is None:
             return self.classifier.weight.new_zeros(())
         return self._last_aux_loss
+
+    def _classification_branch_weight_tensor(self, raw_weights):
+        weights = [1.0] * len(self.classification_branch_names)
+        if raw_weights is None:
+            return torch.tensor(weights, dtype=torch.float32)
+
+        if isinstance(raw_weights, str):
+            raw_weights = raw_weights.strip()
+            if raw_weights == "":
+                return torch.tensor(weights, dtype=torch.float32)
+            parts = [
+                part.strip()
+                for part in raw_weights.split(",")
+                if part.strip()
+            ]
+            if any(("=" in part or ":" in part) for part in parts):
+                parsed_weights = {}
+                for part in parts:
+                    if "=" in part:
+                        branch_name, value = part.split("=", 1)
+                    elif ":" in part:
+                        branch_name, value = part.split(":", 1)
+                    else:
+                        raise ValueError(
+                            "classification_branch_weights mixes named "
+                            "and positional values: {}".format(raw_weights)
+                        )
+                    parsed_weights[branch_name.strip()] = float(
+                        value.strip()
+                    )
+                raw_weights = parsed_weights
+            else:
+                raw_weights = [float(part) for part in parts]
+
+        if isinstance(raw_weights, dict):
+            branch_to_index = {
+                branch_name: index
+                for index, branch_name in enumerate(
+                    self.classification_branch_names
+                )
+            }
+            for raw_name, value in raw_weights.items():
+                branch_name = str(raw_name).strip().lower()
+                if branch_name not in branch_to_index:
+                    raise ValueError(
+                        "classification_branch_weights contains unknown "
+                        "branch '{}'; expected one of {}".format(
+                            raw_name,
+                            list(self.classification_branch_names),
+                        )
+                    )
+                value = float(value)
+                if not math.isfinite(value):
+                    raise ValueError(
+                        "classification_branch_weights for branch '{}' "
+                        "must be finite".format(raw_name)
+                    )
+                weights[branch_to_index[branch_name]] = value
+        else:
+            if torch.is_tensor(raw_weights):
+                values = raw_weights.detach().cpu().view(-1).tolist()
+            else:
+                try:
+                    values = list(raw_weights)
+                except TypeError as exc:
+                    raise ValueError(
+                        "classification_branch_weights must be a dict, "
+                        "comma-separated string, or sequence"
+                    ) from exc
+            if len(values) != len(self.classification_branch_names):
+                raise ValueError(
+                    "classification_branch_weights must provide {} values "
+                    "for branches {}, got {}".format(
+                        len(self.classification_branch_names),
+                        list(self.classification_branch_names),
+                        len(values),
+                    )
+                )
+            weights = [float(value) for value in values]
+            if not all(math.isfinite(value) for value in weights):
+                raise ValueError(
+                    "classification_branch_weights values must be finite"
+                )
+
+        return torch.tensor(weights, dtype=torch.float32)
+
+    def _branch_sum_logits(self, classification_graphs):
+        branch_weights = self.classification_branch_weights.to(
+            device=classification_graphs[0].device,
+            dtype=classification_graphs[0].dtype,
+        )
+        logits = None
+        branch_logits = {}
+        for index, branch_name in enumerate(self.classification_branch_names):
+            weighted_graph = classification_graphs[index] * branch_weights[
+                index
+            ]
+            branch_logit = self.branch_classifiers[branch_name](
+                weighted_graph
+            )
+            branch_logits[branch_name] = branch_logit
+            logits = branch_logit if logits is None else logits + branch_logit
+        if self.branch_sum_bias is not None:
+            logits = logits + self.branch_sum_bias
+        self._last_branch_logits = {
+            name: value.detach()
+            for name, value in branch_logits.items()
+        }
+        return logits
 
     def classification_loss(self, output, target):
         weight = (
@@ -2098,10 +2236,14 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 global_ds_conflict,
             ) = self.global_ds_fusion(graph_branches)
         else:
-            fused = self.fusion(
-                torch.cat(classification_graphs, dim=-1)
-            )
-            logits = self.classifier(fused)
+            if self.classification_head_mode == "branch_sum":
+                logits = self._branch_sum_logits(classification_graphs)
+            else:
+                self._last_branch_logits = None
+                fused = self.fusion(
+                    torch.cat(classification_graphs, dim=-1)
+                )
+                logits = self.classifier(fused)
             output_log_prob = F.log_softmax(logits, dim=-1)
             global_ds_masses = None
             global_ds_branch_masses = None
