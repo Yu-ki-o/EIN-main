@@ -193,6 +193,8 @@ class EdgeRelationUncertaintyRouter(nn.Module):
             ).to(dtype=probabilities.dtype)
         return probabilities
 
+
+####这里根据边的特征构造边stance语义属于支持or反对的概率，以及不确定性，现在时ds方法建模，原始为softmax方法
     def relation_outputs(
         self,
         node_hidden,
@@ -245,7 +247,7 @@ class EdgeRelationUncertaintyRouter(nn.Module):
             support_weight = known_mass * probabilities[:, 0]
             deny_weight = known_mass * probabilities[:, 1]
             return known_mass, support_weight, deny_weight
-
+        #这里目前设置了use_uncertainty_sampling为false，所以不进行伯努利采样
         if (
             not self.use_uncertainty_sampling
             or self.current_epoch < self.warmup_epochs
@@ -258,6 +260,7 @@ class EdgeRelationUncertaintyRouter(nn.Module):
                 child_degree_importance,
             )
             keep_sample = self.soft_bernoulli_sample(keep_probability)
+
 
         # Two-stage routing:
         #   1. keep_sample decides whether the uncertain edge is retained;
@@ -945,6 +948,7 @@ class SemanticTreeTransformerBranch(nn.Module):
         )
         encoded_dense = self.output_norm(encoded_dense)
 
+        ##这里如果将配置文件中的semantic_tree_transformer_pool设置为root，则直接取根节点的表示作为图表示；如果设置为mean，则对所有有效节点取平均作为图表示；如果设置为sum，则对所有有效节点求和作为图表示。
         if self.pool == "root":
             graph_hidden = encoded_dense[:, 0]
         else:
@@ -1938,6 +1942,9 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             node_hidden,
             data.edge_index,
         )
+
+
+#### vertical path 模块，现在不开启
         vertical_nodes = None
         vertical_graph = None
         node_uncertainty = None
@@ -1958,7 +1965,6 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 node_uncertainty,
             )
             vertical_graph = self.global_pool(vertical_nodes, data.batch)
-
         (
             keep_sample,
             support_weight,
@@ -1969,6 +1975,8 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             edge_uncertainty,
             child_degree_importance,
         )
+
+        #这里现在不使用伯努利采样，默认设置node_keep为1
         node_keep = self._build_root_connected_keep(
             data,
             keep_sample,
@@ -2012,7 +2020,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             deny_node_weight=deny_node_weight,
             node_keep=node_keep,
         )
-
+        ###这里现在默认没打开，走else
         if self.use_node_keep_in_change_pool:
             change_graph = self._pool_root_connected_nodes(
                 change_nodes,
@@ -2021,6 +2029,8 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             )
         else:
             change_graph = self.global_pool(change_nodes, data.batch)
+
+
 
         semantic_tree_graph = None
         semantic_tree_nodes = None

@@ -1,4 +1,3 @@
-# model and data
 model_name: EIN
 dataset: Pheme
 num_classes: 2
@@ -7,15 +6,13 @@ word_embedding: word2vec
 e5_model_name: intfloat/multilingual-e5-base
 e5_max_length: 128
 e5_batch_size: 64
-result_name: UncertaintySemanticChange_bigcn_change_semantic_tree_manifest_ds_mlp_sumpool
+result_name: sweep_pheme_bigcn_uncertainty_semantic_change_keyparams_mlp_core_seed0_t0000_cw1p0_1p0_du1p0_lmi0p0
 experiment_mode: id
 ood_source_datasets: []
 ood_val_domain: source
-debug: False
-use_tensorboard: True
+debug: false
+use_tensorboard: true
 tensorboard_log_dir: tensorboard
-
-# training parameters
 seed: 0
 device: cuda
 lr: 0.0005
@@ -24,67 +21,52 @@ patience: 10
 n_epochs: 100
 selection_metric: val_loss
 split: '622'
-
-# model parameters
 batch_size: 128
 hidden_dim: 64
 in_feats: 200
 tokenize_mode: nltk
 k: 10000
 vector_size: 200
-undirected: False
+undirected: false
 n_layers_conv: 2
 dropout: 0.1
 global_pool: mean
-
 base_model: BiGCN_UncertaintySemanticChange
 max_hop: 47
 lamda: 0.0
-use_semantic_parity_gnn: True
-semantic_parity_residual: True
+use_semantic_parity_gnn: true
+semantic_parity_residual: true
 semantic_node_weight_mode: local
-
-# edge support/deny relation encoder
 relation_hidden_dim: 64
 relation_temperature: 1.0
 stance_route_temperature: 0.5
-stance_route_hard: True
+stance_route_hard: true
 lambda_edge_relation_aux: 0.1
 lambda_edge_relation_warmup: 0.5
-lambda_view_mi_aux: 0.01
-
-# optional Dempster-Shafer edge mass routing
-use_ds_mass_routing: True
-ds_unknown_prior: 2.0
+lambda_view_mi_aux: 0.0
+use_ds_mass_routing: true
+ds_unknown_prior: 1.0
 lambda_ds_unknown_edge_aux: 0.0
-# entropy-guided differentiable Bernoulli sampling
-use_uncertainty_sampling: False
+use_uncertainty_sampling: false
 uncertainty_keep_floor: 0.05
 uncertainty_sampling_warmup_epochs: 5
-use_degree_importance: True
+use_degree_importance: true
 degree_importance_strength: 1.0
-
-# replaceable node-level semantic change encoder: mlp or dpga
 semantic_change_encoder: mlp
 semantic_change_hidden_dim: 64
 dpga_pseudo_nodes: 4
 dpga_layers: 1
 dpga_attention_temperature: 1.0
 dpga_modulation_scale: 0.5
-dpga_use_node_weights: True
-# True: node_keep-weighted change pooling; False: ordinary graph pooling
-use_node_keep_in_change_pool: False
-
-# root-path vertical attention with edge-router uncertainty bias
-use_vertical_path_attention: False
+dpga_use_node_weights: true
+use_node_keep_in_change_pool: false
+use_vertical_path_attention: false
 vertical_path_attention_heads: 4
 vertical_path_attention_max_distance: 47
 vertical_path_attention_uncertainty_scale: 1.0
 vertical_path_attention_residual_gate: 1.0
 vertical_path_attention_dropout: 0.1
-
-# inject support/deny node semantics and depth into the propagation tree
-use_semantic_tree_transformer: True
+use_semantic_tree_transformer: true
 semantic_tree_transformer_layers: 1
 semantic_tree_transformer_heads: 4
 semantic_tree_transformer_ffn_dim: 128
@@ -92,19 +74,16 @@ semantic_tree_transformer_dropout: 0.1
 semantic_tree_transformer_max_depth: 47
 semantic_tree_depth_dim: 64
 semantic_tree_transformer_pool: mean
-
-# root-relative support/uncertain/deny state, depth size, and growth trend
 uncertainty_trend_hidden_dim: 64
-use_trend_graph: False
-
-# final branch fusion
+use_trend_graph: false
 classification_fusion_mode: change_semantic_tree
 classification_fusion_hidden_dim: 128
-classification_class_weights: [1.0, 1.5]
-
-# optional graph-level Dempster-Shafer fusion over final branches
-use_global_ds_fusion: False
+classification_class_weights:
+- 1.0
+- 1.0
+use_global_ds_fusion: false
 global_ds_unknown_prior: 0.5
 global_ds_temperature: 1.0
 global_ds_fusion_rule: dempster
 global_ds_hidden_dim: 64
+result_group: sweep_pheme_bigcn_uncertainty_semantic_change_keyparams_mlp_seed0

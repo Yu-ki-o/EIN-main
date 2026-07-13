@@ -272,7 +272,15 @@ class ResGCN(torch.nn.Module):
             S = torch.stack(Sl, dim=1)
             D = torch.stack(Dl, dim=1)
 
-            hop_ind = (n_hop - 1).long().reshape(user_state.shape[0], 1, 1).expand(-1, -1, self.args.hidden_dim) # n_hop as index
+            # Empty state histories are represented by num_hop == 0.  Map
+            # them to the first recurrent state and guard stale caches whose
+            # hop count exceeds the configured sequence length.
+            hop_ind = n_hop.view(-1).long().clamp(1, U.size(1)) - 1
+            hop_ind = hop_ind.reshape(user_state.shape[0], 1, 1).expand(
+                -1,
+                -1,
+                U.size(-1),
+            )
 
             # find real max-hop for each sample in batch
             U_m = torch.gather(U, 1, hop_ind).reshape(user_state.shape[0], self.args.hidden_dim)

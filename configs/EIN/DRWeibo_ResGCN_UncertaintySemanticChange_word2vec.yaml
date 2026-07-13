@@ -24,6 +24,7 @@ patience: 10
 n_epochs: 100
 selection_metric: val_loss
 split: '622'
+legacy_dataset_cache_name: UncertaintySemanticChange_BiGCN_change_semantic_tree_manifest_ds
 
 # model parameters
 batch_size: 128

@@ -24,7 +24,7 @@ base_model: SEEGraphMAE
 batch_size: 128
 hidden_dim: 64
 in_feats: 200
-tokenize_mode: naive
+tokenize_mode: nltk
 k: 10000
 vector_size: 200
 undirected: false

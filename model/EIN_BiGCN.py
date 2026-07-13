@@ -179,7 +179,16 @@ class BiGCN(torch.nn.Module):
         S = torch.stack(Sl, dim=1)
         D = torch.stack(Dl, dim=1)
 
-        hop_ind = (n_hop - 1).long().reshape(user_state.shape[0], 1, 1).expand(-1, -1, self.args.hidden_dim) # n_hop as index
+        # Some Twitter cascades have no state snapshots, so num_hop is zero.
+        # Treat those samples as using the first recurrent state.  Clamp the
+        # upper bound as well so malformed or stale caches cannot index past
+        # the sequence and cause a hard-to-diagnose CUDA device-side assert.
+        hop_ind = n_hop.view(-1).long().clamp(1, U.size(1)) - 1
+        hop_ind = hop_ind.reshape(user_state.shape[0], 1, 1).expand(
+            -1,
+            -1,
+            U.size(-1),
+        )
 
         # find real max-hop for each sample in batch
         U_m = torch.gather(U, 1, hop_ind).reshape(user_state.shape[0], self.args.hidden_dim)
