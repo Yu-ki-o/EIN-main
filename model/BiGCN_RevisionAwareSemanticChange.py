@@ -16,17 +16,11 @@ def _safe_logit(value):
 
 class BiGCN_RevisionAwareSemanticChange(BiGCN_UncertaintySemanticChange):
     """
-    Adds a compact correction-resistant revision signal to the existing
-    uncertainty-routed stance trajectory.
+    BiGCN entry point for collective revision-aware fusion.
 
-    The base trend sequence is:
-      support, uncertain, deny, count, growth
-
-    This model appends one derived signal:
-      anomaly = gate(challenge) * gate(support_pressure) * relu(next_support - support)
-
-    Keeping the mechanism as a single extra trajectory feature avoids turning the
-    model into a collection of separate social-pressure modules.
+    New configurations enable ``collective_revision`` through
+    ``classification_fusion_mode``. The former six-channel anomaly trend is
+    retained only so older experiment configurations remain runnable.
     """
 
     def __init__(
@@ -84,7 +78,14 @@ class BiGCN_RevisionAwareSemanticChange(BiGCN_UncertaintySemanticChange):
                 pressure,
             )
 
-        if self.use_revision_mechanism:
+        # New configurations use the explicit collective_revision fusion
+        # branch. Keep the old six-channel trend only for backward-compatible
+        # configurations that do not request that branch.
+        self.use_legacy_revision_trend = (
+            self.use_revision_mechanism
+            and not self.collective_revision_active
+        )
+        if self.use_legacy_revision_trend:
             trend_hidden = self.uncertainty_trend_encoder.hidden_size
             self.uncertainty_trend_encoder = nn.GRU(
                 input_size=6,
@@ -151,7 +152,7 @@ class BiGCN_RevisionAwareSemanticChange(BiGCN_UncertaintySemanticChange):
             probabilities,
             keep_sample,
         )
-        if not self.use_revision_mechanism:
+        if not self.use_legacy_revision_trend:
             self._last_revision_anomaly_sequence = None
             return base_trend
 

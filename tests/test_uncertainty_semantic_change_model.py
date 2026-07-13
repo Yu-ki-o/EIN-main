@@ -22,6 +22,7 @@ from model.GIN_UncertaintySemanticChange import (
 from model.KAGNN_UncertaintySemanticChange import (
     KAGNN_UncertaintySemanticChange,
 )
+from model.collective_revision import CollectiveRevisionEncoder
 
 
 def make_args():
@@ -437,6 +438,72 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
         self.assertEqual(tuple(unknown.shape), (2, 4, 1))
         self.assertEqual(tuple(support.shape), (2, 4, 1))
         self.assertEqual(tuple(deny.shape), (2, 4, 1))
+
+    def test_collective_revision_branch_can_be_enabled_by_fusion_mode(self):
+        args = make_args()
+        args.use_trend_graph = False
+        args.classification_fusion_mode = "change_collective_revision"
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).eval()
+
+        output, _, _, _ = model(make_batch())
+        self.assertEqual(tuple(output.shape), (2, 2))
+        self.assertEqual(
+            model.classification_branch_names,
+            ("change", "collective_revision"),
+        )
+        self.assertEqual(model.fusion[0].in_features, 16)
+        self.assertEqual(
+            tuple(model._last_collective_revision_graph.shape),
+            (2, 8),
+        )
+        self.assertEqual(
+            tuple(
+                model._last_collective_revision_outputs["sequence"].shape
+            ),
+            (2, 4, 5),
+        )
+
+    def test_collective_revision_distinguishes_success_from_resistance(self):
+        args = make_args()
+        args.collective_revision_window_k = 1
+        args.collective_revision_threshold_learnable = False
+        args.collective_revision_adoption_threshold_init = 0.01
+        args.collective_revision_challenge_threshold_init = 0.01
+        args.collective_revision_gate_temperature = 0.02
+        args.collective_revision_min_gain = 0.05
+        encoder = CollectiveRevisionEncoder(8, args).eval()
+
+        current = [0.75, 0.0, 0.25, 1.0, 0.5]
+        resistant_future = [0.90, 0.0, 0.10, 1.0, 0.0]
+        successful_future = [0.40, 0.0, 0.60, 1.0, 0.0]
+        padding = [0.0, 0.0, 0.0, 0.0, 0.0]
+        resistant_trend = torch.tensor(
+            [[current, resistant_future, padding]],
+            dtype=torch.float32,
+        )
+        successful_trend = torch.tensor(
+            [[current, successful_future, padding]],
+            dtype=torch.float32,
+        )
+
+        _, resistant = encoder(resistant_trend, torch.tensor([2]))
+        _, successful = encoder(successful_trend, torch.tensor([2]))
+
+        self.assertGreater(
+            float(resistant["revision_resistance"][0, 0]),
+            float(successful["revision_resistance"][0, 0]),
+        )
+        self.assertGreater(
+            float(successful["revision_success"][0, 0]),
+            float(resistant["revision_success"][0, 0]),
+        )
 
     def test_support_deny_change_classification_fusion(self):
         args = make_args()

@@ -15,6 +15,7 @@ from torch_geometric.nn import (
 )
 from torch_geometric.utils import softmax, to_dense_batch
 
+from model.collective_revision import CollectiveRevisionEncoder
 from model.semantic_change_encoder import build_semantic_change_encoder
 
 
@@ -968,6 +969,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
       -> shared bidirectional GCN encoders
       -> node-aligned MLP semantic change encoding
       -> support/unknown/deny depth-trend GRU
+      -> optional collective reinforcement/revision-response branch
       -> configurable graph-level branch fusion for classification.
 
     The unknown component is uncertainty mass, not a separately supervised
@@ -1022,11 +1024,27 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         ).strip().lower()
         fusion_mode_branches = {
             "change": ("change",),
+            "collective_revision": ("collective_revision",),
+            "change_collective_revision": (
+                "change",
+                "collective_revision",
+            ),
             "original_change": ("original", "change"),
+            "original_change_collective_revision": (
+                "original",
+                "change",
+                "collective_revision",
+            ),
             "original_change_trend": (
                 "original",
                 "change",
                 "trend",
+            ),
+            "original_change_trend_collective_revision": (
+                "original",
+                "change",
+                "trend",
+                "collective_revision",
             ),
             "original_change_vertical": (
                 "original",
@@ -1043,6 +1061,12 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 "support",
                 "deny",
                 "change",
+            ),
+            "support_deny_change_collective_revision": (
+                "support",
+                "deny",
+                "change",
+                "collective_revision",
             ),
             "support_deny_change_vertical": (
                 "support",
@@ -1072,6 +1096,9 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self.semantic_tree_active = (
             self.use_semantic_tree_transformer
             or "semantic_tree" in self.classification_branch_names
+        )
+        self.collective_revision_active = (
+            "collective_revision" in self.classification_branch_names
         )
         self.use_global_ds_fusion = bool(
             getattr(args, "use_global_ds_fusion", False)
@@ -1211,6 +1238,11 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             if trend_hidden == hid_feats
             else nn.Linear(trend_hidden, hid_feats)
         )
+        self.collective_revision_encoder = (
+            CollectiveRevisionEncoder(hid_feats, args)
+            if self.collective_revision_active
+            else None
+        )
 
         fusion_hidden = int(
             getattr(args, "classification_fusion_hidden_dim", hid_feats * 2)
@@ -1262,6 +1294,8 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_node_uncertainty = None
         self._last_trend_sequence = None
         self._last_node_state_sequence = None
+        self._last_collective_revision_graph = None
+        self._last_collective_revision_outputs = None
         self._last_node_keep = None
         self._last_child_degree_importance = None
 
@@ -2015,10 +2049,22 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             probabilities,
             keep_sample,
         )
-        trend_graph = self._encode_trend(
-            trend_sequence,
-            data.num_hop,
-        )
+        trend_graph = None
+        if "trend" in self.classification_branch_names:
+            trend_graph = self._encode_trend(
+                trend_sequence,
+                data.num_hop,
+            )
+        collective_revision_graph = None
+        collective_revision_outputs = None
+        if self.collective_revision_encoder is not None:
+            (
+                collective_revision_graph,
+                collective_revision_outputs,
+            ) = self.collective_revision_encoder(
+                trend_sequence,
+                data.num_hop,
+            )
 
         graph_branches = {
             "original": original_graph,
@@ -2026,6 +2072,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             "deny": deny_graph,
             "change": change_graph,
             "trend": trend_graph,
+            "collective_revision": collective_revision_graph,
             "vertical": vertical_graph,
             "semantic_tree": semantic_tree_graph,
         }
@@ -2122,6 +2169,19 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             None if node_uncertainty is None else node_uncertainty.detach()
         )
         self._last_trend_sequence = trend_sequence.detach()
+        self._last_collective_revision_graph = (
+            None
+            if collective_revision_graph is None
+            else collective_revision_graph.detach()
+        )
+        self._last_collective_revision_outputs = (
+            None
+            if collective_revision_outputs is None
+            else {
+                name: value.detach()
+                for name, value in collective_revision_outputs.items()
+            }
+        )
         self._last_node_keep = node_keep.detach()
         self._last_child_degree_importance = (
             child_degree_importance.detach()

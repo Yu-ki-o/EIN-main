@@ -18,10 +18,11 @@ class ResGCN_RevisionAwareSemanticChange(
     ResGCN_UncertaintySemanticChange
 ):
     """
-    ResGCN backbone with a compact correction-resistant revision signal.
+    ResGCN entry point for collective revision-aware fusion.
 
-    The mechanism is intentionally folded into the existing trend branch:
-      support, uncertain, deny, count, growth, revision_anomaly
+    New configurations enable ``collective_revision`` through
+    ``classification_fusion_mode``. The former six-channel anomaly trend is
+    retained only so older experiment configurations remain runnable.
     """
 
     def __init__(
@@ -79,7 +80,14 @@ class ResGCN_RevisionAwareSemanticChange(
                 pressure,
             )
 
-        if self.use_revision_mechanism:
+        # New configurations use the explicit collective_revision fusion
+        # branch. Keep the old six-channel trend only for backward-compatible
+        # configurations that do not request that branch.
+        self.use_legacy_revision_trend = (
+            self.use_revision_mechanism
+            and not self.collective_revision_active
+        )
+        if self.use_legacy_revision_trend:
             trend_hidden = self.uncertainty_trend_encoder.hidden_size
             self.uncertainty_trend_encoder = nn.GRU(
                 input_size=6,
@@ -146,7 +154,7 @@ class ResGCN_RevisionAwareSemanticChange(
             probabilities,
             keep_sample,
         )
-        if not self.use_revision_mechanism:
+        if not self.use_legacy_revision_trend:
             self._last_revision_anomaly_sequence = None
             return base_trend
 
