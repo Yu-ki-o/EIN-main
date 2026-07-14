@@ -873,12 +873,37 @@ class SemanticTreeTransformerBranch(nn.Module):
                 "semantic_tree_transformer_pool must be one of "
                 "['mean', 'root', 'sum'], got {}".format(self.pool)
             )
+        self.input_mode = str(
+            getattr(args, "semantic_tree_input_mode", "full")
+        ).strip().lower()
+        input_mode_aliases = {
+            "full": "full",
+            "semantic": "full",
+            "semantic_tree": "full",
+            "original": "original",
+            "origin": "original",
+            "original_only": "original",
+            "raw": "original",
+        }
+        if self.input_mode not in input_mode_aliases:
+            raise ValueError(
+                "semantic_tree_input_mode must be one of {}, got {}".format(
+                    sorted(input_mode_aliases),
+                    self.input_mode,
+                )
+            )
+        self.input_mode = input_mode_aliases[self.input_mode]
+        input_dim = (
+            self.hidden_dim * 3 + depth_dim
+            if self.input_mode == "full"
+            else self.hidden_dim + depth_dim
+        )
 
         self.depth_embedding = nn.Embedding(self.max_depth + 2, depth_dim)
         self.support_missing = nn.Parameter(torch.zeros(self.hidden_dim))
         self.deny_missing = nn.Parameter(torch.zeros(self.hidden_dim))
         self.input_projection = nn.Sequential(
-            nn.Linear(self.hidden_dim * 3 + depth_dim, self.hidden_dim),
+            nn.Linear(input_dim, self.hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.LayerNorm(self.hidden_dim),
@@ -920,26 +945,35 @@ class SemanticTreeTransformerBranch(nn.Module):
         support_node_weight=None,
         deny_node_weight=None,
     ):
-        support_nodes = self._inject_missing_view(
-            support_nodes,
-            support_node_weight,
-            self.support_missing,
-        )
-        deny_nodes = self._inject_missing_view(
-            deny_nodes,
-            deny_node_weight,
-            self.deny_missing,
-        )
         depth_nodes = self.depth_embedding(self._depth_indices(depth))
-        node_input = torch.cat(
-            (
-                original_nodes,
+        if self.input_mode == "original":
+            node_input = torch.cat(
+                (
+                    original_nodes,
+                    depth_nodes,
+                ),
+                dim=-1,
+            )
+        else:
+            support_nodes = self._inject_missing_view(
                 support_nodes,
+                support_node_weight,
+                self.support_missing,
+            )
+            deny_nodes = self._inject_missing_view(
                 deny_nodes,
-                depth_nodes,
-            ),
-            dim=-1,
-        )
+                deny_node_weight,
+                self.deny_missing,
+            )
+            node_input = torch.cat(
+                (
+                    original_nodes,
+                    support_nodes,
+                    deny_nodes,
+                    depth_nodes,
+                ),
+                dim=-1,
+            )
         node_hidden = self.input_projection(node_input)
         dense_hidden, valid_mask = to_dense_batch(node_hidden, batch)
         encoded_dense = self.encoder(
