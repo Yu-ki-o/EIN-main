@@ -1362,10 +1362,10 @@ class ConflictFieldBottleneck(nn.Module):
         self.encoder_mode = str(
             getattr(args, "conflict_encoder_mode", "pool")
         ).strip().lower()
-        if self.encoder_mode not in {"pool", "transformer"}:
+        if self.encoder_mode not in {"pool", "residual", "transformer"}:
             raise ValueError(
                 "conflict_encoder_mode must be one of "
-                "['pool', 'transformer'], got {}".format(
+                "['pool', 'residual', 'transformer'], got {}".format(
                     self.encoder_mode
                 )
             )
@@ -1430,6 +1430,24 @@ class ConflictFieldBottleneck(nn.Module):
             0.0,
             float(getattr(args, "lambda_conflict_redundancy_aux", 0.0)),
         )
+        self.residual_scale = max(
+            0.0,
+            float(getattr(args, "conflict_residual_scale", 0.5)),
+        )
+        self.residual_gate_floor = min(
+            max(
+                float(getattr(args, "conflict_residual_gate_floor", 0.25)),
+                0.0,
+            ),
+            1.0,
+        )
+        self.readout_strength = min(
+            max(
+                float(getattr(args, "conflict_readout_strength", 0.5)),
+                0.0,
+            ),
+            1.0,
+        )
         dropout = float(getattr(args, "dropout", 0.0))
         self.eps = 1e-6
         self.register_buffer(
@@ -1457,6 +1475,31 @@ class ConflictFieldBottleneck(nn.Module):
                 nn.LayerNorm(hidden_dim),
             )
             if self.encoder_mode == "pool"
+            else None
+        )
+        self.residual_encoder = (
+            nn.Sequential(
+                nn.Linear(hidden_dim * 3 + 3, field_hidden),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(field_hidden, hidden_dim),
+            )
+            if self.encoder_mode == "residual"
+            else None
+        )
+        self.residual_gate = (
+            nn.Sequential(
+                nn.Linear(hidden_dim * 4 + 3, field_hidden),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(field_hidden, 1),
+            )
+            if self.encoder_mode == "residual"
+            else None
+        )
+        self.residual_norm = (
+            nn.LayerNorm(hidden_dim)
+            if self.encoder_mode == "residual"
             else None
         )
         self.attention_encoder = (
@@ -1610,6 +1653,7 @@ class ConflictFieldBottleneck(nn.Module):
         attention_received = None
         attention_by_head = None
         node_importance = None
+        node_gate = None
         if self.encoder_mode == "transformer":
             # The Transformer consumes the pure conflict score before DS/path
             # reliability attenuation. This preserves the interpretation that
@@ -1642,6 +1686,68 @@ class ConflictFieldBottleneck(nn.Module):
                 conflict_score,
                 depth,
                 batch,
+            )
+        elif self.encoder_mode == "residual":
+            if change_nodes is None:
+                raise ValueError(
+                    "change_nodes is required when "
+                    "conflict_encoder_mode='residual'"
+                )
+            scalar_features = torch.stack(
+                (field, conflict_intensity, high_frequency),
+                dim=-1,
+            )
+            residual_input = torch.cat(
+                (change_nodes, delta, abs_delta, scalar_features),
+                dim=-1,
+            )
+            residual_update = self.residual_encoder(residual_input)
+            gate_input = torch.cat(
+                (
+                    support_nodes,
+                    deny_nodes,
+                    change_nodes,
+                    abs_delta,
+                    scalar_features,
+                ),
+                dim=-1,
+            )
+            node_gate = torch.sigmoid(
+                self.residual_gate(gate_input).squeeze(-1)
+            )
+            node_gate = (
+                self.residual_gate_floor
+                + (1.0 - self.residual_gate_floor) * node_gate
+            )
+            conflict_nodes = self.residual_norm(
+                change_nodes
+                + self.residual_scale
+                * node_gate.unsqueeze(-1)
+                * residual_update
+            )
+            readout_weight = (
+                (1.0 - self.readout_strength)
+                + self.readout_strength * conflict_score
+            )
+            readout_weight = readout_weight * node_gate
+            if base_node_keep is not None:
+                readout_weight = readout_weight * base_node_keep.clamp(
+                    0.0,
+                    1.0,
+                )
+            if (
+                self.force_root_keep
+                and roots is not None
+                and roots.numel() > 0
+            ):
+                readout_weight = readout_weight.clone()
+                readout_weight[roots] = 1.0
+            keep_sample = readout_weight.clamp(0.0, 1.0)
+            graph_hidden = self._pool_nodes(
+                conflict_nodes,
+                keep_sample,
+                batch,
+                pool_is_sum,
             )
         else:
             keep_sample = self.soft_bernoulli_sample(keep_probability)
@@ -1689,7 +1795,7 @@ class ConflictFieldBottleneck(nn.Module):
             regularized_probability = (
                 conflict_score
                 if self.encoder_mode == "transformer"
-                else keep_probability
+                else keep_sample
             )
             size_loss = self.lambda_size * self._masked_mean(
                 regularized_probability,
@@ -1735,6 +1841,7 @@ class ConflictFieldBottleneck(nn.Module):
             "attention_received": attention_received,
             "attention_by_head": attention_by_head,
             "node_importance": node_importance,
+            "node_gate": node_gate,
             "encoder_mode": self.encoder_mode,
             "nodes": conflict_nodes,
             "graph": graph_hidden,
@@ -2242,6 +2349,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_conflict_attention_received = None
         self._last_conflict_attention_by_head = None
         self._last_conflict_node_importance = None
+        self._last_conflict_node_gate = None
         self._last_conflict_encoder_mode = None
         self._last_conflict_nodes = None
         self._last_conflict_graph = None
@@ -3069,13 +3177,14 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             deny_node_weight,
             data.batch,
         )
-        legacy_conflict_pool = (
+        conflict_needs_change = (
             self.conflict_field_bottleneck is not None
-            and self.conflict_field_bottleneck.encoder_mode == "pool"
+            and self.conflict_field_bottleneck.encoder_mode
+            in {"pool", "residual"}
         )
         needs_change_nodes = (
             "change" in self.classification_branch_names
-            or legacy_conflict_pool
+            or conflict_needs_change
         )
         change_nodes = None
         change_graph = None
@@ -3311,6 +3420,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             self._last_conflict_attention_received = None
             self._last_conflict_attention_by_head = None
             self._last_conflict_node_importance = None
+            self._last_conflict_node_gate = None
             self._last_conflict_encoder_mode = None
             self._last_conflict_nodes = None
             self._last_conflict_graph = None
@@ -3363,6 +3473,11 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 None
                 if conflict_outputs["node_importance"] is None
                 else conflict_outputs["node_importance"].detach()
+            )
+            self._last_conflict_node_gate = (
+                None
+                if conflict_outputs["node_gate"] is None
+                else conflict_outputs["node_gate"].detach()
             )
             self._last_conflict_encoder_mode = conflict_outputs[
                 "encoder_mode"

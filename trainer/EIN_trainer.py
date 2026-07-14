@@ -246,6 +246,19 @@ class EINTrainer(object):
                 conflict_keep_sample.detach().float().mean().item()
             )
 
+        conflict_node_gate = getattr(
+            self.model,
+            '_last_conflict_node_gate',
+            None,
+        )
+        if (
+            torch.is_tensor(conflict_node_gate)
+            and conflict_node_gate.numel() > 0
+        ):
+            diagnostics['conflict_node_gate'] = (
+                conflict_node_gate.detach().float().mean().item()
+            )
+
         conflict_attention_received = getattr(
             self.model,
             '_last_conflict_attention_received',
