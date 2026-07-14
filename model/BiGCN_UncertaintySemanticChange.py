@@ -1794,6 +1794,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         ).strip().lower()
         fusion_mode_branches = {
             "change": ("change",),
+            "semantic_tree": ("semantic_tree",),
             "conflict": ("conflict",),
             "change_conflict": ("change", "conflict"),
             "collective_revision": ("collective_revision",),
@@ -1915,6 +1916,8 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             ),
         }
         for mode_name, branch_names in list(fusion_mode_branches.items()):
+            if "semantic_tree" in branch_names:
+                continue
             fusion_mode_branches[mode_name + "_semantic_tree"] = (
                 branch_names + ("semantic_tree",)
             )
