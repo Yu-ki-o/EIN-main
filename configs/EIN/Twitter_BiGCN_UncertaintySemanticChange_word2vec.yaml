@@ -89,6 +89,17 @@ global_ds_hidden_dim: 64
 
 
 use_conflict_field_bottleneck: true
+conflict_encoder_mode: transformer
+conflict_attention_heads: 4
+conflict_attention_layers: 1
+conflict_attention_ffn_dim: 128
+conflict_attention_dropout: 0.1
+conflict_attention_max_depth: 147
+conflict_attention_depth_dim: 64
+conflict_attention_pool: mean
+conflict_attention_key_scale: 1.0
+conflict_attention_boundary_scale: 1.0
+conflict_attention_region_scale: 1.0
 lambda_conflict_label_aux: 0.1
 lambda_conflict_size_aux: 0.01
 lambda_conflict_redundancy_aux: 0.01

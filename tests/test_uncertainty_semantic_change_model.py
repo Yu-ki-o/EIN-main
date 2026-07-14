@@ -343,6 +343,113 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
             )
         )
 
+    def test_conflict_transformer_builds_interpretable_head_biases(self):
+        args = make_args()
+        args.use_trend_graph = False
+        args.use_conflict_field_bottleneck = True
+        args.conflict_encoder_mode = "transformer"
+        args.conflict_attention_heads = 4
+        args.conflict_attention_layers = 1
+        args.conflict_attention_ffn_dim = 16
+        args.conflict_attention_depth_dim = 4
+        args.conflict_attention_max_depth = 4
+        args.conflict_attention_dropout = 0.0
+        args.classification_fusion_mode = "conflict"
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).eval()
+        encoder = model.conflict_field_bottleneck.attention_encoder
+        score = torch.tensor([[0.1, 0.4, 0.9]])
+        valid = torch.ones(1, 3, dtype=torch.bool)
+
+        bias = encoder.build_attention_bias(score, valid).view(
+            1,
+            4,
+            3,
+            3,
+        )
+
+        self.assertEqual(
+            encoder.head_roles,
+            ("key", "boundary", "region", "free"),
+        )
+        self.assertGreater(float(bias[0, 0, 0, 2]), float(bias[0, 0, 0, 0]))
+        self.assertGreater(float(bias[0, 1, 0, 2]), float(bias[0, 1, 0, 0]))
+        self.assertGreater(float(bias[0, 2, 2, 2]), float(bias[0, 2, 0, 0]))
+        self.assertTrue(torch.equal(bias[0, 3], torch.zeros(3, 3)))
+
+    def test_conflict_transformer_classifies_without_change_encoder(self):
+        args = make_args()
+        args.use_trend_graph = False
+        args.use_conflict_field_bottleneck = True
+        args.conflict_encoder_mode = "transformer"
+        args.conflict_attention_heads = 4
+        args.conflict_attention_layers = 1
+        args.conflict_attention_ffn_dim = 16
+        args.conflict_attention_depth_dim = 4
+        args.conflict_attention_max_depth = 4
+        args.conflict_attention_dropout = 0.0
+        args.conflict_attention_pool = "mean"
+        args.classification_fusion_mode = "conflict"
+        args.lambda_edge_relation_aux = 0.0
+        args.lambda_view_mi_aux = 0.0
+        args.lambda_conflict_label_aux = 0.0
+        args.lambda_conflict_size_aux = 0.0
+        args.lambda_conflict_redundancy_aux = 0.0
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).train()
+        data = make_batch()
+
+        output, _, _, _ = model(data)
+        F.nll_loss(output, data.y).backward()
+
+        self.assertEqual(model.classification_branch_names, ("conflict",))
+        self.assertIsNone(model._last_change_nodes)
+        self.assertIsNone(model._last_change_graph)
+        self.assertEqual(tuple(model._last_conflict_graph.shape), (2, 8))
+        self.assertEqual(tuple(model._last_conflict_nodes.shape), (5, 8))
+        self.assertEqual(
+            tuple(model._last_conflict_attention_received.shape),
+            (5,),
+        )
+        self.assertEqual(
+            tuple(model._last_conflict_attention_by_head.shape),
+            (5, 4),
+        )
+        self.assertEqual(
+            tuple(model._last_conflict_node_importance.shape),
+            (5,),
+        )
+        self.assertTrue(
+            torch.allclose(
+                model._last_conflict_node_importance,
+                model._last_conflict_attention_received
+                * model._last_conflict_score,
+                atol=1e-6,
+            )
+        )
+        attention_encoder = (
+            model.conflict_field_bottleneck.attention_encoder
+        )
+        self.assertIsNotNone(
+            attention_encoder.blocks[0].self_attn.in_proj_weight.grad
+        )
+        self.assertIsNotNone(attention_encoder.key_scale_raw.grad)
+        self.assertIsNone(
+            model.semantic_change_encoder.encoder[0].weight.grad
+        )
+
     def test_dpga_semantic_change_encoder_forward(self):
         args = make_args()
         args.semantic_change_encoder = "dpga"

@@ -961,21 +961,356 @@ class SemanticTreeTransformerBranch(nn.Module):
         return graph_hidden, encoded_nodes
 
 
+class ConflictConditionedTransformerBlock(nn.Module):
+    """Pre-norm Transformer block with an additive conflict attention bias."""
+
+    def __init__(self, hidden_dim, heads, feedforward_dim, dropout):
+        super().__init__()
+        self.norm1 = nn.LayerNorm(hidden_dim)
+        self.self_attn = nn.MultiheadAttention(
+            hidden_dim,
+            heads,
+            dropout=dropout,
+            batch_first=True,
+        )
+        self.attention_dropout = nn.Dropout(dropout)
+        self.norm2 = nn.LayerNorm(hidden_dim)
+        self.feedforward = nn.Sequential(
+            nn.Linear(hidden_dim, feedforward_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(feedforward_dim, hidden_dim),
+            nn.Dropout(dropout),
+        )
+
+    def forward(self, hidden, valid_mask, attention_bias):
+        normalized = self.norm1(hidden)
+        padding_mask = torch.zeros(
+            valid_mask.size(),
+            dtype=normalized.dtype,
+            device=normalized.device,
+        )
+        padding_mask = padding_mask.masked_fill(
+            ~valid_mask,
+            float("-inf"),
+        )
+        attended, attention = self.self_attn(
+            normalized,
+            normalized,
+            normalized,
+            attn_mask=attention_bias,
+            key_padding_mask=padding_mask,
+            need_weights=True,
+            average_attn_weights=False,
+        )
+        hidden = hidden + self.attention_dropout(attended)
+        hidden = hidden + self.feedforward(self.norm2(hidden))
+        hidden = hidden.masked_fill(~valid_mask.unsqueeze(-1), 0.0)
+        return hidden, attention
+
+
+class ConflictConditionedTransformer(nn.Module):
+    """
+    Uses a dual-view conflict field as an explicit Transformer prior.
+
+    Attention heads cycle through four interpretable roles:
+      * key: attend to nodes with high conflict intensity;
+      * boundary: attend across sharp conflict-intensity transitions;
+      * region: model interactions inside high-conflict regions;
+      * free: retain unconstrained content-based attention.
+
+    Unlike the legacy conflict pooling branch, this encoder is deterministic
+    and lets conflict scores affect node-to-node information exchange before
+    graph readout.
+    """
+
+    HEAD_ROLES = ("key", "boundary", "region", "free")
+
+    def __init__(self, hidden_dim, args=None):
+        super().__init__()
+        self.hidden_dim = int(hidden_dim)
+        self.heads = max(
+            1,
+            int(getattr(args, "conflict_attention_heads", 4)),
+        )
+        if self.hidden_dim % self.heads != 0:
+            raise ValueError(
+                "hidden_dim {} must be divisible by "
+                "conflict_attention_heads {}".format(
+                    self.hidden_dim,
+                    self.heads,
+                )
+            )
+        layers = max(
+            1,
+            int(getattr(args, "conflict_attention_layers", 1)),
+        )
+        feedforward_dim = max(
+            self.hidden_dim,
+            int(
+                getattr(
+                    args,
+                    "conflict_attention_ffn_dim",
+                    self.hidden_dim * 2,
+                )
+            ),
+        )
+        dropout = float(
+            getattr(
+                args,
+                "conflict_attention_dropout",
+                getattr(args, "dropout", 0.0),
+            )
+        )
+        self.max_depth = max(
+            1,
+            int(
+                getattr(
+                    args,
+                    "conflict_attention_max_depth",
+                    getattr(args, "max_hop", 32),
+                )
+            ),
+        )
+        depth_dim = max(
+            1,
+            int(
+                getattr(
+                    args,
+                    "conflict_attention_depth_dim",
+                    self.hidden_dim,
+                )
+            ),
+        )
+        self.pool = str(
+            getattr(args, "conflict_attention_pool", "mean")
+        ).strip().lower()
+        if self.pool not in {"mean", "root", "sum"}:
+            raise ValueError(
+                "conflict_attention_pool must be one of "
+                "['mean', 'root', 'sum'], got {}".format(self.pool)
+            )
+
+        self.head_roles = tuple(
+            self.HEAD_ROLES[index % len(self.HEAD_ROLES)]
+            for index in range(self.heads)
+        )
+        role_scales = {
+            "key": float(
+                getattr(args, "conflict_attention_key_scale", 1.0)
+            ),
+            "boundary": float(
+                getattr(args, "conflict_attention_boundary_scale", 1.0)
+            ),
+            "region": float(
+                getattr(args, "conflict_attention_region_scale", 1.0)
+            ),
+        }
+        for role, value in role_scales.items():
+            if value < 0.0 or not math.isfinite(value):
+                raise ValueError(
+                    "conflict attention {} scale must be finite and "
+                    "non-negative, got {}".format(role, value)
+                )
+        self.key_scale_raw = nn.Parameter(
+            self._inverse_softplus(role_scales["key"])
+        )
+        self.boundary_scale_raw = nn.Parameter(
+            self._inverse_softplus(role_scales["boundary"])
+        )
+        self.region_scale_raw = nn.Parameter(
+            self._inverse_softplus(role_scales["region"])
+        )
+
+        self.depth_embedding = nn.Embedding(self.max_depth + 2, depth_dim)
+        self.input_projection = nn.Sequential(
+            nn.Linear(
+                self.hidden_dim * 3 + depth_dim + 4,
+                self.hidden_dim,
+            ),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.LayerNorm(self.hidden_dim),
+        )
+        self.blocks = nn.ModuleList(
+            [
+                ConflictConditionedTransformerBlock(
+                    self.hidden_dim,
+                    self.heads,
+                    feedforward_dim,
+                    dropout,
+                )
+                for _ in range(layers)
+            ]
+        )
+        self.output_norm = nn.LayerNorm(self.hidden_dim)
+
+    @staticmethod
+    def _inverse_softplus(value):
+        value = max(float(value), 1e-6)
+        return torch.tensor(math.log(math.expm1(value)))
+
+    def _depth_indices(self, depth):
+        return depth.long().clamp(-1, self.max_depth) + 1
+
+    def attention_scales(self):
+        return {
+            "key": F.softplus(self.key_scale_raw),
+            "boundary": F.softplus(self.boundary_scale_raw),
+            "region": F.softplus(self.region_scale_raw),
+        }
+
+    def build_attention_bias(self, dense_score, valid_mask):
+        score = dense_score.clamp(0.0, 1.0)
+        query_score = score.unsqueeze(-1)
+        key_score = score.unsqueeze(-2)
+        role_bias = {
+            "key": key_score.expand(-1, score.size(1), -1),
+            "boundary": (query_score - key_score).abs(),
+            "region": query_score * key_score,
+            "free": torch.zeros(
+                score.size(0),
+                score.size(1),
+                score.size(1),
+                dtype=score.dtype,
+                device=score.device,
+            ),
+        }
+        scales = self.attention_scales()
+        head_biases = []
+        for role in self.head_roles:
+            bias = role_bias[role]
+            if role in scales:
+                bias = bias * scales[role].to(dtype=bias.dtype)
+            head_biases.append(bias)
+        attention_bias = torch.stack(head_biases, dim=1)
+        valid_pair = valid_mask.unsqueeze(1) & valid_mask.unsqueeze(2)
+        attention_bias = attention_bias * valid_pair.unsqueeze(1).to(
+            dtype=attention_bias.dtype
+        )
+        return attention_bias.reshape(
+            score.size(0) * self.heads,
+            score.size(1),
+            score.size(1),
+        )
+
+    def _attention_received(self, attention, valid_mask):
+        query_mask = valid_mask[:, None, :, None].to(
+            dtype=attention.dtype
+        )
+        query_count = query_mask.sum(dim=2).clamp_min(1.0)
+        received = (attention * query_mask).sum(dim=2) / query_count
+        received = received * valid_mask[:, None, :].to(
+            dtype=received.dtype
+        )
+        by_head = received.permute(0, 2, 1)[valid_mask]
+        return by_head.mean(dim=-1), by_head
+
+    def forward(
+        self,
+        original_nodes,
+        support_nodes,
+        deny_nodes,
+        field,
+        conflict_intensity,
+        high_frequency,
+        conflict_score,
+        depth,
+        batch,
+    ):
+        scalar_features = torch.stack(
+            (
+                field,
+                conflict_intensity,
+                high_frequency,
+                conflict_score,
+            ),
+            dim=-1,
+        )
+        depth_features = self.depth_embedding(self._depth_indices(depth))
+        node_input = torch.cat(
+            (
+                original_nodes,
+                support_nodes,
+                deny_nodes,
+                depth_features,
+                scalar_features,
+            ),
+            dim=-1,
+        )
+        node_hidden = self.input_projection(node_input)
+        dense_hidden, valid_mask = to_dense_batch(node_hidden, batch)
+        dense_score, score_mask = to_dense_batch(conflict_score, batch)
+        if not torch.equal(valid_mask, score_mask):
+            raise ValueError(
+                "conflict score batching is not aligned with node batching"
+            )
+        attention_bias = self.build_attention_bias(
+            dense_score,
+            valid_mask,
+        )
+        attention = None
+        for block in self.blocks:
+            dense_hidden, attention = block(
+                dense_hidden,
+                valid_mask,
+                attention_bias,
+            )
+        dense_hidden = self.output_norm(dense_hidden)
+        dense_hidden = dense_hidden.masked_fill(
+            ~valid_mask.unsqueeze(-1),
+            0.0,
+        )
+
+        if self.pool == "root":
+            graph_hidden = dense_hidden[:, 0]
+        else:
+            mask = valid_mask.unsqueeze(-1).to(dtype=dense_hidden.dtype)
+            graph_hidden = (dense_hidden * mask).sum(dim=1)
+            if self.pool == "mean":
+                graph_hidden = graph_hidden / mask.sum(dim=1).clamp_min(1.0)
+
+        encoded_nodes = dense_hidden[valid_mask]
+        attention_received, attention_by_head = self._attention_received(
+            attention,
+            valid_mask,
+        )
+        node_importance = attention_received * conflict_score
+        return (
+            graph_hidden,
+            encoded_nodes,
+            attention_received,
+            attention_by_head,
+            node_importance,
+        )
+
+
 class ConflictFieldBottleneck(nn.Module):
     """
-    Builds a signed support-deny semantic field and samples a compact
-    high-conflict subgraph.
+    Builds a signed support-deny semantic field and encodes high-conflict
+    propagation evidence.
 
     The scalar field is close to 0 when support and deny semantics are
-    balanced, and close to +/-1 when one side dominates. The retained nodes
-    therefore form an interpretable conflict bottleneck around high-frequency
-    semantic changes rather than a second copy of the original propagation
-    graph.
+    balanced, and close to +/-1 when one side dominates. ``pool`` mode keeps
+    the legacy Binary-Concrete weighted readout. ``transformer`` mode uses the
+    conflict score as a deterministic multi-head attention prior, so key
+    nodes, conflict boundaries, and high-conflict regions affect information
+    exchange before graph readout.
     """
 
     def __init__(self, hidden_dim, num_classes, args=None):
         super().__init__()
         self.hidden_dim = int(hidden_dim)
+        self.encoder_mode = str(
+            getattr(args, "conflict_encoder_mode", "pool")
+        ).strip().lower()
+        if self.encoder_mode not in {"pool", "transformer"}:
+            raise ValueError(
+                "conflict_encoder_mode must be one of "
+                "['pool', 'transformer'], got {}".format(
+                    self.encoder_mode
+                )
+            )
         field_hidden = int(
             getattr(args, "conflict_field_hidden_dim", hidden_dim)
         )
@@ -1056,11 +1391,20 @@ class ConflictFieldBottleneck(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(field_hidden, 1),
         )
-        self.node_encoder = nn.Sequential(
-            nn.Linear(hidden_dim * 3 + 3, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.LayerNorm(hidden_dim),
+        self.node_encoder = (
+            nn.Sequential(
+                nn.Linear(hidden_dim * 3 + 3, hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.LayerNorm(hidden_dim),
+            )
+            if self.encoder_mode == "pool"
+            else None
+        )
+        self.attention_encoder = (
+            ConflictConditionedTransformer(hidden_dim, args=args)
+            if self.encoder_mode == "transformer"
+            else None
         )
         self.label_head = nn.Linear(hidden_dim, num_classes)
 
@@ -1145,6 +1489,8 @@ class ConflictFieldBottleneck(nn.Module):
         original_graph=None,
         target=None,
         base_node_keep=None,
+        original_nodes=None,
+        depth=None,
     ):
         delta = support_nodes - deny_nodes
         abs_delta = delta.abs()
@@ -1203,26 +1549,67 @@ class ConflictFieldBottleneck(nn.Module):
             keep_probability = keep_probability.clone()
             keep_probability[roots] = 1.0
 
-        keep_sample = self.soft_bernoulli_sample(keep_probability)
-        if self.force_root_keep and roots is not None and roots.numel() > 0:
-            keep_sample = keep_sample.clone()
-            keep_sample[roots] = 1.0
+        attention_received = None
+        attention_by_head = None
+        node_importance = None
+        if self.encoder_mode == "transformer":
+            # The Transformer consumes the pure conflict score before DS/path
+            # reliability attenuation. This preserves the interpretation that
+            # a higher semantic conflict score always supplies a stronger
+            # conflict-attention prior.
+            keep_sample = keep_probability
+            if original_nodes is None:
+                raise ValueError(
+                    "original_nodes is required when "
+                    "conflict_encoder_mode='transformer'"
+                )
+            if depth is None:
+                raise ValueError(
+                    "depth is required when "
+                    "conflict_encoder_mode='transformer'"
+                )
+            (
+                graph_hidden,
+                conflict_nodes,
+                attention_received,
+                attention_by_head,
+                node_importance,
+            ) = self.attention_encoder(
+                original_nodes,
+                support_nodes,
+                deny_nodes,
+                field,
+                conflict_intensity,
+                high_frequency,
+                conflict_score,
+                depth,
+                batch,
+            )
+        else:
+            keep_sample = self.soft_bernoulli_sample(keep_probability)
+            if (
+                self.force_root_keep
+                and roots is not None
+                and roots.numel() > 0
+            ):
+                keep_sample = keep_sample.clone()
+                keep_sample[roots] = 1.0
 
-        scalar_features = torch.stack(
-            (field, conflict_intensity, high_frequency),
-            dim=-1,
-        )
-        node_input = torch.cat(
-            (change_nodes, delta, abs_delta, scalar_features),
-            dim=-1,
-        )
-        conflict_nodes = self.node_encoder(node_input)
-        graph_hidden = self._pool_nodes(
-            conflict_nodes,
-            keep_sample,
-            batch,
-            pool_is_sum,
-        )
+            scalar_features = torch.stack(
+                (field, conflict_intensity, high_frequency),
+                dim=-1,
+            )
+            node_input = torch.cat(
+                (change_nodes, delta, abs_delta, scalar_features),
+                dim=-1,
+            )
+            conflict_nodes = self.node_encoder(node_input)
+            graph_hidden = self._pool_nodes(
+                conflict_nodes,
+                keep_sample,
+                batch,
+                pool_is_sum,
+            )
 
         zero = graph_hidden.new_zeros(())
         label_loss = zero
@@ -1241,8 +1628,13 @@ class ConflictFieldBottleneck(nn.Module):
         )
         size_loss = zero
         if self.lambda_size > 0.0:
+            regularized_probability = (
+                conflict_score
+                if self.encoder_mode == "transformer"
+                else keep_probability
+            )
             size_loss = self.lambda_size * self._masked_mean(
-                keep_probability,
+                regularized_probability,
                 roots_mask,
             )
 
@@ -1281,6 +1673,11 @@ class ConflictFieldBottleneck(nn.Module):
             "conflict_score": conflict_score,
             "keep_probability": keep_probability,
             "keep_sample": keep_sample,
+            "attention_score": conflict_score,
+            "attention_received": attention_received,
+            "attention_by_head": attention_by_head,
+            "node_importance": node_importance,
+            "encoder_mode": self.encoder_mode,
             "nodes": conflict_nodes,
             "graph": graph_hidden,
             "aux_loss": aux_loss,
@@ -1780,6 +2177,11 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_conflict_score = None
         self._last_conflict_keep_probability = None
         self._last_conflict_keep_sample = None
+        self._last_conflict_attention_score = None
+        self._last_conflict_attention_received = None
+        self._last_conflict_attention_by_head = None
+        self._last_conflict_node_importance = None
+        self._last_conflict_encoder_mode = None
         self._last_conflict_nodes = None
         self._last_conflict_graph = None
         self._last_conflict_aux_loss = None
@@ -2606,24 +3008,34 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             deny_node_weight,
             data.batch,
         )
-        change_nodes = self.semantic_change_encoder(
-            support_nodes,
-            deny_nodes,
-            batch=data.batch,
-            edge_index=data.edge_index,
-            support_node_weight=support_node_weight,
-            deny_node_weight=deny_node_weight,
-            node_keep=node_keep,
+        legacy_conflict_pool = (
+            self.conflict_field_bottleneck is not None
+            and self.conflict_field_bottleneck.encoder_mode == "pool"
         )
-        ###这里现在默认没打开，走else
-        if self.use_node_keep_in_change_pool:
-            change_graph = self._pool_root_connected_nodes(
-                change_nodes,
-                node_keep,
-                data.batch,
+        needs_change_nodes = (
+            "change" in self.classification_branch_names
+            or legacy_conflict_pool
+        )
+        change_nodes = None
+        change_graph = None
+        if needs_change_nodes:
+            change_nodes = self.semantic_change_encoder(
+                support_nodes,
+                deny_nodes,
+                batch=data.batch,
+                edge_index=data.edge_index,
+                support_node_weight=support_node_weight,
+                deny_node_weight=deny_node_weight,
+                node_keep=node_keep,
             )
-        else:
-            change_graph = self.global_pool(change_nodes, data.batch)
+            if self.use_node_keep_in_change_pool:
+                change_graph = self._pool_root_connected_nodes(
+                    change_nodes,
+                    node_keep,
+                    data.batch,
+                )
+            else:
+                change_graph = self.global_pool(change_nodes, data.batch)
 
 
 
@@ -2653,6 +3065,12 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         conflict_nodes = None
         conflict_outputs = None
         if self.conflict_field_bottleneck is not None:
+            conflict_depth = semantic_tree_depth
+            if (
+                self.conflict_field_bottleneck.encoder_mode == "transformer"
+                and conflict_depth is None
+            ):
+                conflict_depth = self._node_depths(data, data.edge_index)
             original_context = (
                 original_graph
                 if original_graph is not None
@@ -2673,6 +3091,8 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 original_graph=original_context,
                 target=getattr(data, "y", None),
                 base_node_keep=node_keep,
+                original_nodes=node_hidden,
+                depth=conflict_depth,
             )
 
         trend_sequence = self._build_uncertainty_trend(
@@ -2788,8 +3208,12 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         )
         self._last_support_graph = support_graph.detach()
         self._last_deny_graph = deny_graph.detach()
-        self._last_change_nodes = change_nodes.detach()
-        self._last_change_graph = change_graph.detach()
+        self._last_change_nodes = (
+            None if change_nodes is None else change_nodes.detach()
+        )
+        self._last_change_graph = (
+            None if change_graph is None else change_graph.detach()
+        )
         self._last_vertical_nodes = (
             None if vertical_nodes is None else vertical_nodes.detach()
         )
@@ -2822,6 +3246,11 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             self._last_conflict_score = None
             self._last_conflict_keep_probability = None
             self._last_conflict_keep_sample = None
+            self._last_conflict_attention_score = None
+            self._last_conflict_attention_received = None
+            self._last_conflict_attention_by_head = None
+            self._last_conflict_node_importance = None
+            self._last_conflict_encoder_mode = None
             self._last_conflict_nodes = None
             self._last_conflict_graph = None
             self._last_conflict_label_loss = None
@@ -2856,6 +3285,27 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             self._last_conflict_keep_sample = (
                 conflict_outputs["keep_sample"].detach()
             )
+            self._last_conflict_attention_score = (
+                conflict_outputs["attention_score"].detach()
+            )
+            self._last_conflict_attention_received = (
+                None
+                if conflict_outputs["attention_received"] is None
+                else conflict_outputs["attention_received"].detach()
+            )
+            self._last_conflict_attention_by_head = (
+                None
+                if conflict_outputs["attention_by_head"] is None
+                else conflict_outputs["attention_by_head"].detach()
+            )
+            self._last_conflict_node_importance = (
+                None
+                if conflict_outputs["node_importance"] is None
+                else conflict_outputs["node_importance"].detach()
+            )
+            self._last_conflict_encoder_mode = conflict_outputs[
+                "encoder_mode"
+            ]
             self._last_conflict_nodes = conflict_outputs["nodes"].detach()
             self._last_conflict_graph = conflict_outputs["graph"].detach()
             self._last_conflict_label_loss = (

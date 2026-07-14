@@ -246,6 +246,40 @@ class EINTrainer(object):
                 conflict_keep_sample.detach().float().mean().item()
             )
 
+        conflict_attention_received = getattr(
+            self.model,
+            '_last_conflict_attention_received',
+            None,
+        )
+        if (
+            torch.is_tensor(conflict_attention_received)
+            and conflict_attention_received.numel() > 0
+        ):
+            attention = conflict_attention_received.detach().float()
+            diagnostics['conflict_attention_received_mean'] = (
+                attention.mean().item()
+            )
+            diagnostics['conflict_attention_received_max'] = (
+                attention.max().item()
+            )
+
+        conflict_node_importance = getattr(
+            self.model,
+            '_last_conflict_node_importance',
+            None,
+        )
+        if (
+            torch.is_tensor(conflict_node_importance)
+            and conflict_node_importance.numel() > 0
+        ):
+            importance = conflict_node_importance.detach().float()
+            diagnostics['conflict_node_importance_mean'] = (
+                importance.mean().item()
+            )
+            diagnostics['conflict_node_importance_max'] = (
+                importance.max().item()
+            )
+
         return diagnostics
 
     def _accumulate_diagnostics(self, sums, counts):
