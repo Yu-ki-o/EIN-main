@@ -884,6 +884,10 @@ class SemanticTreeTransformerBranch(nn.Module):
             "origin": "original",
             "original_only": "original",
             "raw": "original",
+            "support_deny": "support_deny",
+            "support_deny_only": "support_deny",
+            "views": "support_deny",
+            "semantic_only": "support_deny",
         }
         if self.input_mode not in input_mode_aliases:
             raise ValueError(
@@ -893,11 +897,12 @@ class SemanticTreeTransformerBranch(nn.Module):
                 )
             )
         self.input_mode = input_mode_aliases[self.input_mode]
-        input_dim = (
-            self.hidden_dim * 3 + depth_dim
-            if self.input_mode == "full"
-            else self.hidden_dim + depth_dim
-        )
+        input_dims = {
+            "full": self.hidden_dim * 3 + depth_dim,
+            "original": self.hidden_dim + depth_dim,
+            "support_deny": self.hidden_dim * 2 + depth_dim,
+        }
+        input_dim = input_dims[self.input_mode]
 
         self.depth_embedding = nn.Embedding(self.max_depth + 2, depth_dim)
         self.support_missing = nn.Parameter(torch.zeros(self.hidden_dim))
@@ -950,6 +955,25 @@ class SemanticTreeTransformerBranch(nn.Module):
             node_input = torch.cat(
                 (
                     original_nodes,
+                    depth_nodes,
+                ),
+                dim=-1,
+            )
+        elif self.input_mode == "support_deny":
+            support_nodes = self._inject_missing_view(
+                support_nodes,
+                support_node_weight,
+                self.support_missing,
+            )
+            deny_nodes = self._inject_missing_view(
+                deny_nodes,
+                deny_node_weight,
+                self.deny_missing,
+            )
+            node_input = torch.cat(
+                (
+                    support_nodes,
+                    deny_nodes,
                     depth_nodes,
                 ),
                 dim=-1,
