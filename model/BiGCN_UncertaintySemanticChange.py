@@ -873,12 +873,42 @@ class SemanticTreeTransformerBranch(nn.Module):
                 "semantic_tree_transformer_pool must be one of "
                 "['mean', 'root', 'sum'], got {}".format(self.pool)
             )
+        self.input_mode = str(
+            getattr(args, "semantic_tree_input_mode", "full")
+        ).strip().lower()
+        input_mode_aliases = {
+            "full": "full",
+            "semantic": "full",
+            "semantic_tree": "full",
+            "original": "original",
+            "origin": "original",
+            "original_only": "original",
+            "raw": "original",
+            "support_deny": "support_deny",
+            "support_deny_only": "support_deny",
+            "views": "support_deny",
+            "semantic_only": "support_deny",
+        }
+        if self.input_mode not in input_mode_aliases:
+            raise ValueError(
+                "semantic_tree_input_mode must be one of {}, got {}".format(
+                    sorted(input_mode_aliases),
+                    self.input_mode,
+                )
+            )
+        self.input_mode = input_mode_aliases[self.input_mode]
+        input_dims = {
+            "full": self.hidden_dim * 3 + depth_dim,
+            "original": self.hidden_dim + depth_dim,
+            "support_deny": self.hidden_dim * 2 + depth_dim,
+        }
+        input_dim = input_dims[self.input_mode]
 
         self.depth_embedding = nn.Embedding(self.max_depth + 2, depth_dim)
         self.support_missing = nn.Parameter(torch.zeros(self.hidden_dim))
         self.deny_missing = nn.Parameter(torch.zeros(self.hidden_dim))
         self.input_projection = nn.Sequential(
-            nn.Linear(self.hidden_dim * 3 + depth_dim, self.hidden_dim),
+            nn.Linear(input_dim, self.hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.LayerNorm(self.hidden_dim),
@@ -920,26 +950,54 @@ class SemanticTreeTransformerBranch(nn.Module):
         support_node_weight=None,
         deny_node_weight=None,
     ):
-        support_nodes = self._inject_missing_view(
-            support_nodes,
-            support_node_weight,
-            self.support_missing,
-        )
-        deny_nodes = self._inject_missing_view(
-            deny_nodes,
-            deny_node_weight,
-            self.deny_missing,
-        )
         depth_nodes = self.depth_embedding(self._depth_indices(depth))
-        node_input = torch.cat(
-            (
-                original_nodes,
+        if self.input_mode == "original":
+            node_input = torch.cat(
+                (
+                    original_nodes,
+                    depth_nodes,
+                ),
+                dim=-1,
+            )
+        elif self.input_mode == "support_deny":
+            support_nodes = self._inject_missing_view(
                 support_nodes,
+                support_node_weight,
+                self.support_missing,
+            )
+            deny_nodes = self._inject_missing_view(
                 deny_nodes,
-                depth_nodes,
-            ),
-            dim=-1,
-        )
+                deny_node_weight,
+                self.deny_missing,
+            )
+            node_input = torch.cat(
+                (
+                    support_nodes,
+                    deny_nodes,
+                    depth_nodes,
+                ),
+                dim=-1,
+            )
+        else:
+            support_nodes = self._inject_missing_view(
+                support_nodes,
+                support_node_weight,
+                self.support_missing,
+            )
+            deny_nodes = self._inject_missing_view(
+                deny_nodes,
+                deny_node_weight,
+                self.deny_missing,
+            )
+            node_input = torch.cat(
+                (
+                    original_nodes,
+                    support_nodes,
+                    deny_nodes,
+                    depth_nodes,
+                ),
+                dim=-1,
+            )
         node_hidden = self.input_projection(node_input)
         dense_hidden, valid_mask = to_dense_batch(node_hidden, batch)
         encoded_dense = self.encoder(
@@ -1304,10 +1362,10 @@ class ConflictFieldBottleneck(nn.Module):
         self.encoder_mode = str(
             getattr(args, "conflict_encoder_mode", "pool")
         ).strip().lower()
-        if self.encoder_mode not in {"pool", "transformer"}:
+        if self.encoder_mode not in {"pool", "residual", "transformer"}:
             raise ValueError(
                 "conflict_encoder_mode must be one of "
-                "['pool', 'transformer'], got {}".format(
+                "['pool', 'residual', 'transformer'], got {}".format(
                     self.encoder_mode
                 )
             )
@@ -1372,6 +1430,24 @@ class ConflictFieldBottleneck(nn.Module):
             0.0,
             float(getattr(args, "lambda_conflict_redundancy_aux", 0.0)),
         )
+        self.residual_scale = max(
+            0.0,
+            float(getattr(args, "conflict_residual_scale", 0.5)),
+        )
+        self.residual_gate_floor = min(
+            max(
+                float(getattr(args, "conflict_residual_gate_floor", 0.25)),
+                0.0,
+            ),
+            1.0,
+        )
+        self.readout_strength = min(
+            max(
+                float(getattr(args, "conflict_readout_strength", 0.5)),
+                0.0,
+            ),
+            1.0,
+        )
         dropout = float(getattr(args, "dropout", 0.0))
         self.eps = 1e-6
         self.register_buffer(
@@ -1399,6 +1475,31 @@ class ConflictFieldBottleneck(nn.Module):
                 nn.LayerNorm(hidden_dim),
             )
             if self.encoder_mode == "pool"
+            else None
+        )
+        self.residual_encoder = (
+            nn.Sequential(
+                nn.Linear(hidden_dim * 3 + 3, field_hidden),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(field_hidden, hidden_dim),
+            )
+            if self.encoder_mode == "residual"
+            else None
+        )
+        self.residual_gate = (
+            nn.Sequential(
+                nn.Linear(hidden_dim * 4 + 3, field_hidden),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(field_hidden, 1),
+            )
+            if self.encoder_mode == "residual"
+            else None
+        )
+        self.residual_norm = (
+            nn.LayerNorm(hidden_dim)
+            if self.encoder_mode == "residual"
             else None
         )
         self.attention_encoder = (
@@ -1552,6 +1653,7 @@ class ConflictFieldBottleneck(nn.Module):
         attention_received = None
         attention_by_head = None
         node_importance = None
+        node_gate = None
         if self.encoder_mode == "transformer":
             # The Transformer consumes the pure conflict score before DS/path
             # reliability attenuation. This preserves the interpretation that
@@ -1584,6 +1686,68 @@ class ConflictFieldBottleneck(nn.Module):
                 conflict_score,
                 depth,
                 batch,
+            )
+        elif self.encoder_mode == "residual":
+            if change_nodes is None:
+                raise ValueError(
+                    "change_nodes is required when "
+                    "conflict_encoder_mode='residual'"
+                )
+            scalar_features = torch.stack(
+                (field, conflict_intensity, high_frequency),
+                dim=-1,
+            )
+            residual_input = torch.cat(
+                (change_nodes, delta, abs_delta, scalar_features),
+                dim=-1,
+            )
+            residual_update = self.residual_encoder(residual_input)
+            gate_input = torch.cat(
+                (
+                    support_nodes,
+                    deny_nodes,
+                    change_nodes,
+                    abs_delta,
+                    scalar_features,
+                ),
+                dim=-1,
+            )
+            node_gate = torch.sigmoid(
+                self.residual_gate(gate_input).squeeze(-1)
+            )
+            node_gate = (
+                self.residual_gate_floor
+                + (1.0 - self.residual_gate_floor) * node_gate
+            )
+            conflict_nodes = self.residual_norm(
+                change_nodes
+                + self.residual_scale
+                * node_gate.unsqueeze(-1)
+                * residual_update
+            )
+            readout_weight = (
+                (1.0 - self.readout_strength)
+                + self.readout_strength * conflict_score
+            )
+            readout_weight = readout_weight * node_gate
+            if base_node_keep is not None:
+                readout_weight = readout_weight * base_node_keep.clamp(
+                    0.0,
+                    1.0,
+                )
+            if (
+                self.force_root_keep
+                and roots is not None
+                and roots.numel() > 0
+            ):
+                readout_weight = readout_weight.clone()
+                readout_weight[roots] = 1.0
+            keep_sample = readout_weight.clamp(0.0, 1.0)
+            graph_hidden = self._pool_nodes(
+                conflict_nodes,
+                keep_sample,
+                batch,
+                pool_is_sum,
             )
         else:
             keep_sample = self.soft_bernoulli_sample(keep_probability)
@@ -1631,7 +1795,7 @@ class ConflictFieldBottleneck(nn.Module):
             regularized_probability = (
                 conflict_score
                 if self.encoder_mode == "transformer"
-                else keep_probability
+                else keep_sample
             )
             size_loss = self.lambda_size * self._masked_mean(
                 regularized_probability,
@@ -1677,6 +1841,7 @@ class ConflictFieldBottleneck(nn.Module):
             "attention_received": attention_received,
             "attention_by_head": attention_by_head,
             "node_importance": node_importance,
+            "node_gate": node_gate,
             "encoder_mode": self.encoder_mode,
             "nodes": conflict_nodes,
             "graph": graph_hidden,
@@ -1760,6 +1925,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         ).strip().lower()
         fusion_mode_branches = {
             "change": ("change",),
+            "semantic_tree": ("semantic_tree",),
             "conflict": ("conflict",),
             "change_conflict": ("change", "conflict"),
             "collective_revision": ("collective_revision",),
@@ -1881,6 +2047,8 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             ),
         }
         for mode_name, branch_names in list(fusion_mode_branches.items()):
+            if "semantic_tree" in branch_names:
+                continue
             fusion_mode_branches[mode_name + "_semantic_tree"] = (
                 branch_names + ("semantic_tree",)
             )
@@ -2181,6 +2349,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_conflict_attention_received = None
         self._last_conflict_attention_by_head = None
         self._last_conflict_node_importance = None
+        self._last_conflict_node_gate = None
         self._last_conflict_encoder_mode = None
         self._last_conflict_nodes = None
         self._last_conflict_graph = None
@@ -3008,13 +3177,14 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             deny_node_weight,
             data.batch,
         )
-        legacy_conflict_pool = (
+        conflict_needs_change = (
             self.conflict_field_bottleneck is not None
-            and self.conflict_field_bottleneck.encoder_mode == "pool"
+            and self.conflict_field_bottleneck.encoder_mode
+            in {"pool", "residual"}
         )
         needs_change_nodes = (
             "change" in self.classification_branch_names
-            or legacy_conflict_pool
+            or conflict_needs_change
         )
         change_nodes = None
         change_graph = None
@@ -3250,6 +3420,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             self._last_conflict_attention_received = None
             self._last_conflict_attention_by_head = None
             self._last_conflict_node_importance = None
+            self._last_conflict_node_gate = None
             self._last_conflict_encoder_mode = None
             self._last_conflict_nodes = None
             self._last_conflict_graph = None
@@ -3302,6 +3473,11 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 None
                 if conflict_outputs["node_importance"] is None
                 else conflict_outputs["node_importance"].detach()
+            )
+            self._last_conflict_node_gate = (
+                None
+                if conflict_outputs["node_gate"] is None
+                else conflict_outputs["node_gate"].detach()
             )
             self._last_conflict_encoder_mode = conflict_outputs[
                 "encoder_mode"

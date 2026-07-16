@@ -4,6 +4,22 @@ import torch.nn.functional as F
 from torch_geometric.utils import to_dense_batch
 
 
+def _as_bool(value, default=False):
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off"}:
+            return False
+    return bool(value)
+
+
 class MLPSemanticChangeEncoder(nn.Module):
     """
     Encodes node-level semantic change between two aligned graph views.
@@ -12,9 +28,9 @@ class MLPSemanticChangeEncoder(nn.Module):
 
         delta = deny_nodes - support_nodes
 
-    Only the signed change and its absolute magnitude are encoded. Edge or
-    node uncertainty is intentionally kept outside this module so uncertainty
-    routing/trend modeling can remain an independent, replaceable branch.
+    By default only the signed change and its absolute magnitude are encoded.
+    ``include_sum`` optionally appends support_nodes + deny_nodes as a total
+    evidence-strength channel.
     """
 
     def __init__(
@@ -23,6 +39,7 @@ class MLPSemanticChangeEncoder(nn.Module):
         output_dim=None,
         hidden_dim=None,
         dropout=0.0,
+        include_sum=False,
     ):
         super().__init__()
         self.input_dim = int(input_dim)
@@ -40,10 +57,17 @@ class MLPSemanticChangeEncoder(nn.Module):
         if mlp_hidden_dim <= 0:
             raise ValueError("hidden_dim must be positive")
 
-        # Bias-free layers guarantee that identical support/deny views produce
-        # an exact zero change representation.
+        self.include_sum = bool(include_sum)
+        self.feature_multiplier = 3 if self.include_sum else 2
+
+        # Bias-free layers keep the pure-difference mode anchored at zero when
+        # support and deny views are identical.
         self.encoder = nn.Sequential(
-            nn.Linear(self.input_dim * 2, mlp_hidden_dim, bias=False),
+            nn.Linear(
+                self.input_dim * self.feature_multiplier,
+                mlp_hidden_dim,
+                bias=False,
+            ),
             nn.ReLU(),
             nn.Dropout(float(dropout)),
             nn.Linear(mlp_hidden_dim, self.output_dim, bias=False),
@@ -52,7 +76,10 @@ class MLPSemanticChangeEncoder(nn.Module):
     def change_features(self, support_nodes, deny_nodes):
         self._validate_inputs(support_nodes, deny_nodes)
         delta = deny_nodes - support_nodes
-        return torch.cat((delta, delta.abs()), dim=-1)
+        features = [delta, delta.abs()]
+        if self.include_sum:
+            features.append(support_nodes + deny_nodes)
+        return torch.cat(features, dim=-1)
 
     def forward(self, support_nodes, deny_nodes, **kwargs):
         features = self.change_features(support_nodes, deny_nodes)
@@ -220,9 +247,10 @@ class DPGASemanticChangeEncoder(nn.Module):
     DPGA-style semantic change encoder for aligned support/deny views.
 
     The encoder keeps the existing signed-delta change signal, then modulates
-    it with pseudo-node alignment context. This preserves the useful invariant
-    that identical support/deny node features produce exact zero change while
-    still allowing graph-level dynamic pathways to decide which changes matter.
+    it with pseudo-node alignment context. In the default pure-difference mode,
+    identical support/deny node features still produce exact zero change. The
+    optional sum channel keeps total evidence strength when that invariant is
+    less important than distinguishing weak and strong aligned evidence.
     """
 
     def __init__(
@@ -236,6 +264,7 @@ class DPGASemanticChangeEncoder(nn.Module):
         attention_temperature=1.0,
         modulation_scale=0.5,
         use_node_weights=True,
+        include_sum=False,
     ):
         super().__init__()
         self.input_dim = int(input_dim)
@@ -250,6 +279,7 @@ class DPGASemanticChangeEncoder(nn.Module):
         self.dropout = float(dropout)
         self.modulation_scale = max(0.0, float(modulation_scale))
         self.use_node_weights = bool(use_node_weights)
+        self.include_sum = bool(include_sum)
 
         if self.input_dim <= 0:
             raise ValueError("input_dim must be positive")
@@ -267,6 +297,7 @@ class DPGASemanticChangeEncoder(nn.Module):
             output_dim=self.output_dim,
             hidden_dim=self.hidden_dim,
             dropout=self.dropout,
+            include_sum=self.include_sum,
         )
         self.node_projection = nn.Linear(
             self.input_dim,
@@ -440,12 +471,20 @@ def build_semantic_change_encoder(
     """
 
     name = str(encoder_name).strip().lower()
+    include_sum = _as_bool(
+        getattr(
+            args,
+            "semantic_change_include_sum",
+            getattr(args, "semantic_change_include_total_evidence", False),
+        )
+    )
     if name == "mlp":
         return MLPSemanticChangeEncoder(
             input_dim=input_dim,
             output_dim=output_dim,
             hidden_dim=hidden_dim,
             dropout=dropout,
+            include_sum=include_sum,
         )
     if name == "dpga":
         return DPGASemanticChangeEncoder(
@@ -464,6 +503,7 @@ def build_semantic_change_encoder(
             use_node_weights=bool(
                 getattr(args, "dpga_use_node_weights", True)
             ),
+            include_sum=include_sum,
         )
     raise ValueError(
         "unsupported semantic change encoder: {!r}".format(encoder_name)
