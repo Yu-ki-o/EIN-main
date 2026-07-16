@@ -31,6 +31,8 @@ from supervisor import (
     EIN_Plain_BiGCN_supervisor,
     EIN_Plain_ResGCN_supervisor,
     EIN_NEGT_supervisor,
+    EIN_EBGCN_supervisor,
+    EIN_EBGCN_ResGCN_supervisor,
     EIN_TCSR_supervisor,
 )
 
@@ -62,6 +64,10 @@ def _summary_model_parts(args):
         return 'LIRS', None
     if base_model == 'NEGT':
         return 'NEGT', None
+    if base_model == 'EBGCN':
+        return 'EBGCN', None
+    if base_model == 'EBGCN_ResGCN':
+        return 'EBGCN', 'ResGCN'
 
     return str(getattr(args, 'model_name', 'Model')).strip(), base_model
 

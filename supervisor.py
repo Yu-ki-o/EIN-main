@@ -27,10 +27,12 @@ from model.SEEGraphMAE import SEEGraphMAE
 from model.KAGNN import KAGNN
 from model.LIRS import LIRSGIN
 from model.NEGT import NEGT
+from model.EBGCN import EBGCN, EBGCNResGCN
 from model.RAGCL_baselines import RAGCLBiGCN, RAGCLResGCN
 from trainer.EIN_trainer import EINTrainer
 from trainer.LIRS_trainer import LIRSTrainer
 from trainer.NEGT_trainer import NEGTTrainer
+from trainer.EBGCN_trainer import EBGCNTrainer
 from trainer.RAGCL_trainer import RAGCLTrainer
 from trainer.SEEGraphMAE_trainer import SEEGraphMAETrainer
 from train_tcsr import run_seed as run_tcsr_seed
@@ -679,6 +681,62 @@ def EIN_NEGT_supervisor(args):
     optimizer = base_model.init_optimizer(args)
     datasets = [train_dataset, val_dataset, test_dataset]
     trainer = NEGTTrainer(datasets, base_model, optimizer, args, device)
+
+    print('Seed {} | Start training'.format(args.seed), flush=True)
+    return trainer.train_process()
+
+
+def EIN_EBGCN_supervisor(args):
+    init_seed(args.seed, need_deepfix=True)
+    device = resolve_device(args)
+
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
+    text_encoder = build_text_encoder(args, device, label_source_path)
+
+    print('Seed {} | Building experiment datasets'.format(args.seed), flush=True)
+    train_dataset, val_dataset, test_dataset = build_experiment_datasets(args, text_encoder)
+
+    print('Seed {} | Initializing EBGCN'.format(args.seed), flush=True)
+    base_model = EBGCN(
+        args.in_feats,
+        args.hidden_dim,
+        args.num_classes,
+        args,
+        device,
+    ).to(device)
+    optimizer = base_model.init_optimizer(args)
+    trainer = EBGCNTrainer(
+        [train_dataset, val_dataset, test_dataset], base_model, optimizer, args, device
+    )
+
+    print('Seed {} | Start training'.format(args.seed), flush=True)
+    return trainer.train_process()
+
+
+def EIN_EBGCN_ResGCN_supervisor(args):
+    init_seed(args.seed, need_deepfix=True)
+    device = resolve_device(args)
+
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
+    text_encoder = build_text_encoder(args, device, label_source_path)
+
+    print('Seed {} | Building experiment datasets'.format(args.seed), flush=True)
+    train_dataset, val_dataset, test_dataset = build_experiment_datasets(args, text_encoder)
+
+    print('Seed {} | Initializing EBGCN-ResGCN'.format(args.seed), flush=True)
+    base_model = EBGCNResGCN(
+        args.in_feats,
+        args.hidden_dim,
+        args.num_classes,
+        args,
+        device,
+    ).to(device)
+    optimizer = base_model.init_optimizer(args)
+    trainer = EBGCNTrainer(
+        [train_dataset, val_dataset, test_dataset], base_model, optimizer, args, device
+    )
 
     print('Seed {} | Start training'.format(args.seed), flush=True)
     return trainer.train_process()

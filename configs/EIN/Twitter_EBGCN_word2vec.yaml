@@ -1,0 +1,37 @@
+model_name: EIN
+dataset: Twitter
+num_classes: 2
+language: en
+word_embedding: word2vec
+result_name: Twitter_EBGCN_word2vec
+experiment_mode: id
+ood_source_datasets: []
+ood_val_domain: source
+debug: false
+seed: 0
+device: cuda
+lr: 0.0005
+weight_decay: 0.0001
+patience: 10
+n_epochs: 100
+selection_metric: val_loss
+split: '622'
+num_workers: 0
+base_model: EBGCN
+batch_size: 32
+hidden_dim: 64
+in_feats: 200
+tokenize_mode: naive
+k: 10000
+vector_size: 200
+# EBGCN uses the retained directed topology for TD propagation and its reverse
+# for BU propagation, regardless of the generic graph topology setting.
+undirected: false
+dropout: 0.0
+max_hop: 147
+ebgcn_hidden_dim: 64
+ebgcn_output_dim: 64
+ebgcn_edge_num: 2
+ebgcn_edge_infer_td: true
+ebgcn_edge_infer_bu: true
+ebgcn_edge_loss_weight: 1.0
