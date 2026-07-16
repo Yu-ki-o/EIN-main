@@ -1,0 +1,58 @@
+# model and data
+model_name: EIN
+dataset: Weibo
+num_classes: 2
+language: ch
+word_embedding: word2vec
+e5_model_name: intfloat/multilingual-e5-base
+e5_max_length: 128
+e5_batch_size: 64
+result_name: Weibo_DepthAwareGraphTransformer_word2vec
+experiment_mode: id
+ood_source_datasets: []
+ood_val_domain: source
+debug: False
+use_tensorboard: True
+tensorboard_log_dir: tensorboard
+
+# training parameters
+seed: 0
+device: cuda
+lr: 0.0005
+weight_decay: 0.00001
+patience: 15
+n_epochs: 100
+selection_metric: val_loss
+split: '622'
+
+# model parameters
+batch_size: 128
+hidden_dim: 128
+in_feats: 200
+tokenize_mode: jieba
+k: 10000
+vector_size: 200
+undirected: False
+n_layers_conv: 2
+dropout: 0.3
+global_pool: sum
+
+base_model: DepthAwareGraphTransformer
+max_hop: 72
+lamda: 0.0
+
+# depth-aware graph transformer
+depth_transformer_layers: 2
+depth_transformer_heads: 4
+depth_transformer_ffn_dim: 256
+depth_transformer_dropout: 0.3
+depth_transformer_max_depth: 72
+depth_transformer_depth_dim: 128
+depth_transformer_pool: sum
+depth_transformer_use_root_context: True
+depth_transformer_use_relative_depth_bias: True
+depth_transformer_classifier_hidden_dim: 256
+depth_transformer_log_attention: False
+
+# final classifier
+classification_class_weights: [1.0, 1.5]

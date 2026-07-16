@@ -24,6 +24,7 @@ from supervisor import (
     EIN_GCN_UncertaintySemanticChange_supervisor,
     EIN_GIN_UncertaintySemanticChange_supervisor,
     EIN_KAGNN_UncertaintySemanticChange_supervisor,
+    EIN_DepthAwareGraphTransformer_supervisor,
     EIN_SEEGraphMAE_supervisor,
     EIN_KAGNN_supervisor,
     EIN_RAGCL_BiGCN_supervisor,

@@ -23,6 +23,7 @@ from model.ResGCN_RevisionAwareSemanticChange import (
 from model.GCN_UncertaintySemanticChange import GCN_UncertaintySemanticChange
 from model.GIN_UncertaintySemanticChange import GIN_UncertaintySemanticChange
 from model.KAGNN_UncertaintySemanticChange import KAGNN_UncertaintySemanticChange
+from model.DepthAwareGraphTransformer import DepthAwareGraphTransformer
 from model.SEEGraphMAE import SEEGraphMAE
 from model.KAGNN import KAGNN
 from model.LIRS import LIRSGIN
@@ -187,6 +188,7 @@ def _graph_dataset_cache_part(args):
         'BiGCN_SameDiffFusion',
         'BiGCN_UncertaintySemanticChange',
         'BiGCN_RevisionAwareSemanticChange',
+        'DepthAwareGraphTransformer',
         'LIRS',
         'EBGCN',
         'EBGCN_BiGCN_StateAuxSameDiff',
@@ -455,6 +457,7 @@ def load_graph_dataset(args, path, text_encoder):
         'BiGCN_SameDiffFusion',
         'BiGCN_UncertaintySemanticChange',
         'BiGCN_RevisionAwareSemanticChange',
+        'DepthAwareGraphTransformer',
         'LIRS',
         'EBGCN',
         'EBGCN_BiGCN_StateAuxSameDiff',
@@ -1282,6 +1285,41 @@ def EIN_KAGNN_UncertaintySemanticChange_supervisor(args):
         flush=True,
     )
     base_model = KAGNN_UncertaintySemanticChange(
+        args.in_feats,
+        args.hidden_dim,
+        args.hidden_dim,
+        args.num_classes,
+        args,
+        device,
+    ).to(device)
+
+    optimizer = base_model.init_optimizer(args)
+    datasets = [train_dataset, val_dataset, test_dataset]
+    trainer = EINTrainer(datasets, base_model, optimizer, args, device)
+
+    print('Seed {} | Start training'.format(args.seed), flush=True)
+    return trainer.train_process()
+
+
+def EIN_DepthAwareGraphTransformer_supervisor(args):
+    init_seed(args.seed, need_deepfix=True)
+
+    device = resolve_device(args)
+
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
+    text_encoder = build_text_encoder(args, device, label_source_path)
+
+    print('Seed {} | Building experiment datasets'.format(args.seed), flush=True)
+    train_dataset, val_dataset, test_dataset = build_experiment_datasets(args, text_encoder)
+
+    print(
+        'Seed {} | Initializing DepthAwareGraphTransformer'.format(
+            args.seed
+        ),
+        flush=True,
+    )
+    base_model = DepthAwareGraphTransformer(
         args.in_feats,
         args.hidden_dim,
         args.hidden_dim,
