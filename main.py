@@ -21,6 +21,8 @@ from supervisor import (
     EIN_BiGCN_RevisionAwareSemanticChange_supervisor,
     EIN_ResGCN_UncertaintySemanticChange_supervisor,
     EIN_ResGCN_RevisionAwareSemanticChange_supervisor,
+    EIN_BiGCN_BackboneOnly_supervisor,
+    EIN_ResGCN_BackboneOnly_supervisor,
     EIN_GCN_UncertaintySemanticChange_supervisor,
     EIN_GIN_UncertaintySemanticChange_supervisor,
     EIN_KAGNN_UncertaintySemanticChange_supervisor,
@@ -60,6 +62,10 @@ def _summary_model_parts(args):
 
     if base_model.startswith('Plain_'):
         return 'Base', base_model[len('Plain_'):]
+    if base_model == 'BiGCN_BackboneOnly':
+        return 'BackboneOnly', 'BiGCN'
+    if base_model == 'ResGCN_BackboneOnly':
+        return 'BackboneOnly', 'ResGCN'
     if base_model.startswith('RAGCL_'):
         return 'Ragcl', base_model[len('RAGCL_'):]
     if 'StateAuxSameDiff' in base_model:

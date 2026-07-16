@@ -20,6 +20,7 @@ from model.ResGCN_UncertaintySemanticChange import ResGCN_UncertaintySemanticCha
 from model.ResGCN_RevisionAwareSemanticChange import (
     ResGCN_RevisionAwareSemanticChange,
 )
+from model.DualBackboneOnly import BiGCN_BackboneOnly, ResGCN_BackboneOnly
 from model.GCN_UncertaintySemanticChange import GCN_UncertaintySemanticChange
 from model.GIN_UncertaintySemanticChange import GIN_UncertaintySemanticChange
 from model.KAGNN_UncertaintySemanticChange import KAGNN_UncertaintySemanticChange
@@ -188,6 +189,7 @@ def _graph_dataset_cache_part(args):
         'BiGCN_SameDiffFusion',
         'BiGCN_UncertaintySemanticChange',
         'BiGCN_RevisionAwareSemanticChange',
+        'BiGCN_BackboneOnly',
         'DepthAwareGraphTransformer',
         'LIRS',
         'EBGCN',
@@ -201,6 +203,7 @@ def _graph_dataset_cache_part(args):
         'ResGCN_SameDiffFusion',
         'ResGCN_UncertaintySemanticChange',
         'ResGCN_RevisionAwareSemanticChange',
+        'ResGCN_BackboneOnly',
         'GCN_UncertaintySemanticChange',
         'GIN_UncertaintySemanticChange',
         'KAGNN_UncertaintySemanticChange',
@@ -439,6 +442,7 @@ def load_graph_dataset(args, path, text_encoder):
         'ResGCN_SameDiffFusion',
         'ResGCN_UncertaintySemanticChange',
         'ResGCN_RevisionAwareSemanticChange',
+        'ResGCN_BackboneOnly',
         'GCN_UncertaintySemanticChange',
         'GIN_UncertaintySemanticChange',
         'KAGNN_UncertaintySemanticChange',
@@ -457,6 +461,7 @@ def load_graph_dataset(args, path, text_encoder):
         'BiGCN_SameDiffFusion',
         'BiGCN_UncertaintySemanticChange',
         'BiGCN_RevisionAwareSemanticChange',
+        'BiGCN_BackboneOnly',
         'DepthAwareGraphTransformer',
         'LIRS',
         'EBGCN',
@@ -1088,6 +1093,55 @@ def EIN_BiGCN_UncertaintySemanticChange_supervisor(args):
 
     print('Seed {} | Start training'.format(args.seed), flush=True)
     return trainer.train_process()
+
+
+def _EIN_BackboneOnly_supervisor(args, model_cls, label):
+    init_seed(args.seed, need_deepfix=True)
+
+    device = resolve_device(args)
+
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
+    text_encoder = build_text_encoder(args, device, label_source_path)
+
+    print('Seed {} | Building experiment datasets'.format(args.seed), flush=True)
+    train_dataset, val_dataset, test_dataset = build_experiment_datasets(args, text_encoder)
+
+    print(
+        'Seed {} | Initializing {}'.format(args.seed, label),
+        flush=True,
+    )
+    base_model = model_cls(
+        args.in_feats,
+        args.hidden_dim,
+        args.hidden_dim,
+        args.num_classes,
+        args,
+        device,
+    ).to(device)
+
+    optimizer = base_model.init_optimizer(args)
+    datasets = [train_dataset, val_dataset, test_dataset]
+    trainer = EINTrainer(datasets, base_model, optimizer, args, device)
+
+    print('Seed {} | Start training'.format(args.seed), flush=True)
+    return trainer.train_process()
+
+
+def EIN_BiGCN_BackboneOnly_supervisor(args):
+    return _EIN_BackboneOnly_supervisor(
+        args,
+        BiGCN_BackboneOnly,
+        'BiGCN_BackboneOnly',
+    )
+
+
+def EIN_ResGCN_BackboneOnly_supervisor(args):
+    return _EIN_BackboneOnly_supervisor(
+        args,
+        ResGCN_BackboneOnly,
+        'ResGCN_BackboneOnly',
+    )
 
 
 def EIN_BiGCN_RevisionAwareSemanticChange_supervisor(args):

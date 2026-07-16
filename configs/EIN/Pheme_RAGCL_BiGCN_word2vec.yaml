@@ -42,8 +42,8 @@ dropout: 0.1
 edge_norm: True
 global_pool: sum
 
-base_model: RAGCL_BiGCN
+base_model: Plain_BiGCN
 max_hop: 47
-use_unsup_loss: True
+use_unsup_loss: False
 ragcl_lamda: 0.001
 centrality: PageRank

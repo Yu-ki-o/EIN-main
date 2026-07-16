@@ -2369,10 +2369,26 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             raise ValueError(
                 "unsupported backbone_type: {}".format(self.backbone_type)
             )
+        self.bigcn_num_layers = max(
+            2,
+            int(getattr(args, "n_layers_conv", 2)),
+        )
         self.td_conv1 = GCNConv(in_feats, hid_feats)
         self.td_conv2 = GCNConv(hid_feats + in_feats, out_feats)
         self.bu_conv1 = GCNConv(in_feats, hid_feats)
         self.bu_conv2 = GCNConv(hid_feats + in_feats, out_feats)
+        self.td_extra_convs = nn.ModuleList(
+            [
+                GCNConv(out_feats + out_feats, out_feats)
+                for _ in range(self.bigcn_num_layers - 2)
+            ]
+        )
+        self.bu_extra_convs = nn.ModuleList(
+            [
+                GCNConv(out_feats + out_feats, out_feats)
+                for _ in range(self.bigcn_num_layers - 2)
+            ]
+        )
         branch_dim = out_feats + hid_feats
         self.direction_fusion = nn.Sequential(
             nn.Linear(branch_dim * 2, hid_feats),
@@ -2551,6 +2567,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         edge_weight,
         conv1,
         conv2,
+        extra_convs=None,
     ):
         raw_nodes = data.x.float()
         hidden_first = conv1(
@@ -2569,6 +2586,17 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         hidden = conv2(hidden, edge_index, edge_weight=edge_weight)
         hidden = F.relu(hidden)
         root_hidden = self._extend_root_features(hidden_first, data)
+        for conv in extra_convs or []:
+            root_current = self._extend_root_features(hidden, data)
+            hidden = torch.cat((hidden, root_current), dim=-1)
+            hidden = F.relu(hidden)
+            hidden = F.dropout(
+                hidden,
+                p=self.dropout,
+                training=self.training,
+            )
+            hidden = conv(hidden, edge_index, edge_weight=edge_weight)
+            hidden = F.relu(hidden)
         return torch.cat((hidden, root_hidden), dim=-1)
 
     def _encode_semantic_view(
@@ -2584,6 +2612,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             edge_weight,
             self.td_conv1,
             self.td_conv2,
+            self.td_extra_convs,
         )
         bottom_up = self._encode_bigcn_direction(
             data,
@@ -2591,6 +2620,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             edge_weight,
             self.bu_conv1,
             self.bu_conv2,
+            self.bu_extra_convs,
         )
         return self.direction_fusion(
             torch.cat((top_down, bottom_up), dim=-1)
