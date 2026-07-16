@@ -3,9 +3,11 @@ from types import SimpleNamespace
 import pytest
 import torch
 import torch.nn.functional as F
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 from torch_geometric.data import Batch, Data
 
 from model.LIRS_EBGCN import LIRSEBGCN
+from trainer.LIRS_EBGCN_trainer import LIRSEBGCNTrainer
 
 
 def _args(backbone):
@@ -137,3 +139,12 @@ def test_lirs_ebgcn_rejects_unknown_backbone():
             6, 8, 2, _args('unknown'), torch.device('cpu')
         )
 
+
+def test_lirs_ebgcn_metrics_match_project_hard_label_protocol():
+    y_true = [0, 0, 1, 1]
+    y_pred = [0, 1, 1, 1]
+    metrics = LIRSEBGCNTrainer._metrics(y_true, y_pred, val_loss=0.25)
+    assert metrics['val_acc'] == accuracy_score(y_true, y_pred)
+    assert metrics['val_auc'] == roc_auc_score(y_true, y_pred)
+    assert metrics['val_f1'] == f1_score(y_true, y_pred, zero_division=0)
+    assert metrics['val_loss'] == 0.25

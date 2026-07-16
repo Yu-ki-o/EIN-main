@@ -138,29 +138,24 @@ class LIRSEBGCNTrainer:
         return averages['loss']
 
     @staticmethod
-    def _metrics(y_true, y_pred, y_score, val_loss=None):
+    def _metrics(y_true, y_pred, val_loss=None):
+        """Compute metrics with the project's existing EIN/EBGCN protocol.
+
+        In particular, AUC is intentionally computed from hard class
+        predictions rather than positive-class probabilities to keep reported
+        results directly comparable with trainer/EIN_trainer.py and
+        trainer/EBGCN_trainer.py.
+        """
         y_true = np.asarray(y_true)
         y_pred = np.asarray(y_pred)
-        y_score = np.asarray(y_score)
         try:
-            if y_score.ndim == 2 and y_score.shape[1] > 2:
-                auc = roc_auc_score(
-                    y_true, y_score, multi_class='ovr', average='macro'
-                )
-            else:
-                positive = y_score[:, 1] if y_score.ndim == 2 else y_score
-                auc = roc_auc_score(y_true, positive)
+            auc = roc_auc_score(y_true, y_pred)
         except ValueError:
             auc = np.nan
         metrics = {
             'val_acc': accuracy_score(y_true, y_pred),
             'val_auc': auc,
-            'val_f1': f1_score(
-                y_true,
-                y_pred,
-                average='binary' if len(np.unique(y_true)) <= 2 else 'macro',
-                zero_division=0,
-            ),
+            'val_f1': f1_score(y_true, y_pred, zero_division=0),
         }
         if val_loss is not None:
             metrics['val_loss'] = val_loss
@@ -168,7 +163,7 @@ class LIRSEBGCNTrainer:
 
     def _evaluate_loader(self, loader, include_loss):
         self.model.eval()
-        losses, y_true, y_pred, y_score = [], [], [], []
+        losses, y_true, y_pred = [], [], []
         with torch.no_grad():
             for data in loader:
                 data = self._move_to_device(data)
@@ -177,14 +172,11 @@ class LIRSEBGCNTrainer:
                     losses.append(
                         F.nll_loss(out, data.y.view(-1).long()).item()
                     )
-                probabilities = out.exp()
                 y_true.extend(data.y.view(-1).tolist())
                 y_pred.extend(out.argmax(dim=1).tolist())
-                y_score.extend(probabilities.tolist())
         return self._metrics(
             y_true,
             y_pred,
-            y_score,
             val_loss=float(np.mean(losses)) if include_loss else None,
         )
 
@@ -266,4 +258,3 @@ class LIRSEBGCNTrainer:
                 torch.load(best_model_path, map_location=self.device)
             )
         return self.test()
-
