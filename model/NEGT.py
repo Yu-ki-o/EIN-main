@@ -127,9 +127,10 @@ def _source_relation_attention(data):
 
     for graph_id in range(batch_size):
         start_ptr = graph_ptrs[graph_id]
-        graph_edges = edge_index[
-            (batch[edge_index[0]] == graph_id) & (batch[edge_index[1]] == graph_id)
-        ]
+        edge_mask = (batch[edge_index[0]] == graph_id) & (
+            batch[edge_index[1]] == graph_id
+        )
+        graph_edges = edge_index[:, edge_mask]
         adjacency = torch.zeros(
             (max_nodes, max_nodes), dtype=torch.float32, device=edge_index.device
         )
