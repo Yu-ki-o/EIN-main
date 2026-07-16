@@ -164,6 +164,7 @@ def _graph_dataset_cache_part(args):
         'BiGCN_UncertaintySemanticChange',
         'BiGCN_RevisionAwareSemanticChange',
         'LIRS',
+        'EBGCN',
     }:
         return 'tree'
     if base_model in {
@@ -180,6 +181,7 @@ def _graph_dataset_cache_part(args):
         'KAGNN',
         'NEGT',
         'TCSR',
+        'EBGCN_ResGCN',
         'RAGCL_ResGCN',
         'RAGCL_BiGCN',
         'Plain_ResGCN',
@@ -395,6 +397,7 @@ def load_graph_dataset(args, path, text_encoder):
         'KAGNN',
         'NEGT',
         'TCSR',
+        'EBGCN_ResGCN',
     ]:
         return ResGCNTreeDataset(path, args.word_embedding, text_encoder, args.undirected, args=args)
     if args.base_model in [
@@ -405,6 +408,7 @@ def load_graph_dataset(args, path, text_encoder):
         'BiGCN_UncertaintySemanticChange',
         'BiGCN_RevisionAwareSemanticChange',
         'LIRS',
+        'EBGCN',
     ]:
         return TreeDataset(path, args.word_embedding, text_encoder, args=args)
     if args.base_model in ['RAGCL_ResGCN', 'RAGCL_BiGCN', 'Plain_ResGCN', 'Plain_BiGCN']:
