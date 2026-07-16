@@ -28,11 +28,20 @@ from model.KAGNN import KAGNN
 from model.LIRS import LIRSGIN
 from model.NEGT import NEGT
 from model.EBGCN import EBGCN, EBGCNResGCN
+from model.EBGCN_ResGCN_StateAuxSameDiff import (
+    EBGCNResGCNStateAuxSameDiff,
+)
+from model.EBGCN_BiGCN_StateAuxSameDiff import (
+    EBGCNBiGCNStateAuxSameDiff,
+)
 from model.RAGCL_baselines import RAGCLBiGCN, RAGCLResGCN
 from trainer.EIN_trainer import EINTrainer
 from trainer.LIRS_trainer import LIRSTrainer
 from trainer.NEGT_trainer import NEGTTrainer
 from trainer.EBGCN_trainer import EBGCNTrainer
+from trainer.EBGCN_StateAuxSameDiff_trainer import (
+    EBGCNStateAuxSameDiffTrainer,
+)
 from trainer.RAGCL_trainer import RAGCLTrainer
 from trainer.SEEGraphMAE_trainer import SEEGraphMAETrainer
 from train_tcsr import run_seed as run_tcsr_seed
@@ -165,6 +174,7 @@ def _graph_dataset_cache_part(args):
         'BiGCN_RevisionAwareSemanticChange',
         'LIRS',
         'EBGCN',
+        'EBGCN_BiGCN_StateAuxSameDiff',
     }:
         return 'tree'
     if base_model in {
@@ -182,6 +192,7 @@ def _graph_dataset_cache_part(args):
         'NEGT',
         'TCSR',
         'EBGCN_ResGCN',
+        'EBGCN_ResGCN_StateAuxSameDiff',
         'RAGCL_ResGCN',
         'RAGCL_BiGCN',
         'Plain_ResGCN',
@@ -398,6 +409,7 @@ def load_graph_dataset(args, path, text_encoder):
         'NEGT',
         'TCSR',
         'EBGCN_ResGCN',
+        'EBGCN_ResGCN_StateAuxSameDiff',
     ]:
         return ResGCNTreeDataset(path, args.word_embedding, text_encoder, args.undirected, args=args)
     if args.base_model in [
@@ -409,6 +421,7 @@ def load_graph_dataset(args, path, text_encoder):
         'BiGCN_RevisionAwareSemanticChange',
         'LIRS',
         'EBGCN',
+        'EBGCN_BiGCN_StateAuxSameDiff',
     ]:
         return TreeDataset(path, args.word_embedding, text_encoder, args=args)
     if args.base_model in ['RAGCL_ResGCN', 'RAGCL_BiGCN', 'Plain_ResGCN', 'Plain_BiGCN']:
@@ -742,6 +755,78 @@ def EIN_EBGCN_ResGCN_supervisor(args):
         [train_dataset, val_dataset, test_dataset], base_model, optimizer, args, device
     )
 
+    print('Seed {} | Start training'.format(args.seed), flush=True)
+    return trainer.train_process()
+
+
+def EIN_EBGCN_ResGCN_StateAuxSameDiff_supervisor(args):
+    init_seed(args.seed, need_deepfix=True)
+    device = resolve_device(args)
+
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
+    text_encoder = build_text_encoder(args, device, label_source_path)
+
+    print('Seed {} | Building experiment datasets'.format(args.seed), flush=True)
+    train_dataset, val_dataset, test_dataset = build_experiment_datasets(
+        args, text_encoder
+    )
+
+    print(
+        'Seed {} | Initializing EBGCN-ResGCN dual-subgraph model'.format(args.seed),
+        flush=True,
+    )
+    base_model = EBGCNResGCNStateAuxSameDiff(
+        args.in_feats,
+        args.hidden_dim,
+        args.num_classes,
+        args,
+        device,
+    ).to(device)
+    optimizer = base_model.init_optimizer(args)
+    trainer = EBGCNStateAuxSameDiffTrainer(
+        [train_dataset, val_dataset, test_dataset],
+        base_model,
+        optimizer,
+        args,
+        device,
+    )
+
+    print('Seed {} | Start training'.format(args.seed), flush=True)
+    return trainer.train_process()
+
+
+def EIN_EBGCN_BiGCN_StateAuxSameDiff_supervisor(args):
+    init_seed(args.seed, need_deepfix=True)
+    device = resolve_device(args)
+
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
+    text_encoder = build_text_encoder(args, device, label_source_path)
+    print('Seed {} | Building experiment datasets'.format(args.seed), flush=True)
+    train_dataset, val_dataset, test_dataset = build_experiment_datasets(
+        args, text_encoder
+    )
+
+    print(
+        'Seed {} | Initializing EBGCN-BiGCN dual-subgraph model'.format(args.seed),
+        flush=True,
+    )
+    base_model = EBGCNBiGCNStateAuxSameDiff(
+        args.in_feats,
+        args.hidden_dim,
+        args.num_classes,
+        args,
+        device,
+    ).to(device)
+    optimizer = base_model.init_optimizer(args)
+    trainer = EBGCNStateAuxSameDiffTrainer(
+        [train_dataset, val_dataset, test_dataset],
+        base_model,
+        optimizer,
+        args,
+        device,
+    )
     print('Seed {} | Start training'.format(args.seed), flush=True)
     return trainer.train_process()
 
