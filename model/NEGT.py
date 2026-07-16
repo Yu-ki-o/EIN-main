@@ -289,6 +289,17 @@ class NEGT(torch.nn.Module):
         return self.concrete_sample(att_log_logits, temp=1, training=training)
 
     @staticmethod
+    def concrete_sample(att_log_logit, temp, training):
+        """Concrete relaxation used by the released NEGT implementation."""
+        if training:
+            random_noise = torch.empty_like(att_log_logit).uniform_(1e-10, 1 - 1e-10)
+            random_noise = torch.log(random_noise) - torch.log(1.0 - random_noise)
+            att_bern = ((att_log_logit + random_noise) / temp).sigmoid()
+        else:
+            att_bern = att_log_logit.sigmoid()
+        return att_bern
+
+    @staticmethod
     def lift_node_att_to_edge_att(node_att, edge_index, batch):
         src_lifted_att = node_att[edge_index[0]]
         dst_lifted_att = node_att[edge_index[1]]
