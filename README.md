@@ -97,3 +97,30 @@ Ablation flags are available with paired CLI switches:
 ```bash
 python train_tcsr.py --dataset_dir data/Pheme --no-use_threshold --no-use_isolation
 ```
+
+## LIRS-EBGCN
+
+`LIRS_EBGCN` is an end-to-end, spuriosity-aware extension of EBGCN. It learns
+a shortcut-biased node view, removes its projected component before Bayesian
+edge inference, and regularizes the resulting graph representation with
+biased infomax, HSIC, and online class-conditional spurious prototypes.
+
+The same model supports both propagation backbones through one configuration
+field:
+
+```yaml
+base_model: LIRS_EBGCN
+lirs_ebgcn_backbone: bigcn  # choices: bigcn, resgcn
+```
+
+Ready-to-run Word2Vec configurations are provided for all project datasets:
+
+```bash
+python main.py --config_filename configs/EIN/Pheme_LIRS_EBGCN_word2vec.yaml
+python main.py --config_filename configs/EIN/Weibo_LIRS_EBGCN_word2vec.yaml
+python main.py --config_filename configs/EIN/DRWeibo_LIRS_EBGCN_word2vec.yaml
+python main.py --config_filename configs/EIN/Twitter_LIRS_EBGCN_word2vec.yaml
+```
+
+To run the ResGCN variant, change only `lirs_ebgcn_backbone` to `resgcn` in
+the selected file. The dataset cache and loader are selected automatically.

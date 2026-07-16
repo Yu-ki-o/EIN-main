@@ -28,6 +28,7 @@ from model.KAGNN import KAGNN
 from model.LIRS import LIRSGIN
 from model.NEGT import NEGT
 from model.EBGCN import EBGCN, EBGCNResGCN
+from model.LIRS_EBGCN import LIRSEBGCN
 from model.EBGCN_ResGCN_StateAuxSameDiff import (
     EBGCNResGCNStateAuxSameDiff,
 )
@@ -39,6 +40,7 @@ from trainer.EIN_trainer import EINTrainer
 from trainer.LIRS_trainer import LIRSTrainer
 from trainer.NEGT_trainer import NEGTTrainer
 from trainer.EBGCN_trainer import EBGCNTrainer
+from trainer.LIRS_EBGCN_trainer import LIRSEBGCNTrainer
 from trainer.EBGCN_StateAuxSameDiff_trainer import (
     EBGCNStateAuxSameDiffTrainer,
 )
@@ -165,6 +167,19 @@ def _safe_cache_part(value):
 
 def _graph_dataset_cache_part(args):
     base_model = str(getattr(args, 'base_model', '')).strip()
+    if base_model == 'LIRS_EBGCN':
+        backbone = str(
+            getattr(args, 'lirs_ebgcn_backbone', 'bigcn')
+        ).strip().lower()
+        if backbone == 'bigcn':
+            return 'tree'
+        if backbone == 'resgcn':
+            return 'resgcn-tree'
+        raise ValueError(
+            'lirs_ebgcn_backbone must be "bigcn" or "resgcn", got {!r}.'.format(
+                backbone
+            )
+        )
     if base_model in {
         'BiGCN',
         'BiGCN_Uncertainty',
@@ -394,6 +409,27 @@ def build_strict_ood_paths(args):
 
 
 def load_graph_dataset(args, path, text_encoder):
+    if args.base_model == 'LIRS_EBGCN':
+        backbone = str(
+            getattr(args, 'lirs_ebgcn_backbone', 'bigcn')
+        ).strip().lower()
+        if backbone == 'resgcn':
+            return ResGCNTreeDataset(
+                path,
+                args.word_embedding,
+                text_encoder,
+                args.undirected,
+                args=args,
+            )
+        if backbone == 'bigcn':
+            return TreeDataset(
+                path, args.word_embedding, text_encoder, args=args
+            )
+        raise ValueError(
+            'lirs_ebgcn_backbone must be "bigcn" or "resgcn", got {!r}.'.format(
+                backbone
+            )
+        )
     if args.base_model in [
         'ResGCN',
         'ResGCN_Uncertainty',
@@ -755,6 +791,49 @@ def EIN_EBGCN_ResGCN_supervisor(args):
         [train_dataset, val_dataset, test_dataset], base_model, optimizer, args, device
     )
 
+    print('Seed {} | Start training'.format(args.seed), flush=True)
+    return trainer.train_process()
+
+
+def EIN_LIRS_EBGCN_supervisor(args):
+    """Train the LIRS-inspired EBGCN with a config-selected backbone."""
+    init_seed(args.seed, need_deepfix=True)
+    device = resolve_device(args)
+
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
+    text_encoder = build_text_encoder(args, device, label_source_path)
+
+    backbone = str(
+        getattr(args, 'lirs_ebgcn_backbone', 'bigcn')
+    ).strip().lower()
+    print(
+        'Seed {} | Building {} experiment datasets'.format(args.seed, backbone),
+        flush=True,
+    )
+    train_dataset, val_dataset, test_dataset = build_experiment_datasets(
+        args, text_encoder
+    )
+
+    print(
+        'Seed {} | Initializing LIRS-EBGCN ({})'.format(args.seed, backbone),
+        flush=True,
+    )
+    base_model = LIRSEBGCN(
+        args.in_feats,
+        args.hidden_dim,
+        args.num_classes,
+        args,
+        device,
+    ).to(device)
+    optimizer = base_model.init_optimizer(args)
+    trainer = LIRSEBGCNTrainer(
+        [train_dataset, val_dataset, test_dataset],
+        base_model,
+        optimizer,
+        args,
+        device,
+    )
     print('Seed {} | Start training'.format(args.seed), flush=True)
     return trainer.train_process()
 

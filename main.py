@@ -33,6 +33,7 @@ from supervisor import (
     EIN_NEGT_supervisor,
     EIN_EBGCN_supervisor,
     EIN_EBGCN_ResGCN_supervisor,
+    EIN_LIRS_EBGCN_supervisor,
     EIN_EBGCN_ResGCN_StateAuxSameDiff_supervisor,
     EIN_EBGCN_BiGCN_StateAuxSameDiff_supervisor,
     EIN_TCSR_supervisor,
@@ -70,6 +71,11 @@ def _summary_model_parts(args):
         return 'EBGCN', None
     if base_model == 'EBGCN_ResGCN':
         return 'EBGCN', 'ResGCN'
+    if base_model == 'LIRS_EBGCN':
+        backbone = str(
+            getattr(args, 'lirs_ebgcn_backbone', 'bigcn')
+        ).strip().lower()
+        return 'LIRS-EBGCN', 'BiGCN' if backbone == 'bigcn' else 'ResGCN'
     if base_model == 'EBGCN_ResGCN_StateAuxSameDiff':
         return 'EBGCN-DualSubgraph', 'ResGCN'
     if base_model == 'EBGCN_BiGCN_StateAuxSameDiff':
