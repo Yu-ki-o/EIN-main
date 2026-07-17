@@ -443,6 +443,7 @@ def load_graph_dataset(args, path, text_encoder):
         'ResGCN_SameDiffFusion',
         'ResGCN_UncertaintySemanticChange',
         'ResGCN_RevisionAwareSemanticChange',
+        'ResGCN_StaticDynamicSemanticChange',
         'ResGCN_BackboneOnly',
         'GCN_UncertaintySemanticChange',
         'GIN_UncertaintySemanticChange',
