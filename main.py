@@ -42,6 +42,7 @@ from supervisor import (
     EIN_TCSR_supervisor,
 )
 from supervisor_static_dynamic import (
+    EIN_BiGCN_StaticDynamicSemanticChange_supervisor,
     EIN_ResGCN_StaticDynamicSemanticChange_supervisor,
 )
 

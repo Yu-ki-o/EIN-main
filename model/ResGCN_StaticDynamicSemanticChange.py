@@ -38,7 +38,7 @@ class StaticDynamicChangeEncoder(nn.Module):
         )
         self.max_depth = max(1, int(getattr(args, "max_hop", 72)))
         self.max_layers = max(
-            1,
+            2,
             int(getattr(args, "n_layers_conv", 2)),
         )
         self.use_ib_sampling = bool(

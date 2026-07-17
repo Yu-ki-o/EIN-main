@@ -5,6 +5,9 @@ import torch
 import torch.nn.functional as F
 from torch_geometric.data import Batch, Data
 
+from model.BiGCN_StaticDynamicSemanticChange import (
+    BiGCN_StaticDynamicSemanticChange,
+)
 from model.ResGCN_StaticDynamicSemanticChange import (
     ResGCN_StaticDynamicSemanticChange,
     StaticDynamicChangeEncoder,
@@ -183,6 +186,32 @@ class ResGCNStaticDynamicSemanticChangeTest(unittest.TestCase):
         self.assertIsNotNone(model._last_dynamic_change_loss)
         self.assertIsNotNone(model._last_information_bottleneck_loss)
         self.assertIsNotNone(model._last_variant_intervention_loss)
+
+
+class BiGCNStaticDynamicSemanticChangeTest(unittest.TestCase):
+    def test_model_forward_uses_three_pseudo_time_states(self):
+        model = BiGCN_StaticDynamicSemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=model_args(),
+            device=torch.device("cpu"),
+        )
+        model.set_epoch(1)
+        data = make_batch()
+
+        output, uncertainty, support, deny = model(data)
+        loss = F.nll_loss(output, data.y) + model.auxiliary_loss()
+        loss.backward()
+
+        self.assertEqual(tuple(output.shape), (2, 2))
+        self.assertEqual(tuple(uncertainty.shape), (2, 4, 1))
+        self.assertEqual(
+            model.static_dynamic_encoder.last_temporal_near_attention.size(1),
+            2,
+        )
+        self.assertTrue(torch.isfinite(loss))
 
 
 if __name__ == "__main__":

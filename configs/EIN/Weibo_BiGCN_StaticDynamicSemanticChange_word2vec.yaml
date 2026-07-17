@@ -1,0 +1,87 @@
+# Static/dynamic dual-view semantic change with BiGCN backbone
+model_name: EIN
+dataset: Weibo
+num_classes: 2
+language: ch
+word_embedding: word2vec
+e5_model_name: intfloat/multilingual-e5-base
+e5_max_length: 128
+e5_batch_size: 64
+result_name: BiGCN_StaticDynamicSemanticChange_clean
+experiment_mode: id
+ood_source_datasets: []
+ood_val_domain: source
+debug: false
+use_tensorboard: true
+tensorboard_log_dir: tensorboard
+
+seed: 0
+device: cuda
+lr: 0.0005
+weight_decay: 0.00001
+patience: 15
+n_epochs: 100
+selection_metric: val_loss
+split: '622'
+
+batch_size: 128
+hidden_dim: 128
+in_feats: 200
+tokenize_mode: jieba
+k: 10000
+vector_size: 200
+undirected: false
+n_layers_conv: 2
+dropout: 0.3
+global_pool: sum
+base_model: BiGCN_StaticDynamicSemanticChange
+max_hop: 72
+lamda: 0.0
+
+relation_hidden_dim: 128
+relation_temperature: 1.0
+stance_route_temperature: 0.5
+stance_route_hard: true
+lambda_edge_relation_aux: 0.1
+lambda_edge_relation_warmup: 0.5
+lambda_view_mi_aux: 0.0
+use_ds_mass_routing: true
+ds_unknown_prior: 1.0
+lambda_ds_unknown_edge_aux: 0.0
+use_uncertainty_sampling: false
+uncertainty_sample_temperature: 0.5
+uncertainty_keep_floor: 0.1
+uncertainty_sampling_warmup_epochs: 5
+use_degree_importance: true
+degree_importance_strength: 1.0
+semantic_node_weight_mode: local
+use_semantic_parity_gnn: false
+use_node_keep_in_change_pool: false
+
+st_change_attention_temperature: 1.0
+st_change_min_std: 0.001
+st_change_max_wasserstein_distance: 20.0
+st_change_use_ib_sampling: false
+lambda_static_change_cls: 0.15
+lambda_dynamic_change_cls: 0.15
+lambda_temporal_prediction: 0.05
+lambda_information_bottleneck: 0.001
+lambda_variant_intervention: 0.05
+lambda_static_dynamic_decorr: 0.01
+lambda_invariant_mask_prior: 0.01
+invariant_mask_prior: 0.5
+spatiotemporal_warmup_epochs: 10
+
+semantic_change_encoder: mlp
+semantic_change_hidden_dim: 128
+classification_fusion_mode: change
+classification_fusion_hidden_dim: 256
+classification_class_weights: [1.0, 1.5]
+classification_head_mode: fusion
+use_vertical_path_attention: false
+use_semantic_tree_transformer: false
+use_trend_graph: false
+uncertainty_trend_hidden_dim: 128
+use_conflict_field_bottleneck: false
+use_global_ds_fusion: false
+
