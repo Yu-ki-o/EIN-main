@@ -73,6 +73,9 @@ vertical_path_attention_dropout: 0.3
 use_semantic_tree_transformer: True
 semantic_tree_transformer_layers: 1
 semantic_tree_transformer_heads: 4
+semantic_tree_num_topics: 4
+semantic_tree_topic_temperature: 1.0
+semantic_tree_attention_temperature: 1.0
 semantic_tree_transformer_ffn_dim: 256
 semantic_tree_transformer_dropout: 0.3
 semantic_tree_transformer_max_depth: 20
