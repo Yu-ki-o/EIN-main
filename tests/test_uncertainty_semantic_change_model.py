@@ -9,6 +9,7 @@ from model.BiGCN_UncertaintySemanticChange import (
     BiGCN_UncertaintySemanticChange,
     EdgeRelationUncertaintyRouter,
     SemanticParityDirectionEncoder,
+    SemanticTreeTransformerBranch,
 )
 from model.ResGCN_UncertaintySemanticChange import (
     ResGCN_UncertaintySemanticChange,
@@ -814,7 +815,76 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
         self.assertTrue(
             torch.equal(model._last_semantic_tree_depth, expected_depth)
         )
+        self.assertEqual(
+            tuple(model._last_original_nodes.shape),
+            (5, 8),
+        )
+        self.assertEqual(
+            tuple(model._last_semantic_tree_topics.shape),
+            (2, 3, 2),
+        )
+        self.assertEqual(
+            tuple(model._last_semantic_tree_topic_similarity.shape),
+            (2, 3, 3),
+        )
+        self.assertTrue(
+            torch.allclose(
+                model._last_semantic_tree_topic_similarity,
+                model._last_semantic_tree_topic_similarity.transpose(1, 2),
+                atol=1e-6,
+            )
+        )
+        self.assertTrue(
+            torch.allclose(
+                model._last_semantic_tree_attention[0].sum(dim=-1),
+                torch.ones(3),
+                atol=1e-6,
+            )
+        )
+        self.assertTrue(
+            torch.allclose(
+                model._last_semantic_tree_attention[1, :2].sum(dim=-1),
+                torch.ones(2),
+                atol=1e-6,
+            )
+        )
         self.assertTrue(torch.isfinite(model._last_semantic_tree_graph).all())
+
+    def test_semantic_tree_depth_is_part_of_dual_view_values(self):
+        args = make_args()
+        args.semantic_tree_transformer_heads = 2
+        args.semantic_tree_transformer_layers = 1
+        args.semantic_tree_depth_dim = 4
+        branch = SemanticTreeTransformerBranch(8, args=args).eval()
+        original = torch.randn(3, 8)
+        support = torch.randn(3, 8)
+        deny = torch.randn(3, 8)
+        batch = torch.zeros(3, dtype=torch.long)
+
+        _, shallow_nodes = branch(
+            original,
+            support,
+            deny,
+            torch.tensor([0, 1, 1]),
+            batch,
+        )
+        shallow_attention = branch.last_attention.clone()
+        _, deep_nodes = branch(
+            original,
+            support,
+            deny,
+            torch.tensor([0, 2, 2]),
+            batch,
+        )
+
+        self.assertTrue(
+            torch.allclose(
+                shallow_attention,
+                branch.last_attention,
+                atol=1e-6,
+            )
+        )
+        self.assertFalse(torch.allclose(shallow_nodes, deep_nodes))
 
     def test_change_semantic_tree_classification_fusion(self):
         args = make_args()
@@ -842,6 +912,7 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
         )
         self.assertEqual(model.fusion[0].in_features, 16)
         self.assertIsNone(model._last_original_graph)
+        self.assertEqual(tuple(model._last_original_nodes.shape), (5, 8))
         self.assertIsNone(model._last_vertical_graph)
         self.assertEqual(tuple(model._last_change_graph.shape), (2, 8))
         self.assertEqual(

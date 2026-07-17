@@ -59,7 +59,7 @@ DEFAULTS = {
             "semantic_tree_transformer_max_depth": [40, 72],
         },
         "semantic_tree_capacity": {
-            "semantic_tree_transformer_heads": [4, 8],
+            "semantic_tree_num_topics": [4, 8],
             "semantic_tree_transformer_ffn_dim": [256, 512],
             "semantic_tree_depth_dim": [64, 128],
             "semantic_tree_transformer_pool": ["mean", "root"],
