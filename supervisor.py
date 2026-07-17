@@ -203,6 +203,7 @@ def _graph_dataset_cache_part(args):
         'ResGCN_SameDiffFusion',
         'ResGCN_UncertaintySemanticChange',
         'ResGCN_RevisionAwareSemanticChange',
+        'ResGCN_StaticDynamicSemanticChange',
         'ResGCN_BackboneOnly',
         'GCN_UncertaintySemanticChange',
         'GIN_UncertaintySemanticChange',

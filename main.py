@@ -41,6 +41,9 @@ from supervisor import (
     EIN_EBGCN_BiGCN_StateAuxSameDiff_supervisor,
     EIN_TCSR_supervisor,
 )
+from supervisor_static_dynamic import (
+    EIN_ResGCN_StaticDynamicSemanticChange_supervisor,
+)
 
 
 def _safe_filename_part(value):
