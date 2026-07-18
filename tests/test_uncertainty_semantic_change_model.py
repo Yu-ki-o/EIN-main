@@ -38,7 +38,13 @@ def make_args():
         stance_route_hard=True,
         uncertainty_sample_temperature=0.5,
         uncertainty_keep_floor=0.05,
+        edge_relation_distribution=None,
         use_ds_mass_routing=False,
+        use_dirichlet_relation_routing=False,
+        dirichlet_relation_prior=1.0,
+        dirichlet_relation_sample=False,
+        dirichlet_teacher_strength=10.0,
+        dirichlet_teacher_smoothing=0.05,
         ds_unknown_prior=2.0,
         lambda_ds_unknown_edge_aux=0.0,
         use_global_ds_fusion=False,
@@ -221,6 +227,49 @@ class EdgeRelationUncertaintyRouterTest(unittest.TestCase):
         self.assertTrue(torch.allclose(keep, support + deny, atol=1e-6))
         self.assertTrue(torch.allclose(keep + unknown, torch.ones_like(keep)))
         self.assertGreater(float(unknown), float(support))
+
+    def test_ds_and_dirichlet_relation_routing_are_mutually_exclusive(self):
+        args = make_args()
+        args.use_ds_mass_routing = True
+        args.use_dirichlet_relation_routing = True
+
+        with self.assertRaises(ValueError):
+            EdgeRelationUncertaintyRouter(4, args)
+
+    def test_distribution_switch_closes_other_relation_modes(self):
+        args = make_args()
+        args.edge_relation_distribution = "dirichlet"
+        args.use_ds_mass_routing = True
+        args.use_dirichlet_relation_routing = False
+
+        router = EdgeRelationUncertaintyRouter(4, args)
+
+        self.assertTrue(router.use_dirichlet_relation_routing)
+        self.assertFalse(router.use_ds_mass_routing)
+        self.assertEqual(router.edge_relation_distribution, "dirichlet")
+
+    def test_dirichlet_relation_routing_uses_mean_probability(self):
+        args = make_args()
+        args.use_dirichlet_relation_routing = True
+        router = EdgeRelationUncertaintyRouter(4, args).eval()
+        logits = torch.tensor([[0.0, 0.0], [4.0, -4.0]])
+
+        concentration, probabilities = router.dirichlet_relation_probabilities(
+            logits
+        )
+        expected = concentration / concentration.sum(dim=-1, keepdim=True)
+
+        self.assertTrue((concentration > 0).all())
+        self.assertTrue(torch.allclose(probabilities, expected, atol=1e-6))
+        self.assertTrue(
+            torch.allclose(
+                probabilities.sum(dim=-1),
+                torch.ones(2),
+                atol=1e-6,
+            )
+        )
+        self.assertAlmostEqual(float(probabilities[0, 0]), 0.5, places=6)
+        self.assertGreater(float(probabilities[1, 0]), float(probabilities[1, 1]))
 
 
 class SemanticParityDirectionEncoderTest(unittest.TestCase):
@@ -1197,6 +1246,39 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
             torch.allclose(
                 model._last_edge_unknown_mass,
                 model._last_edge_uncertainty,
+                atol=1e-6,
+            )
+        )
+        self.assertTrue(torch.isfinite(unknown).all())
+        self.assertTrue(torch.isfinite(support).all())
+        self.assertTrue(torch.isfinite(deny).all())
+
+    def test_dirichlet_relation_routing_forward_records_alpha(self):
+        args = make_args()
+        args.use_dirichlet_relation_routing = True
+        args.use_uncertainty_sampling = False
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).train()
+        data = make_batch()
+
+        output, unknown, support, deny = model(data)
+        loss = F.nll_loss(output, data.y) + model.auxiliary_loss()
+        loss.backward()
+
+        self.assertEqual(tuple(model._last_edge_dirichlet_alpha.shape), (3, 2))
+        self.assertTrue((model._last_edge_dirichlet_alpha > 0).all())
+        self.assertIsNone(model._last_edge_masses)
+        self.assertIsNone(model._last_edge_unknown_mass)
+        self.assertTrue(
+            torch.allclose(
+                model._last_edge_probabilities.sum(dim=-1),
+                torch.ones(3),
                 atol=1e-6,
             )
         )

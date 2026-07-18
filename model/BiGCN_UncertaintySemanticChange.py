@@ -7,6 +7,7 @@ sys.path.append(os.getcwd())
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torch.distributions import Dirichlet, kl_divergence
 from torch_geometric.nn import (
     GCNConv,
     global_add_pool,
@@ -31,6 +32,13 @@ class EdgeRelationUncertaintyRouter(nn.Module):
     When Dempster-Shafer mass routing is enabled, the edge head instead emits
     non-negative evidence for support/deny. The residual mass is assigned to
     the unknown set and the semantic views receive only support/deny masses.
+
+    When Dirichlet relation routing is enabled, the edge head emits positive
+    concentration parameters for a support/deny probability distribution. The
+    Dirichlet mean, or an optional reparameterized Dirichlet sample, is used as
+    the semantic routing probability. Its total concentration is not treated as
+    edge uncertainty here; uncertainty keeps the existing entropy-based route
+    ambiguity semantics.
     """
 
     def __init__(self, hidden_dim, args=None):
@@ -57,8 +65,52 @@ class EdgeRelationUncertaintyRouter(nn.Module):
         self.use_uncertainty_sampling = bool(
             getattr(args, "use_uncertainty_sampling", True)
         )
-        self.use_ds_mass_routing = bool(
-            getattr(args, "use_ds_mass_routing", False)
+        relation_distribution = getattr(args, "edge_relation_distribution", None)
+        use_dirichlet = bool(
+            getattr(args, "use_dirichlet_relation_routing", False)
+        )
+        use_ds = bool(getattr(args, "use_ds_mass_routing", False))
+        if relation_distribution is not None:
+            relation_distribution = str(relation_distribution).strip().lower()
+            valid_distributions = {"softmax", "ds", "dirichlet"}
+            if relation_distribution not in valid_distributions:
+                raise ValueError(
+                    "edge_relation_distribution must be one of {}, got {}".format(
+                        sorted(valid_distributions),
+                        relation_distribution,
+                    )
+                )
+            use_dirichlet = relation_distribution == "dirichlet"
+            use_ds = relation_distribution == "ds"
+        elif use_dirichlet and use_ds:
+            raise ValueError(
+                "use_dirichlet_relation_routing and use_ds_mass_routing are "
+                "mutually exclusive; leave both false for the original softmax "
+                "router."
+            )
+        self.use_dirichlet_relation_routing = use_dirichlet
+        self.use_ds_mass_routing = use_ds
+        self.edge_relation_distribution = (
+            "dirichlet"
+            if self.use_dirichlet_relation_routing
+            else "ds"
+            if self.use_ds_mass_routing
+            else "softmax"
+        )
+        self.dirichlet_relation_prior = max(
+            1e-6,
+            float(getattr(args, "dirichlet_relation_prior", 1.0)),
+        )
+        self.dirichlet_relation_sample = bool(
+            getattr(args, "dirichlet_relation_sample", False)
+        )
+        self.dirichlet_teacher_strength = max(
+            1e-6,
+            float(getattr(args, "dirichlet_teacher_strength", 10.0)),
+        )
+        self.dirichlet_teacher_smoothing = min(
+            max(float(getattr(args, "dirichlet_teacher_smoothing", 0.05)), 0.0),
+            0.49,
         )
         self.ds_unknown_prior = max(
             1e-6,
@@ -122,6 +174,44 @@ class EdgeRelationUncertaintyRouter(nn.Module):
         )
         return masses, class_mass, unknown_mass
 
+    def dirichlet_concentration(self, logits):
+        if logits.numel() == 0:
+            return logits.new_zeros(logits.size())
+        evidence = F.softplus(logits / self.relation_temperature)
+        return evidence + self.dirichlet_relation_prior
+
+    def dirichlet_mean(self, concentration):
+        total = concentration.sum(dim=-1, keepdim=True)
+        return concentration / total.clamp_min(self.eps)
+
+    def dirichlet_relation_probabilities(self, logits):
+        concentration = self.dirichlet_concentration(logits)
+        mean = self.dirichlet_mean(concentration)
+        if self.training and self.dirichlet_relation_sample:
+            probabilities = Dirichlet(
+                concentration.clamp_min(self.eps)
+            ).rsample()
+            probabilities = probabilities / probabilities.sum(
+                dim=-1,
+                keepdim=True,
+            ).clamp_min(self.eps)
+            return concentration, probabilities
+        return concentration, mean
+
+    def dirichlet_teacher_concentration(self, labels):
+        labels = labels.view(-1).long().clamp(0, 1)
+        support_target = (labels == 0).to(dtype=torch.float32)
+        smooth = self.dirichlet_teacher_smoothing
+        support_target = support_target * (1.0 - 2.0 * smooth) + smooth
+        target_prob = torch.stack(
+            (support_target, 1.0 - support_target),
+            dim=-1,
+        )
+        return (
+            self.dirichlet_relation_prior
+            + self.dirichlet_teacher_strength * target_prob
+        )
+
     def normalized_entropy(self, probabilities):
         probabilities = probabilities.clamp_min(self.eps)
         entropy = -(probabilities * probabilities.log()).sum(dim=-1)
@@ -178,9 +268,12 @@ class EdgeRelationUncertaintyRouter(nn.Module):
     def stance_route(self, logits, probabilities):
         if self.current_epoch < self.warmup_epochs:
             return probabilities
+        route_logits = logits
+        if self.use_dirichlet_relation_routing:
+            route_logits = probabilities.clamp_min(self.eps).log()
         if self.training:
             return F.gumbel_softmax(
-                logits,
+                route_logits,
                 tau=self.route_temperature,
                 hard=self.hard_stance_route,
                 dim=-1,
@@ -222,7 +315,10 @@ class EdgeRelationUncertaintyRouter(nn.Module):
             dim=-1,
         )
         logits = self.logit_head(self.relation_encoder(edge_features))
-        if self.use_ds_mass_routing:
+        if self.use_dirichlet_relation_routing:
+            _, probabilities = self.dirichlet_relation_probabilities(logits)
+            uncertainty = self.normalized_entropy(probabilities)
+        elif self.use_ds_mass_routing:
             _, class_mass, uncertainty = self.relation_masses(logits)
             known_mass = class_mass.sum(dim=-1, keepdim=True)
             probabilities = class_mass / known_mass.clamp_min(self.eps)
@@ -2354,6 +2450,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_global_ds_branch_masses = None
         self._last_global_ds_conflict = None
         self._last_edge_probabilities = None
+        self._last_edge_dirichlet_alpha = None
         self._last_edge_masses = None
         self._last_edge_unknown_mass = None
         self._last_edge_uncertainty = None
@@ -2746,6 +2843,29 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                     edge_loss
                     + self.lambda_ds_unknown_edge * masses[:, 1].mean()
                 )
+            return relation_weight * edge_loss
+        if self.edge_router.use_dirichlet_relation_routing:
+            concentration = self.edge_router.dirichlet_concentration(
+                logits[valid]
+            ).clamp_min(self.view_mi_eps)
+            teacher = self.edge_router.dirichlet_teacher_concentration(
+                valid_labels
+            ).to(device=concentration.device, dtype=concentration.dtype)
+            teacher = teacher.clamp_min(self.view_mi_eps)
+            edge_kl = kl_divergence(
+                Dirichlet(teacher),
+                Dirichlet(concentration),
+            )
+            if class_weight is not None:
+                sample_weight = class_weight[valid_labels].to(
+                    device=edge_kl.device,
+                    dtype=edge_kl.dtype,
+                )
+                edge_loss = (
+                    edge_kl * sample_weight
+                ).sum() / sample_weight.sum().clamp_min(self.view_mi_eps)
+            else:
+                edge_loss = edge_kl.mean()
             return relation_weight * edge_loss
         return relation_weight * F.cross_entropy(
             logits[valid],
@@ -3449,13 +3569,22 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             else global_ds_conflict.detach()
         )
         self._last_edge_probabilities = probabilities.detach()
-        if self.edge_router.use_ds_mass_routing:
+        if self.edge_router.use_dirichlet_relation_routing:
+            self._last_edge_dirichlet_alpha = (
+                self.edge_router.dirichlet_concentration(relation_logits)
+                .detach()
+            )
+            self._last_edge_masses = None
+            self._last_edge_unknown_mass = None
+        elif self.edge_router.use_ds_mass_routing:
+            self._last_edge_dirichlet_alpha = None
             edge_masses, _, edge_unknown_mass = (
                 self.edge_router.relation_masses(relation_logits)
             )
             self._last_edge_masses = edge_masses.detach()
             self._last_edge_unknown_mass = edge_unknown_mass.detach()
         else:
+            self._last_edge_dirichlet_alpha = None
             self._last_edge_masses = None
             self._last_edge_unknown_mass = None
         self._last_edge_uncertainty = edge_uncertainty.detach()
