@@ -7,7 +7,7 @@ word_embedding: word2vec
 e5_model_name: intfloat/multilingual-e5-base
 e5_max_length: 128
 e5_batch_size: 64
-result_name: UncertaintySemanticChange_bigcn_change_semantic_tree_manifest_dirichlet_mlp_sumpool
+result_name: UncertaintySemanticChange_bigcn_change_semantic_tree_manifest_dirichlet_gcb_sumpool
 experiment_mode: id
 ood_source_datasets: []
 ood_val_domain: source
@@ -73,6 +73,10 @@ degree_importance_strength: 1.0
 # replaceable node-level semantic change encoder: mlp or dpga
 semantic_change_encoder: mlp
 semantic_change_hidden_dim: 64
+use_gaussian_semantic_change_bottleneck: True
+semantic_change_gaussian_latent_dim: 64
+semantic_change_gaussian_sample: False
+lambda_semantic_change_bottleneck: 0.001
 dpga_pseudo_nodes: 4
 dpga_layers: 1
 dpga_attention_temperature: 1.0

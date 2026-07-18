@@ -2262,6 +2262,10 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             0.0,
             float(getattr(args, "lambda_ds_unknown_edge_aux", 0.0)),
         )
+        self.lambda_semantic_change_bottleneck = max(
+            0.0,
+            float(getattr(args, "lambda_semantic_change_bottleneck", 0.0)),
+        )
         self.view_mi_eps = max(
             1e-12,
             float(getattr(args, "view_mi_eps", 1e-6)),
@@ -2445,6 +2449,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_aux_loss = None
         self._last_edge_relation_loss = None
         self._last_view_mi_loss = None
+        self._last_semantic_change_bottleneck_loss = None
         self._last_branch_logits = None
         self._last_global_ds_masses = None
         self._last_global_ds_branch_masses = None
@@ -2917,6 +2922,15 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             mi_proxy = (support * deny).sum(dim=-1).pow(2).mean()
         return self.lambda_view_mi * mi_proxy
 
+    def _semantic_change_bottleneck_loss(self):
+        zero = self.classifier.weight.new_zeros(())
+        if self.lambda_semantic_change_bottleneck <= 0.0:
+            return zero
+        kl_loss = getattr(self.semantic_change_encoder, "kl_loss", None)
+        if kl_loss is None:
+            return zero
+        return self.lambda_semantic_change_bottleneck * kl_loss()
+
     def _node_depths(self, data, edge_index):
         num_nodes = data.x.size(0)
         depth = torch.full(
@@ -3292,6 +3306,11 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         return self.trend_projection(hidden[batch_index, last_index])
 
     def forward(self, data):
+        if hasattr(self.semantic_change_encoder, "last_kl_loss"):
+            self.semantic_change_encoder.last_kl_loss = None
+            self.semantic_change_encoder.last_mean = None
+            self.semantic_change_encoder.last_logvar = None
+
         node_hidden = self.node_projection(data.x.float())
         node_hidden = self._add_root_context(node_hidden, data)
         original_nodes = None
@@ -3540,6 +3559,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             support_graph,
             deny_graph,
         )
+        change_bottleneck_loss = self._semantic_change_bottleneck_loss()
         conflict_aux_loss = (
             relation_logits.new_zeros(())
             if conflict_outputs is None
@@ -3548,10 +3568,14 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_aux_loss = (
             edge_relation_loss
             + view_mi_loss
+            + change_bottleneck_loss
             + conflict_aux_loss
         )
         self._last_edge_relation_loss = edge_relation_loss.detach()
         self._last_view_mi_loss = view_mi_loss.detach()
+        self._last_semantic_change_bottleneck_loss = (
+            change_bottleneck_loss.detach()
+        )
         self._last_conflict_aux_loss = conflict_aux_loss.detach()
         self._last_global_ds_masses = (
             None

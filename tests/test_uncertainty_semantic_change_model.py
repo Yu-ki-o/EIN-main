@@ -61,6 +61,12 @@ def make_args():
         semantic_node_weight_mode="local",
         semantic_change_encoder="mlp",
         semantic_change_hidden_dim=8,
+        use_gaussian_semantic_change_bottleneck=False,
+        semantic_change_gaussian_latent_dim=8,
+        semantic_change_gaussian_sample=False,
+        semantic_change_gaussian_min_logvar=-8.0,
+        semantic_change_gaussian_max_logvar=4.0,
+        lambda_semantic_change_bottleneck=0.0,
         uncertainty_trend_hidden_dim=8,
         use_trend_graph=True,
         use_node_keep_in_change_pool=True,
@@ -1282,6 +1288,38 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
                 atol=1e-6,
             )
         )
+        self.assertTrue(torch.isfinite(unknown).all())
+        self.assertTrue(torch.isfinite(support).all())
+        self.assertTrue(torch.isfinite(deny).all())
+
+    def test_gaussian_semantic_change_bottleneck_adds_auxiliary_kl(self):
+        args = make_args()
+        args.use_gaussian_semantic_change_bottleneck = True
+        args.semantic_change_gaussian_sample = False
+        args.lambda_semantic_change_bottleneck = 0.01
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).train()
+        data = make_batch()
+
+        output, unknown, support, deny = model(data)
+        loss = F.nll_loss(output, data.y) + model.auxiliary_loss()
+        loss.backward()
+
+        self.assertIsNotNone(
+            model.semantic_change_encoder.mean_head.weight.grad
+        )
+        self.assertIsNotNone(model._last_semantic_change_bottleneck_loss)
+        self.assertGreaterEqual(
+            float(model._last_semantic_change_bottleneck_loss),
+            0.0,
+        )
+        self.assertEqual(tuple(model._last_change_nodes.shape), (5, 8))
         self.assertTrue(torch.isfinite(unknown).all())
         self.assertTrue(torch.isfinite(support).all())
         self.assertTrue(torch.isfinite(deny).all())

@@ -103,6 +103,145 @@ class MLPSemanticChangeEncoder(nn.Module):
             )
 
 
+class GaussianSemanticChangeBottleneck(nn.Module):
+    """
+    Encodes support/deny semantic change through a diagonal Gaussian
+    bottleneck.
+
+    The input features follow the same convention as the MLP encoder:
+    signed delta is ``deny_nodes - support_nodes``. By default the forward pass
+    uses the posterior mean for stability; sampling can be enabled with
+    ``semantic_change_gaussian_sample``.
+    """
+
+    def __init__(
+        self,
+        input_dim,
+        output_dim=None,
+        hidden_dim=None,
+        latent_dim=None,
+        dropout=0.0,
+        include_sum=False,
+        sample=False,
+        min_logvar=-8.0,
+        max_logvar=4.0,
+    ):
+        super().__init__()
+        self.input_dim = int(input_dim)
+        self.output_dim = (
+            self.input_dim if output_dim is None else int(output_dim)
+        )
+        self.hidden_dim = (
+            self.input_dim if hidden_dim is None else int(hidden_dim)
+        )
+        self.latent_dim = (
+            self.output_dim if latent_dim is None else int(latent_dim)
+        )
+        self.include_sum = bool(include_sum)
+        self.sample = bool(sample)
+        self.min_logvar = float(min_logvar)
+        self.max_logvar = float(max_logvar)
+        self.feature_multiplier = 3 if self.include_sum else 2
+
+        if self.input_dim <= 0:
+            raise ValueError("input_dim must be positive")
+        if self.output_dim <= 0:
+            raise ValueError("output_dim must be positive")
+        if self.hidden_dim <= 0:
+            raise ValueError("hidden_dim must be positive")
+        if self.latent_dim <= 0:
+            raise ValueError("latent_dim must be positive")
+        if self.min_logvar > self.max_logvar:
+            raise ValueError("min_logvar must be <= max_logvar")
+
+        self.encoder = nn.Sequential(
+            nn.Linear(
+                self.input_dim * self.feature_multiplier,
+                self.hidden_dim,
+                bias=False,
+            ),
+            nn.ReLU(),
+            nn.Dropout(float(dropout)),
+        )
+        self.mean_head = nn.Linear(
+            self.hidden_dim,
+            self.latent_dim,
+            bias=False,
+        )
+        self.logvar_head = nn.Linear(
+            self.hidden_dim,
+            self.latent_dim,
+            bias=False,
+        )
+        self.decoder = (
+            nn.Identity()
+            if self.latent_dim == self.output_dim
+            else nn.Linear(self.latent_dim, self.output_dim, bias=False)
+        )
+        self.last_mean = None
+        self.last_logvar = None
+        self.last_kl_loss = None
+
+    def change_features(self, support_nodes, deny_nodes):
+        self._validate_inputs(support_nodes, deny_nodes)
+        delta = deny_nodes - support_nodes
+        features = [delta, delta.abs()]
+        if self.include_sum:
+            features.append(support_nodes + deny_nodes)
+        return torch.cat(features, dim=-1)
+
+    def forward(self, support_nodes, deny_nodes, **kwargs):
+        features = self.change_features(support_nodes, deny_nodes)
+        if support_nodes.size(0) == 0:
+            zero = support_nodes.new_zeros(())
+            self.last_mean = support_nodes.new_zeros((0, self.latent_dim))
+            self.last_logvar = support_nodes.new_zeros((0, self.latent_dim))
+            self.last_kl_loss = zero
+            return support_nodes.new_zeros((0, self.output_dim))
+
+        hidden = self.encoder(features)
+        mean = self.mean_head(hidden)
+        logvar = self.logvar_head(hidden).clamp(
+            self.min_logvar,
+            self.max_logvar,
+        )
+        if self.training and self.sample:
+            std = torch.exp(0.5 * logvar)
+            latent = mean + torch.randn_like(std) * std
+        else:
+            latent = mean
+
+        kl_loss = 0.5 * (
+            mean.pow(2) + logvar.exp() - 1.0 - logvar
+        ).mean()
+        self.last_mean = mean
+        self.last_logvar = logvar
+        self.last_kl_loss = kl_loss
+        return self.decoder(latent)
+
+    def kl_loss(self):
+        if self.last_kl_loss is None:
+            return self.mean_head.weight.new_zeros(())
+        return self.last_kl_loss
+
+    def _validate_inputs(self, support_nodes, deny_nodes):
+        if support_nodes.shape != deny_nodes.shape:
+            raise ValueError(
+                "support_nodes and deny_nodes must have identical shapes, "
+                "got {} and {}".format(
+                    tuple(support_nodes.shape),
+                    tuple(deny_nodes.shape),
+                )
+            )
+        if support_nodes.size(-1) != self.input_dim:
+            raise ValueError(
+                "expected node feature dimension {}, got {}".format(
+                    self.input_dim,
+                    support_nodes.size(-1),
+                )
+            )
+
+
 class _DPGAAlignmentLayer(nn.Module):
     """
     Pseudo-node alignment layer inspired by dynamic pathway-based graph
@@ -471,6 +610,10 @@ def build_semantic_change_encoder(
     """
 
     name = str(encoder_name).strip().lower()
+    if _as_bool(
+        getattr(args, "use_gaussian_semantic_change_bottleneck", False)
+    ):
+        name = "gaussian"
     include_sum = _as_bool(
         getattr(
             args,
@@ -485,6 +628,30 @@ def build_semantic_change_encoder(
             hidden_dim=hidden_dim,
             dropout=dropout,
             include_sum=include_sum,
+        )
+    if name in {"gaussian", "gaussian_mlp", "gaussian_bottleneck"}:
+        return GaussianSemanticChangeBottleneck(
+            input_dim=input_dim,
+            output_dim=output_dim,
+            hidden_dim=hidden_dim,
+            latent_dim=int(
+                getattr(
+                    args,
+                    "semantic_change_gaussian_latent_dim",
+                    output_dim if output_dim is not None else input_dim,
+                )
+            ),
+            dropout=dropout,
+            include_sum=include_sum,
+            sample=_as_bool(
+                getattr(args, "semantic_change_gaussian_sample", False)
+            ),
+            min_logvar=float(
+                getattr(args, "semantic_change_gaussian_min_logvar", -8.0)
+            ),
+            max_logvar=float(
+                getattr(args, "semantic_change_gaussian_max_logvar", 4.0)
+            ),
         )
     if name == "dpga":
         return DPGASemanticChangeEncoder(

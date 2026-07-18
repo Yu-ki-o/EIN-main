@@ -4,6 +4,7 @@ import torch
 
 from model.semantic_change_encoder import (
     DPGASemanticChangeEncoder,
+    GaussianSemanticChangeBottleneck,
     MLPSemanticChangeEncoder,
     build_semantic_change_encoder,
 )
@@ -116,6 +117,56 @@ class DPGASemanticChangeEncoderTest(unittest.TestCase):
             hidden_dim=8,
         )
         self.assertIsInstance(encoder, DPGASemanticChangeEncoder)
+
+
+class GaussianSemanticChangeBottleneckTest(unittest.TestCase):
+    def test_output_shape_gradient_and_kl(self):
+        encoder = GaussianSemanticChangeBottleneck(
+            input_dim=4,
+            output_dim=6,
+            hidden_dim=8,
+            latent_dim=5,
+            dropout=0.0,
+        )
+        support = torch.randn(5, 4, requires_grad=True)
+        deny = torch.randn(5, 4, requires_grad=True)
+
+        change = encoder(support, deny)
+        loss = change.sum() + encoder.kl_loss()
+        loss.backward()
+
+        self.assertEqual(tuple(change.shape), (5, 6))
+        self.assertEqual(tuple(encoder.last_mean.shape), (5, 5))
+        self.assertEqual(tuple(encoder.last_logvar.shape), (5, 5))
+        self.assertGreaterEqual(float(encoder.kl_loss()), 0.0)
+        self.assertIsNotNone(support.grad)
+        self.assertIsNotNone(deny.grad)
+
+    def test_identical_views_produce_zero_change_without_sampling(self):
+        encoder = GaussianSemanticChangeBottleneck(input_dim=4).eval()
+        nodes = torch.randn(7, 4)
+
+        change = encoder(nodes, nodes)
+
+        self.assertTrue(torch.equal(change, torch.zeros_like(change)))
+        self.assertAlmostEqual(float(encoder.kl_loss()), 0.0, places=6)
+
+    def test_factory_switch_replaces_mlp_with_gaussian_bottleneck(self):
+        class Args:
+            use_gaussian_semantic_change_bottleneck = True
+            semantic_change_gaussian_latent_dim = 3
+            semantic_change_gaussian_sample = False
+
+        encoder = build_semantic_change_encoder(
+            "mlp",
+            input_dim=4,
+            output_dim=4,
+            hidden_dim=8,
+            args=Args(),
+        )
+
+        self.assertIsInstance(encoder, GaussianSemanticChangeBottleneck)
+        self.assertEqual(encoder.latent_dim, 3)
 
 
 if __name__ == "__main__":
