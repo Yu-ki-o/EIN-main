@@ -35,6 +35,7 @@ base_model: ResGCN_UncertaintySemanticChange
 max_hop: 147
 lamda: 0.0
 use_semantic_parity_gnn: true
+semantic_parity_direction: bottom_up
 semantic_parity_residual: true
 semantic_node_weight_mode: local
 relation_hidden_dim: 64

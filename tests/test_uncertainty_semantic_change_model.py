@@ -1138,6 +1138,39 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
         self.assertIsNotNone(model._last_semantic_tree_uncertainty_bias)
         self.assertTrue(torch.allclose(model._last_keep_sample, torch.ones(3)))
 
+    def test_forward_does_not_gate_parity_views_with_parent_edge_twice(self):
+        args = make_args()
+        args.use_trend_graph = False
+        args.use_uncertainty_sampling = False
+        args.use_semantic_tree_transformer = True
+        args.semantic_tree_transformer_heads = 2
+        args.semantic_tree_transformer_layers = 1
+        args.semantic_tree_depth_dim = 4
+        args.classification_fusion_mode = "change_semantic_tree"
+        args.use_semantic_tree_change_uncertainty_bias = True
+        args.semantic_tree_uncertainty_source = "edge_relation"
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).eval()
+
+        def fail_if_called(*_args, **_kwargs):
+            raise AssertionError("post-parity semantic node gate was called")
+
+        model._build_semantic_node_weights = fail_if_called
+        output, _, _, _ = model(make_batch())
+
+        self.assertEqual(tuple(output.shape), (2, 2))
+        self.assertIsNotNone(model._last_semantic_tree_uncertainty_bias)
+        self.assertGreater(
+            float(model._last_semantic_tree_uncertainty_bias.abs().sum()),
+            0.0,
+        )
+
     def test_change_semantic_tree_classification_fusion(self):
         args = make_args()
         args.use_trend_graph = False

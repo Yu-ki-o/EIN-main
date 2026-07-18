@@ -41,6 +41,7 @@ global_pool: sum
 base_model: ResGCN_UncertaintySemanticChange
 max_hop: 72
 lamda: 0.0
+semantic_parity_direction: bottom_up
 
 # edge support/deny relation encoder
 relation_hidden_dim: 128

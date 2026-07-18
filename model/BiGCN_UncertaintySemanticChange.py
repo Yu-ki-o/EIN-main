@@ -2497,6 +2497,43 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self.use_semantic_parity_gnn = bool(
             getattr(args, "use_semantic_parity_gnn", True)
         )
+        default_parity_direction = (
+            "bidirectional" if self.backbone_type == "bigcn" else "top_down"
+        )
+        parity_direction = str(
+            getattr(
+                args,
+                "semantic_parity_direction",
+                default_parity_direction,
+            )
+        ).strip().lower()
+        parity_direction_aliases = {
+            "forward": "top_down",
+            "td": "top_down",
+            "ancestor": "top_down",
+            "backward": "bottom_up",
+            "bu": "bottom_up",
+            "descendant": "bottom_up",
+            "both": "bidirectional",
+            "bi": "bidirectional",
+        }
+        parity_direction = parity_direction_aliases.get(
+            parity_direction,
+            parity_direction,
+        )
+        valid_parity_directions = {
+            "top_down",
+            "bottom_up",
+            "bidirectional",
+        }
+        if parity_direction not in valid_parity_directions:
+            raise ValueError(
+                "semantic_parity_direction must be one of {}, got {}".format(
+                    sorted(valid_parity_directions),
+                    parity_direction,
+                )
+            )
+        self.semantic_parity_direction = parity_direction
         self.semantic_node_weight_mode = str(
             getattr(args, "semantic_node_weight_mode", "local")
         ).strip().lower()
@@ -2515,7 +2552,9 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 hidden_dim=hid_feats,
                 num_layers=parity_layers,
                 dropout=self.dropout,
-                bidirectional=self.backbone_type == "bigcn",
+                bidirectional=(
+                    self.semantic_parity_direction == "bidirectional"
+                ),
                 residual=bool(
                     getattr(args, "semantic_parity_residual", True)
                 ),
@@ -2958,9 +2997,12 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         deny_weight,
     ):
         if self.semantic_parity_encoder is not None:
+            parity_edge_index = edge_index
+            if self.semantic_parity_direction == "bottom_up":
+                parity_edge_index = self._reverse_edges(edge_index)
             return self.semantic_parity_encoder(
                 data.x.float(),
-                edge_index,
+                parity_edge_index,
                 support_weight,
                 deny_weight,
             )
@@ -3628,22 +3670,19 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             support_weight,
             deny_weight,
         )
-        (
-            support_node_weight,
-            deny_node_weight,
-        ) = self._build_semantic_node_weights(
-            data,
-            support_weight,
-            deny_weight,
-        )
+        # Edge relation probabilities have already been composed through the
+        # parity encoder. Do not gate the resulting node views a second time
+        # with the node's immediate parent-edge probabilities.
+        support_node_weight = None
+        deny_node_weight = None
         support_graph = self._pool_root_connected_nodes(
             support_nodes,
-            support_node_weight,
+            node_keep,
             data.batch,
         )
         deny_graph = self._pool_root_connected_nodes(
             deny_nodes,
-            deny_node_weight,
+            node_keep,
             data.batch,
         )
         conflict_needs_change = (
