@@ -67,6 +67,14 @@ def make_args():
         semantic_change_gaussian_min_logvar=-8.0,
         semantic_change_gaussian_max_logvar=4.0,
         lambda_semantic_change_bottleneck=0.0,
+        lambda_semantic_tree_change_mi_aux=0.0,
+        use_semantic_tree_change_uncertainty_bias=False,
+        semantic_tree_uncertainty_source="gaussian_change",
+        semantic_tree_uncertainty_bias_scale=1.0,
+        semantic_tree_change_uncertainty_detach=True,
+        semantic_tree_input_mode="support_deny",
+        semantic_tree_query_mode="root_learned",
+        semantic_tree_num_queries=1,
         uncertainty_trend_hidden_dim=8,
         use_trend_graph=True,
         use_node_keep_in_change_pool=True,
@@ -876,30 +884,24 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
         )
         self.assertEqual(
             tuple(model._last_semantic_tree_topics.shape),
-            (2, 3, 2),
+            (2, 3, 1),
         )
+        self.assertIsNone(model._last_semantic_tree_topic_similarity)
         self.assertEqual(
-            tuple(model._last_semantic_tree_topic_similarity.shape),
-            (2, 3, 3),
-        )
-        self.assertTrue(
-            torch.allclose(
-                model._last_semantic_tree_topic_similarity,
-                model._last_semantic_tree_topic_similarity.transpose(1, 2),
-                atol=1e-6,
-            )
+            tuple(model._last_semantic_tree_query.shape),
+            (2, 1, 8),
         )
         self.assertTrue(
             torch.allclose(
                 model._last_semantic_tree_attention[0].sum(dim=-1),
-                torch.ones(3),
+                torch.ones(1),
                 atol=1e-6,
             )
         )
         self.assertTrue(
             torch.allclose(
-                model._last_semantic_tree_attention[1, :2].sum(dim=-1),
-                torch.ones(2),
+                model._last_semantic_tree_attention[1].sum(dim=-1),
+                torch.ones(1),
                 atol=1e-6,
             )
         )
@@ -923,7 +925,7 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
             torch.tensor([0, 1, 1]),
             batch,
         )
-        shallow_attention = branch.last_attention.clone()
+        shallow_key = branch.last_key.clone()
         _, deep_nodes = branch(
             original,
             support,
@@ -932,14 +934,188 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
             batch,
         )
 
+        self.assertFalse(torch.allclose(shallow_key, branch.last_key))
+        self.assertFalse(torch.allclose(shallow_nodes, deep_nodes))
+
+    def test_semantic_tree_configurable_concat_modes_always_include_depth(self):
+        expected_input_dims = {
+            "support_deny": 20,
+            "support_deny_original": 28,
+            "original": 12,
+        }
+        for input_mode, expected_dim in expected_input_dims.items():
+            args = make_args()
+            args.semantic_tree_depth_dim = 4
+            args.semantic_tree_input_mode = input_mode
+            branch = SemanticTreeTransformerBranch(8, args=args)
+            self.assertEqual(branch.key_projection[1].in_features, expected_dim)
+            self.assertEqual(
+                branch.value_projection[1].in_features,
+                expected_dim,
+            )
+
+    def test_semantic_tree_attention_penalizes_uncertain_change_keys(self):
+        args = make_args()
+        args.semantic_tree_transformer_heads = 2
+        args.semantic_tree_transformer_layers = 1
+        args.semantic_tree_depth_dim = 4
+        args.use_semantic_tree_change_uncertainty_bias = True
+        args.semantic_tree_uncertainty_bias_scale = 4.0
+        branch = SemanticTreeTransformerBranch(8, args=args).eval()
+        original = torch.zeros(3, 8)
+        support = torch.randn(3, 8)
+        deny = torch.randn(3, 8)
+        batch = torch.zeros(3, dtype=torch.long)
+
+        branch(
+            original,
+            support,
+            deny,
+            torch.tensor([0, 1, 1]),
+            batch,
+            change_node_uncertainty=torch.tensor([0.0, 10.0, 0.0]),
+        )
+
+        self.assertEqual(tuple(branch.last_uncertainty_bias.shape), (1, 1, 3))
+        self.assertLess(
+            float(branch.last_attention[0, 0, 1]),
+            float(branch.last_attention[0, 0, 0]),
+        )
+        self.assertTrue(
+            torch.all(branch.last_uncertainty_bias[:, :, 1] < 0.0)
+        )
         self.assertTrue(
             torch.allclose(
-                shallow_attention,
-                branch.last_attention,
+                branch.last_uncertainty_bias[:, :, 0],
+                torch.zeros(1, 1),
+            )
+        )
+
+    def test_zero_semantic_tree_uncertainty_scale_disables_bias(self):
+        args = make_args()
+        args.semantic_tree_transformer_heads = 2
+        args.semantic_tree_transformer_layers = 1
+        args.semantic_tree_depth_dim = 4
+        args.use_semantic_tree_change_uncertainty_bias = True
+        args.semantic_tree_uncertainty_source = "edge_relation"
+        args.semantic_tree_uncertainty_bias_scale = 0.0
+        branch = SemanticTreeTransformerBranch(8, args=args).eval()
+        original = torch.randn(3, 8)
+        support = torch.randn(3, 8)
+        deny = torch.randn(3, 8)
+        batch = torch.zeros(3, dtype=torch.long)
+
+        branch(
+            original,
+            support,
+            deny,
+            torch.tensor([0, 1, 1]),
+            batch,
+            change_node_uncertainty=torch.tensor([0.0, 1.0, 0.5]),
+        )
+
+        self.assertTrue(branch.uncertainty_bias_active)
+        self.assertTrue(
+            torch.allclose(
+                branch.last_uncertainty_bias,
+                torch.zeros(1, 1, 3),
+            )
+        )
+
+    def test_semantic_tree_change_mi_and_gaussian_uncertainty_are_used(self):
+        args = make_args()
+        args.use_trend_graph = False
+        args.use_semantic_tree_transformer = True
+        args.semantic_tree_transformer_heads = 2
+        args.semantic_tree_transformer_layers = 1
+        args.semantic_tree_depth_dim = 4
+        args.classification_fusion_mode = "change_semantic_tree"
+        args.use_gaussian_semantic_change_bottleneck = True
+        args.lambda_semantic_tree_change_mi_aux = 0.05
+        args.use_semantic_tree_change_uncertainty_bias = True
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).train()
+
+        output, _, _, _ = model(make_batch())
+        loss = model._last_aux_loss
+        loss.backward()
+
+        self.assertEqual(tuple(output.shape), (2, 2))
+        self.assertGreater(
+            float(model._last_semantic_tree_change_mi_loss),
+            0.0,
+        )
+        self.assertEqual(
+            tuple(model._last_change_node_uncertainty.shape),
+            (5,),
+        )
+        self.assertEqual(
+            tuple(model._last_semantic_tree_uncertainty_bias.shape),
+            (2, 1, 3),
+        )
+        self.assertIsNotNone(
+            model.semantic_tree_transformer.key_projection[1].weight.grad
+        )
+
+    def test_semantic_tree_can_reuse_pre_route_edge_uncertainty(self):
+        args = make_args()
+        args.use_trend_graph = False
+        args.use_uncertainty_sampling = False
+        args.use_semantic_tree_transformer = True
+        args.semantic_tree_transformer_heads = 2
+        args.semantic_tree_transformer_layers = 1
+        args.semantic_tree_depth_dim = 4
+        args.classification_fusion_mode = "change_semantic_tree"
+        args.use_gaussian_semantic_change_bottleneck = True
+        args.use_semantic_tree_change_uncertainty_bias = True
+        args.semantic_tree_uncertainty_source = "edge_relation"
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).eval()
+        data = make_batch()
+
+        model(data)
+        expected = torch.stack(
+            (
+                model._last_edge_uncertainty.new_zeros(()),
+                model._last_edge_uncertainty[0],
+                model._last_edge_uncertainty[1],
+                model._last_edge_uncertainty.new_zeros(()),
+                model._last_edge_uncertainty[2],
+            )
+        )
+
+        self.assertTrue(
+            torch.allclose(
+                model._last_semantic_tree_node_uncertainty,
+                expected,
                 atol=1e-6,
             )
         )
-        self.assertFalse(torch.allclose(shallow_nodes, deep_nodes))
+        self.assertTrue(
+            torch.allclose(
+                model._last_node_uncertainty,
+                expected,
+                atol=1e-6,
+            )
+        )
+        self.assertEqual(
+            model.semantic_tree_transformer.uncertainty_source,
+            "edge_relation",
+        )
+        self.assertIsNotNone(model._last_semantic_tree_uncertainty_bias)
+        self.assertTrue(torch.allclose(model._last_keep_sample, torch.ones(3)))
 
     def test_change_semantic_tree_classification_fusion(self):
         args = make_args()

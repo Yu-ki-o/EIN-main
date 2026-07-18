@@ -899,13 +899,13 @@ class RootPathUncertaintyAttention(nn.Module):
         )
 
 
-class _TopicGuidedValuePropagationLayer(nn.Module):
-    """Propagates one value view over a fixed topic-attention graph."""
+class _GlobalQueryCrossAttentionLayer(nn.Module):
+    """Updates a fixed number of event queries from one node context."""
 
     def __init__(self, hidden_dim, feedforward_dim, dropout):
         super().__init__()
-        self.value_norm = nn.LayerNorm(hidden_dim)
-        self.value_output = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        self.query_norm = nn.LayerNorm(hidden_dim)
+        self.context_output = nn.Linear(hidden_dim, hidden_dim, bias=False)
         self.context_dropout = nn.Dropout(dropout)
         self.ffn_norm = nn.LayerNorm(hidden_dim)
         self.feedforward = nn.Sequential(
@@ -916,22 +916,14 @@ class _TopicGuidedValuePropagationLayer(nn.Module):
             nn.Dropout(dropout),
         )
 
-    def forward(self, value, attention, valid_mask):
-        context = torch.matmul(attention, self.value_norm(value))
-        value = value + self.context_dropout(self.value_output(context))
-        value = value + self.feedforward(self.ffn_norm(value))
-        return value.masked_fill(~valid_mask.unsqueeze(-1), 0.0)
+    def forward(self, query, context):
+        query = query + self.context_dropout(self.context_output(context))
+        query = query + self.feedforward(self.ffn_norm(query))
+        return query
 
 
 class SemanticTreeTransformerBranch(nn.Module):
-    """Topic-guided dual-view propagation over each propagation tree.
-
-    The original propagation-graph node representations are used only to
-    infer a soft topic distribution and a symmetric pairwise topic affinity.
-    Row-wise normalization turns that shared pair score into the aggregation
-    attention.  The values come from the support/deny graph views together
-    with absolute depth, and both views reuse exactly the same attention.
-    """
+    """Linear event-query cross-attention over configurable node semantics."""
 
     def __init__(self, hidden_dim, args=None):
         super().__init__()
@@ -956,14 +948,11 @@ class SemanticTreeTransformerBranch(nn.Module):
                 )
             ),
         )
-        legacy_heads = max(
+        self.num_queries = max(
             1,
-            int(getattr(args, "semantic_tree_transformer_heads", 4)),
+            int(getattr(args, "semantic_tree_num_queries", 1)),
         )
-        self.num_topics = max(
-            1,
-            int(getattr(args, "semantic_tree_num_topics", legacy_heads)),
-        )
+        self.num_topics = self.num_queries
         layers = max(
             1,
             int(getattr(args, "semantic_tree_transformer_layers", 1)),
@@ -985,10 +974,6 @@ class SemanticTreeTransformerBranch(nn.Module):
                 getattr(args, "dropout", 0.0),
             )
         )
-        self.topic_temperature = max(
-            1e-6,
-            float(getattr(args, "semantic_tree_topic_temperature", 1.0)),
-        )
         self.attention_temperature = max(
             1e-6,
             float(
@@ -1003,6 +988,106 @@ class SemanticTreeTransformerBranch(nn.Module):
             1e-12,
             float(getattr(args, "semantic_tree_topic_eps", 1e-6)),
         )
+        self.use_change_uncertainty_bias = bool(
+            getattr(
+                args,
+                "use_semantic_tree_change_uncertainty_bias",
+                False,
+            )
+        )
+        self.uncertainty_bias_scale = max(
+            0.0,
+            float(
+                getattr(
+                    args,
+                    "semantic_tree_uncertainty_bias_scale",
+                    getattr(
+                        args,
+                        "semantic_tree_change_uncertainty_scale",
+                        1.0,
+                    ),
+                )
+            ),
+        )
+        # Compatibility for code that still reads the old attribute name.
+        self.change_uncertainty_scale = self.uncertainty_bias_scale
+        self.detach_change_uncertainty = bool(
+            getattr(
+                args,
+                "semantic_tree_change_uncertainty_detach",
+                True,
+            )
+        )
+        uncertainty_source = str(
+            getattr(
+                args,
+                "semantic_tree_uncertainty_source",
+                "gaussian_change",
+            )
+        ).strip().lower()
+        uncertainty_source_aliases = {
+            "change": "gaussian_change",
+            "gaussian": "gaussian_change",
+            "route": "edge_relation",
+            "change_route": "edge_relation",
+            "edge": "edge_relation",
+            "none": "none",
+        }
+        uncertainty_source = uncertainty_source_aliases.get(
+            uncertainty_source,
+            uncertainty_source,
+        )
+        valid_uncertainty_sources = {
+            "none",
+            "gaussian_change",
+            "edge_relation",
+        }
+        if uncertainty_source not in valid_uncertainty_sources:
+            raise ValueError(
+                "semantic_tree_uncertainty_source must be one of {}, "
+                "got {}".format(
+                    sorted(valid_uncertainty_sources),
+                    uncertainty_source,
+                )
+            )
+        self.uncertainty_source = uncertainty_source
+        input_mode = str(
+            getattr(args, "semantic_tree_input_mode", "support_deny")
+        ).strip().lower()
+        input_mode_aliases = {
+            "sd": "support_deny",
+            "support+deny": "support_deny",
+            "support_deny_orig": "support_deny_original",
+            "support+deny+original": "support_deny_original",
+            "orig": "original",
+            "source": "original",
+        }
+        input_mode = input_mode_aliases.get(input_mode, input_mode)
+        valid_input_modes = {
+            "support_deny",
+            "support_deny_original",
+            "original",
+        }
+        if input_mode not in valid_input_modes:
+            raise ValueError(
+                "semantic_tree_input_mode must be one of {}, got {}".format(
+                    sorted(valid_input_modes),
+                    input_mode,
+                )
+            )
+        self.input_mode = input_mode
+        query_mode = str(
+            getattr(args, "semantic_tree_query_mode", "root_learned")
+        ).strip().lower()
+        valid_query_modes = {"learned", "root", "root_learned"}
+        if query_mode not in valid_query_modes:
+            raise ValueError(
+                "semantic_tree_query_mode must be one of {}, got {}".format(
+                    sorted(valid_query_modes),
+                    query_mode,
+                )
+            )
+        self.query_mode = query_mode
         self.pool = str(
             getattr(args, "semantic_tree_transformer_pool", "mean")
         ).strip().lower()
@@ -1015,23 +1100,34 @@ class SemanticTreeTransformerBranch(nn.Module):
         self.depth_embedding = nn.Embedding(self.max_depth + 2, depth_dim)
         self.support_missing = nn.Parameter(torch.zeros(self.hidden_dim))
         self.deny_missing = nn.Parameter(torch.zeros(self.hidden_dim))
-        self.topic_encoder = nn.Sequential(
+        semantic_multiplier = {
+            "support_deny": 2,
+            "support_deny_original": 3,
+            "original": 1,
+        }[self.input_mode]
+        node_input_dim = self.hidden_dim * semantic_multiplier + depth_dim
+        self.learned_query = nn.Parameter(
+            torch.empty(self.num_queries, self.hidden_dim)
+        )
+        nn.init.normal_(self.learned_query, std=self.hidden_dim ** -0.5)
+        self.root_query_projection = nn.Sequential(
             nn.LayerNorm(self.hidden_dim),
-            nn.Linear(self.hidden_dim, self.hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(self.hidden_dim, self.num_topics),
+            nn.Linear(self.hidden_dim, self.hidden_dim, bias=False),
+        )
+        self.key_projection = nn.Sequential(
+            nn.LayerNorm(node_input_dim),
+            nn.Linear(node_input_dim, self.hidden_dim, bias=False),
         )
         self.value_projection = nn.Sequential(
-            nn.Linear(self.hidden_dim + depth_dim, self.hidden_dim),
+            nn.LayerNorm(node_input_dim),
+            nn.Linear(node_input_dim, self.hidden_dim, bias=False),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.LayerNorm(self.hidden_dim),
         )
         self.attention_dropout = nn.Dropout(dropout)
         self.propagation_layers = nn.ModuleList(
             [
-                _TopicGuidedValuePropagationLayer(
+                _GlobalQueryCrossAttentionLayer(
                     self.hidden_dim,
                     feedforward_dim,
                     dropout,
@@ -1039,16 +1135,28 @@ class SemanticTreeTransformerBranch(nn.Module):
                 for _ in range(layers)
             ]
         )
-        self.view_fusion = nn.Sequential(
-            nn.Linear(self.hidden_dim * 4, self.hidden_dim),
+        self.graph_output = nn.Sequential(
+            nn.Linear(self.hidden_dim, self.hidden_dim),
             nn.GELU(),
-            nn.Dropout(dropout),
             nn.LayerNorm(self.hidden_dim),
         )
+        self.node_output = nn.LayerNorm(self.hidden_dim)
 
         self.last_topic_distribution = None
         self.last_topic_similarity = None
         self.last_attention = None
+        self.last_change_uncertainty = None
+        self.last_uncertainty_bias = None
+        self.last_query = None
+        self.last_key = None
+        self.last_value = None
+
+    @property
+    def uncertainty_bias_active(self):
+        return (
+            self.use_change_uncertainty_bias
+            and self.uncertainty_source != "none"
+        )
 
     def _inject_missing_view(self, view_nodes, node_weight, missing):
         if node_weight is None:
@@ -1061,28 +1169,67 @@ class SemanticTreeTransformerBranch(nn.Module):
         # Unknown/unreachable depth -1 maps to 0. Root depth 0 maps to 1.
         return depth.long().clamp(-1, self.max_depth) + 1
 
-    def _topic_attention(self, original_dense, valid_mask):
-        topic_logits = self.topic_encoder(original_dense)
-        topic_distribution = F.softmax(
-            topic_logits / self.topic_temperature,
-            dim=-1,
+    def _node_input(
+        self,
+        original_nodes,
+        support_nodes,
+        deny_nodes,
+        depth_nodes,
+    ):
+        if self.input_mode == "support_deny":
+            semantic_nodes = (support_nodes, deny_nodes)
+        elif self.input_mode == "support_deny_original":
+            semantic_nodes = (support_nodes, deny_nodes, original_nodes)
+        else:
+            semantic_nodes = (original_nodes,)
+        return torch.cat((*semantic_nodes, depth_nodes), dim=-1)
+
+    def _initial_query(self, original_dense):
+        batch_size = original_dense.size(0)
+        learned = self.learned_query.unsqueeze(0).expand(
+            batch_size,
+            -1,
+            -1,
         )
-        topic_similarity = torch.matmul(
-            topic_distribution,
-            topic_distribution.transpose(1, 2),
-        )
-        # log shared-topic mass has a useful range: identical sharp topics are
-        # near zero, while disjoint topics receive a large negative logit.
-        score = torch.log(topic_similarity.clamp_min(self.topic_eps))
+        root = self.root_query_projection(original_dense[:, 0]).unsqueeze(1)
+        if self.query_mode == "learned":
+            return learned
+        if self.query_mode == "root":
+            return root.expand(-1, self.num_queries, -1)
+        return learned + root
+
+    def _cross_attention(
+        self,
+        query,
+        key,
+        valid_mask,
+        change_uncertainty,
+    ):
+        score = torch.matmul(
+            query,
+            key.transpose(1, 2),
+        ) / math.sqrt(self.hidden_dim)
         score = score / self.attention_temperature
+        uncertainty_bias = None
+        if (
+            self.uncertainty_bias_active
+            and change_uncertainty is not None
+        ):
+            if self.detach_change_uncertainty:
+                change_uncertainty = change_uncertainty.detach()
+            bounded_uncertainty = change_uncertainty.clamp_min(0.0)
+            bounded_uncertainty = bounded_uncertainty / (
+                1.0 + bounded_uncertainty
+            )
+            uncertainty_bias = -self.uncertainty_bias_scale * (
+                bounded_uncertainty.unsqueeze(1)
+            )
+            uncertainty_bias = uncertainty_bias.expand_as(score)
+            score = score + uncertainty_bias
         score = score.masked_fill(~valid_mask.unsqueeze(1), -1e9)
         attention = F.softmax(score, dim=-1)
         attention = self.attention_dropout(attention)
-        attention = attention.masked_fill(
-            ~valid_mask.unsqueeze(-1),
-            0.0,
-        )
-        return topic_distribution, topic_similarity, attention
+        return attention, uncertainty_bias
 
     def forward(
         self,
@@ -1093,6 +1240,7 @@ class SemanticTreeTransformerBranch(nn.Module):
         batch,
         support_node_weight=None,
         deny_node_weight=None,
+        change_node_uncertainty=None,
     ):
         support_nodes = self._inject_missing_view(
             support_nodes,
@@ -1107,52 +1255,64 @@ class SemanticTreeTransformerBranch(nn.Module):
         depth_nodes = self.depth_embedding(self._depth_indices(depth))
 
         original_dense, valid_mask = to_dense_batch(original_nodes, batch)
-        support_dense, support_mask = to_dense_batch(
-            self.value_projection(
-                torch.cat((support_nodes, depth_nodes), dim=-1)
-            ),
+        node_input = self._node_input(
+            original_nodes,
+            support_nodes,
+            deny_nodes,
+            depth_nodes,
+        )
+        key_dense, key_mask = to_dense_batch(
+            self.key_projection(node_input),
             batch,
         )
-        deny_dense, deny_mask = to_dense_batch(
-            self.value_projection(
-                torch.cat((deny_nodes, depth_nodes), dim=-1)
-            ),
+        value_dense, value_mask = to_dense_batch(
+            self.value_projection(node_input),
             batch,
         )
-        valid_mask = valid_mask & support_mask & deny_mask
-        (
-            topic_distribution,
-            topic_similarity,
-            attention,
-        ) = self._topic_attention(original_dense, valid_mask)
-
-        for layer in self.propagation_layers:
-            support_dense = layer(support_dense, attention, valid_mask)
-            deny_dense = layer(deny_dense, attention, valid_mask)
-
-        delta = deny_dense - support_dense
-        encoded_dense = self.view_fusion(
-            torch.cat(
-                (support_dense, deny_dense, delta, delta.abs()),
-                dim=-1,
+        valid_mask = valid_mask & key_mask & value_mask
+        change_uncertainty_dense = None
+        if change_node_uncertainty is not None:
+            change_uncertainty_dense, uncertainty_mask = to_dense_batch(
+                change_node_uncertainty,
+                batch,
             )
-        )
+            valid_mask = valid_mask & uncertainty_mask
+        query = self._initial_query(original_dense)
+        attention = None
+        uncertainty_bias = None
+        for layer in self.propagation_layers:
+            attention, uncertainty_bias = self._cross_attention(
+                layer.query_norm(query),
+                key_dense,
+                valid_mask,
+                change_uncertainty_dense,
+            )
+            context = torch.matmul(attention, value_dense)
+            query = layer(query, context)
+
+        if self.pool == "sum":
+            graph_hidden = query.sum(dim=1)
+        elif self.pool == "root":
+            graph_hidden = query[:, 0]
+        else:
+            graph_hidden = query.mean(dim=1)
+        graph_hidden = self.graph_output(graph_hidden)
+
+        node_relevance = attention.mean(dim=1).unsqueeze(-1)
+        encoded_dense = self.node_output(value_dense * node_relevance)
         encoded_dense = encoded_dense.masked_fill(
             ~valid_mask.unsqueeze(-1),
             0.0,
         )
 
-        if self.pool == "root":
-            graph_hidden = encoded_dense[:, 0]
-        else:
-            mask = valid_mask.unsqueeze(-1).to(dtype=encoded_dense.dtype)
-            graph_hidden = (encoded_dense * mask).sum(dim=1)
-            if self.pool == "mean":
-                graph_hidden = graph_hidden / mask.sum(dim=1).clamp_min(1.0)
-
-        self.last_topic_distribution = topic_distribution
-        self.last_topic_similarity = topic_similarity
+        self.last_topic_distribution = attention.transpose(1, 2)
+        self.last_topic_similarity = None
         self.last_attention = attention
+        self.last_change_uncertainty = change_uncertainty_dense
+        self.last_uncertainty_bias = uncertainty_bias
+        self.last_query = query
+        self.last_key = key_dense
+        self.last_value = value_dense
         encoded_nodes = encoded_dense[valid_mask]
         return graph_hidden, encoded_nodes
 
@@ -2266,6 +2426,16 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             0.0,
             float(getattr(args, "lambda_semantic_change_bottleneck", 0.0)),
         )
+        self.lambda_semantic_tree_change_mi = max(
+            0.0,
+            float(
+                getattr(
+                    args,
+                    "lambda_semantic_tree_change_mi_aux",
+                    0.0,
+                )
+            ),
+        )
         self.view_mi_eps = max(
             1e-12,
             float(getattr(args, "view_mi_eps", 1e-6)),
@@ -2450,6 +2620,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_edge_relation_loss = None
         self._last_view_mi_loss = None
         self._last_semantic_change_bottleneck_loss = None
+        self._last_semantic_tree_change_mi_loss = None
         self._last_branch_logits = None
         self._last_global_ds_masses = None
         self._last_global_ds_branch_masses = None
@@ -2476,6 +2647,10 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_semantic_tree_topics = None
         self._last_semantic_tree_topic_similarity = None
         self._last_semantic_tree_attention = None
+        self._last_semantic_tree_query = None
+        self._last_semantic_tree_uncertainty_bias = None
+        self._last_change_node_uncertainty = None
+        self._last_semantic_tree_node_uncertainty = None
         self._last_node_uncertainty = None
         self._last_trend_sequence = None
         self._last_node_state_sequence = None
@@ -2931,6 +3106,62 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             return zero
         return self.lambda_semantic_change_bottleneck * kl_loss()
 
+    def _change_node_uncertainty(self):
+        logvar = getattr(self.semantic_change_encoder, "last_logvar", None)
+        if logvar is None or logvar.numel() == 0:
+            return None
+        return logvar.float().exp().mean(dim=-1)
+
+    def _semantic_tree_change_mutual_information_loss(
+        self,
+        semantic_tree_graph,
+        change_graph,
+    ):
+        zero = self.classifier.weight.new_zeros(())
+        if self.lambda_semantic_tree_change_mi <= 0.0:
+            return zero
+        if semantic_tree_graph is None or change_graph is None:
+            return zero
+        if semantic_tree_graph.numel() == 0 or change_graph.numel() == 0:
+            return zero
+
+        semantic_tree = semantic_tree_graph.float()
+        change = change_graph.float()
+        if semantic_tree.size(0) > 1:
+            semantic_tree = semantic_tree - semantic_tree.mean(
+                dim=0,
+                keepdim=True,
+            )
+            change = change - change.mean(dim=0, keepdim=True)
+            semantic_tree = semantic_tree / semantic_tree.pow(2).mean(
+                dim=0,
+                keepdim=True,
+            ).add(self.view_mi_eps).sqrt()
+            change = change / change.pow(2).mean(
+                dim=0,
+                keepdim=True,
+            ).add(self.view_mi_eps).sqrt()
+            cross_covariance = semantic_tree.t().matmul(change)
+            cross_covariance = cross_covariance / semantic_tree.size(0)
+            mi_proxy = cross_covariance.pow(2).mean()
+        else:
+            semantic_tree = F.normalize(
+                semantic_tree,
+                p=2,
+                dim=-1,
+                eps=self.view_mi_eps,
+            )
+            change = F.normalize(
+                change,
+                p=2,
+                dim=-1,
+                eps=self.view_mi_eps,
+            )
+            mi_proxy = (
+                (semantic_tree * change).sum(dim=-1).pow(2).mean()
+            )
+        return self.lambda_semantic_tree_change_mi * mi_proxy
+
     def _node_depths(self, data, edge_index):
         num_nodes = data.x.size(0)
         depth = torch.full(
@@ -3343,7 +3574,16 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         vertical_graph = None
         node_uncertainty = None
         path_depth = None
-        if self.vertical_path_attention is not None:
+        semantic_tree_needs_edge_uncertainty = (
+            self.semantic_tree_transformer is not None
+            and self.semantic_tree_transformer.uncertainty_bias_active
+            and self.semantic_tree_transformer.uncertainty_source
+            == "edge_relation"
+        )
+        if (
+            self.vertical_path_attention is not None
+            or semantic_tree_needs_edge_uncertainty
+        ):
             (
                 path_parent,
                 path_depth,
@@ -3352,6 +3592,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 data,
                 edge_uncertainty,
             )
+        if self.vertical_path_attention is not None:
             vertical_nodes = self.vertical_path_attention(
                 node_hidden,
                 path_parent,
@@ -3413,9 +3654,21 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         needs_change_nodes = (
             "change" in self.classification_branch_names
             or conflict_needs_change
+            or (
+                self.semantic_tree_transformer is not None
+                and (
+                    (
+                        self.semantic_tree_transformer.uncertainty_bias_active
+                        and self.semantic_tree_transformer.uncertainty_source
+                        == "gaussian_change"
+                    )
+                    or self.lambda_semantic_tree_change_mi > 0.0
+                )
+            )
         )
         change_nodes = None
         change_graph = None
+        change_node_uncertainty = None
         if needs_change_nodes:
             change_nodes = self.semantic_change_encoder(
                 support_nodes,
@@ -3434,13 +3687,24 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 )
             else:
                 change_graph = self.global_pool(change_nodes, data.batch)
-
-
+            change_node_uncertainty = self._change_node_uncertainty()
 
         semantic_tree_graph = None
         semantic_tree_nodes = None
         semantic_tree_depth = None
+        semantic_tree_node_uncertainty = None
         if self.semantic_tree_transformer is not None:
+            if self.semantic_tree_transformer.uncertainty_bias_active:
+                if (
+                    self.semantic_tree_transformer.uncertainty_source
+                    == "edge_relation"
+                ):
+                    semantic_tree_node_uncertainty = node_uncertainty
+                elif (
+                    self.semantic_tree_transformer.uncertainty_source
+                    == "gaussian_change"
+                ):
+                    semantic_tree_node_uncertainty = change_node_uncertainty
             semantic_tree_depth = (
                 path_depth
                 if path_depth is not None
@@ -3457,6 +3721,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 data.batch,
                 support_node_weight=support_node_weight,
                 deny_node_weight=deny_node_weight,
+                change_node_uncertainty=semantic_tree_node_uncertainty,
             )
 
         conflict_graph = None
@@ -3560,6 +3825,12 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             deny_graph,
         )
         change_bottleneck_loss = self._semantic_change_bottleneck_loss()
+        semantic_tree_change_mi_loss = (
+            self._semantic_tree_change_mutual_information_loss(
+                semantic_tree_graph,
+                change_graph,
+            )
+        )
         conflict_aux_loss = (
             relation_logits.new_zeros(())
             if conflict_outputs is None
@@ -3569,12 +3840,16 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             edge_relation_loss
             + view_mi_loss
             + change_bottleneck_loss
+            + semantic_tree_change_mi_loss
             + conflict_aux_loss
         )
         self._last_edge_relation_loss = edge_relation_loss.detach()
         self._last_view_mi_loss = view_mi_loss.detach()
         self._last_semantic_change_bottleneck_loss = (
             change_bottleneck_loss.detach()
+        )
+        self._last_semantic_tree_change_mi_loss = (
+            semantic_tree_change_mi_loss.detach()
         )
         self._last_conflict_aux_loss = conflict_aux_loss.detach()
         self._last_global_ds_masses = (
@@ -3658,13 +3933,42 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         )
         self._last_semantic_tree_topic_similarity = (
             None
-            if self.semantic_tree_transformer is None
+            if (
+                self.semantic_tree_transformer is None
+                or self.semantic_tree_transformer.last_topic_similarity is None
+            )
             else self.semantic_tree_transformer.last_topic_similarity.detach()
         )
         self._last_semantic_tree_attention = (
             None
             if self.semantic_tree_transformer is None
             else self.semantic_tree_transformer.last_attention.detach()
+        )
+        self._last_semantic_tree_query = (
+            None
+            if (
+                self.semantic_tree_transformer is None
+                or self.semantic_tree_transformer.last_query is None
+            )
+            else self.semantic_tree_transformer.last_query.detach()
+        )
+        self._last_semantic_tree_uncertainty_bias = (
+            None
+            if (
+                self.semantic_tree_transformer is None
+                or self.semantic_tree_transformer.last_uncertainty_bias is None
+            )
+            else self.semantic_tree_transformer.last_uncertainty_bias.detach()
+        )
+        self._last_change_node_uncertainty = (
+            None
+            if change_node_uncertainty is None
+            else change_node_uncertainty.detach()
+        )
+        self._last_semantic_tree_node_uncertainty = (
+            None
+            if semantic_tree_node_uncertainty is None
+            else semantic_tree_node_uncertainty.detach()
         )
         if conflict_outputs is None:
             self._last_conflict_field = None
