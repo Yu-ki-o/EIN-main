@@ -92,7 +92,7 @@ vertical_path_attention_dropout: 0.3
 # original-graph topics guide shared attention over dual-view values + depth
 use_semantic_tree_transformer: True
 semantic_tree_input_mode: support_deny
-semantic_tree_query_mode: root_learned
+semantic_tree_query_mode: learned
 semantic_tree_num_queries: 1
 semantic_tree_transformer_layers: 2  #扫描结果显示这个是关键参数
 semantic_tree_attention_temperature: 1.0

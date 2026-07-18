@@ -923,7 +923,7 @@ class _GlobalQueryCrossAttentionLayer(nn.Module):
 
 
 class SemanticTreeTransformerBranch(nn.Module):
-    """Linear event-query cross-attention over configurable node semantics."""
+    """Linear topic-query attention from original keys to semantic values."""
 
     def __init__(self, hidden_dim, args=None):
         super().__init__()
@@ -1100,12 +1100,12 @@ class SemanticTreeTransformerBranch(nn.Module):
         self.depth_embedding = nn.Embedding(self.max_depth + 2, depth_dim)
         self.support_missing = nn.Parameter(torch.zeros(self.hidden_dim))
         self.deny_missing = nn.Parameter(torch.zeros(self.hidden_dim))
-        semantic_multiplier = {
+        value_multiplier = {
             "support_deny": 2,
             "support_deny_original": 3,
             "original": 1,
         }[self.input_mode]
-        node_input_dim = self.hidden_dim * semantic_multiplier + depth_dim
+        value_input_dim = self.hidden_dim * value_multiplier + depth_dim
         self.learned_query = nn.Parameter(
             torch.empty(self.num_queries, self.hidden_dim)
         )
@@ -1115,12 +1115,12 @@ class SemanticTreeTransformerBranch(nn.Module):
             nn.Linear(self.hidden_dim, self.hidden_dim, bias=False),
         )
         self.key_projection = nn.Sequential(
-            nn.LayerNorm(node_input_dim),
-            nn.Linear(node_input_dim, self.hidden_dim, bias=False),
+            nn.LayerNorm(self.hidden_dim),
+            nn.Linear(self.hidden_dim, self.hidden_dim, bias=False),
         )
         self.value_projection = nn.Sequential(
-            nn.LayerNorm(node_input_dim),
-            nn.Linear(node_input_dim, self.hidden_dim, bias=False),
+            nn.LayerNorm(value_input_dim),
+            nn.Linear(value_input_dim, self.hidden_dim, bias=False),
             nn.GELU(),
             nn.Dropout(dropout),
         )
@@ -1169,7 +1169,7 @@ class SemanticTreeTransformerBranch(nn.Module):
         # Unknown/unreachable depth -1 maps to 0. Root depth 0 maps to 1.
         return depth.long().clamp(-1, self.max_depth) + 1
 
-    def _node_input(
+    def _value_input(
         self,
         original_nodes,
         support_nodes,
@@ -1255,18 +1255,18 @@ class SemanticTreeTransformerBranch(nn.Module):
         depth_nodes = self.depth_embedding(self._depth_indices(depth))
 
         original_dense, valid_mask = to_dense_batch(original_nodes, batch)
-        node_input = self._node_input(
+        value_input = self._value_input(
             original_nodes,
             support_nodes,
             deny_nodes,
             depth_nodes,
         )
         key_dense, key_mask = to_dense_batch(
-            self.key_projection(node_input),
+            self.key_projection(original_nodes),
             batch,
         )
         value_dense, value_mask = to_dense_batch(
-            self.value_projection(node_input),
+            self.value_projection(value_input),
             batch,
         )
         valid_mask = valid_mask & key_mask & value_mask

@@ -926,6 +926,7 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
             batch,
         )
         shallow_key = branch.last_key.clone()
+        shallow_value = branch.last_value.clone()
         _, deep_nodes = branch(
             original,
             support,
@@ -934,10 +935,11 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
             batch,
         )
 
-        self.assertFalse(torch.allclose(shallow_key, branch.last_key))
+        self.assertTrue(torch.allclose(shallow_key, branch.last_key))
+        self.assertFalse(torch.allclose(shallow_value, branch.last_value))
         self.assertFalse(torch.allclose(shallow_nodes, deep_nodes))
 
-    def test_semantic_tree_configurable_concat_modes_always_include_depth(self):
+    def test_semantic_tree_original_keys_and_configurable_semantic_values(self):
         expected_input_dims = {
             "support_deny": 20,
             "support_deny_original": 28,
@@ -948,11 +950,30 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
             args.semantic_tree_depth_dim = 4
             args.semantic_tree_input_mode = input_mode
             branch = SemanticTreeTransformerBranch(8, args=args)
-            self.assertEqual(branch.key_projection[1].in_features, expected_dim)
+            self.assertEqual(branch.key_projection[1].in_features, 8)
             self.assertEqual(
                 branch.value_projection[1].in_features,
                 expected_dim,
             )
+
+    def test_semantic_tree_keys_ignore_dual_views_but_values_use_them(self):
+        args = make_args()
+        args.semantic_tree_depth_dim = 4
+        args.semantic_tree_input_mode = "support_deny"
+        branch = SemanticTreeTransformerBranch(8, args=args).eval()
+        original = torch.randn(3, 8)
+        support = torch.randn(3, 8)
+        deny = torch.randn(3, 8)
+        depth = torch.tensor([0, 1, 1])
+        batch = torch.zeros(3, dtype=torch.long)
+
+        branch(original, support, deny, depth, batch)
+        first_key = branch.last_key.clone()
+        first_value = branch.last_value.clone()
+        branch(original, support + 1.0, deny - 1.0, depth, batch)
+
+        self.assertTrue(torch.allclose(first_key, branch.last_key))
+        self.assertFalse(torch.allclose(first_value, branch.last_value))
 
     def test_semantic_tree_attention_penalizes_uncertain_change_keys(self):
         args = make_args()
