@@ -968,6 +968,8 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
         expected_input_dims = {
             "support_deny": 20,
             "support_deny_original": 28,
+            "difference": 12,
+            "support_deny_difference": 28,
             "original": 12,
         }
         for input_mode, expected_dim in expected_input_dims.items():
@@ -980,6 +982,45 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
                 branch.value_projection[1].in_features,
                 expected_dim,
             )
+
+    def test_semantic_tree_difference_value_modes_use_full_signed_change(self):
+        original = torch.randn(3, 8)
+        support = torch.randn(3, 8)
+        deny = torch.randn(3, 8)
+        depth = torch.randn(3, 4)
+        difference = deny - support
+
+        args = make_args()
+        args.semantic_tree_depth_dim = 4
+        args.semantic_tree_input_mode = "difference"
+        difference_branch = SemanticTreeTransformerBranch(8, args=args)
+        difference_input = difference_branch._value_input(
+            original,
+            support,
+            deny,
+            depth,
+        )
+        self.assertTrue(
+            torch.allclose(
+                difference_input,
+                torch.cat((difference, depth), dim=-1),
+            )
+        )
+
+        args.semantic_tree_input_mode = "support_deny_difference"
+        concatenated_branch = SemanticTreeTransformerBranch(8, args=args)
+        concatenated_input = concatenated_branch._value_input(
+            original,
+            support,
+            deny,
+            depth,
+        )
+        self.assertTrue(
+            torch.allclose(
+                concatenated_input,
+                torch.cat((support, deny, difference, depth), dim=-1),
+            )
+        )
 
     def test_semantic_tree_keys_ignore_dual_views_but_values_use_them(self):
         args = make_args()

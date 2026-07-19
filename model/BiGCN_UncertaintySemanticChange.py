@@ -1065,6 +1065,12 @@ class SemanticTreeTransformerBranch(nn.Module):
             "support+deny": "support_deny",
             "support_deny_orig": "support_deny_original",
             "support+deny+original": "support_deny_original",
+            "diff": "difference",
+            "deny_support_difference": "difference",
+            "deny-support": "difference",
+            "support_deny_diff": "support_deny_difference",
+            "support+deny+difference": "support_deny_difference",
+            "support_deny_change": "support_deny_difference",
             "orig": "original",
             "source": "original",
         }
@@ -1072,6 +1078,8 @@ class SemanticTreeTransformerBranch(nn.Module):
         valid_input_modes = {
             "support_deny",
             "support_deny_original",
+            "difference",
+            "support_deny_difference",
             "original",
         }
         if input_mode not in valid_input_modes:
@@ -1109,6 +1117,8 @@ class SemanticTreeTransformerBranch(nn.Module):
         value_multiplier = {
             "support_deny": 2,
             "support_deny_original": 3,
+            "difference": 1,
+            "support_deny_difference": 3,
             "original": 1,
         }[self.input_mode]
         value_input_dim = self.hidden_dim * value_multiplier + depth_dim
@@ -1182,10 +1192,15 @@ class SemanticTreeTransformerBranch(nn.Module):
         deny_nodes,
         depth_nodes,
     ):
+        difference = deny_nodes - support_nodes
         if self.input_mode == "support_deny":
             semantic_nodes = (support_nodes, deny_nodes)
         elif self.input_mode == "support_deny_original":
             semantic_nodes = (support_nodes, deny_nodes, original_nodes)
+        elif self.input_mode == "difference":
+            semantic_nodes = (difference,)
+        elif self.input_mode == "support_deny_difference":
+            semantic_nodes = (support_nodes, deny_nodes, difference)
         else:
             semantic_nodes = (original_nodes,)
         return torch.cat((*semantic_nodes, depth_nodes), dim=-1)
