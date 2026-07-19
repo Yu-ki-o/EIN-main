@@ -339,10 +339,16 @@ class EdgeRelationUncertaintyRouter(nn.Module):
             return empty_scalar, empty_scalar, empty_scalar
 
         if self.use_ds_mass_routing:
-            known_mass = (1.0 - uncertainty).clamp(0.0, 1.0)
-            support_weight = known_mass * probabilities[:, 0]
-            deny_weight = known_mass * probabilities[:, 1]
-            return known_mass, support_weight, deny_weight
+            if (
+                not self.use_uncertainty_sampling
+                or self.current_epoch < self.warmup_epochs
+            ):
+                keep_sample = torch.ones_like(uncertainty)
+            else:
+                keep_sample = (1.0 - uncertainty).clamp(0.0, 1.0)
+            support_weight = keep_sample * probabilities[:, 0]
+            deny_weight = keep_sample * probabilities[:, 1]
+            return keep_sample, support_weight, deny_weight
         #这里目前设置了use_uncertainty_sampling为false，所以不进行伯努利采样
         if (
             not self.use_uncertainty_sampling

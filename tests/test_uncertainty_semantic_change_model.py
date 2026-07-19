@@ -215,6 +215,7 @@ class EdgeRelationUncertaintyRouterTest(unittest.TestCase):
         args = make_args()
         args.use_ds_mass_routing = True
         router = EdgeRelationUncertaintyRouter(4, args).eval()
+        router.set_epoch(router.warmup_epochs)
         with torch.no_grad():
             for parameter in router.parameters():
                 parameter.zero_()
@@ -241,6 +242,30 @@ class EdgeRelationUncertaintyRouterTest(unittest.TestCase):
         self.assertTrue(torch.allclose(keep, support + deny, atol=1e-6))
         self.assertTrue(torch.allclose(keep + unknown, torch.ones_like(keep)))
         self.assertGreater(float(unknown), float(support))
+
+    def test_ds_uncertainty_can_be_reserved_for_semantic_attention(self):
+        args = make_args()
+        args.use_ds_mass_routing = True
+        args.use_uncertainty_sampling = False
+        router = EdgeRelationUncertaintyRouter(4, args).eval()
+        router.set_epoch(router.warmup_epochs)
+        with torch.no_grad():
+            for parameter in router.parameters():
+                parameter.zero_()
+        nodes = torch.randn(2, 4)
+        edge_index = torch.tensor([[0], [1]])
+
+        _, probabilities, unknown, keep, support, deny = router(
+            nodes,
+            edge_index,
+        )
+
+        self.assertGreater(float(unknown), 0.0)
+        self.assertTrue(
+            torch.allclose(probabilities, torch.tensor([[0.5, 0.5]]))
+        )
+        self.assertAlmostEqual(float(keep), 1.0, places=6)
+        self.assertAlmostEqual(float(support + deny), 1.0, places=6)
 
     def test_ds_and_dirichlet_relation_routing_are_mutually_exclusive(self):
         args = make_args()
