@@ -40,8 +40,10 @@ SWEEP_PARAM_ORDER = [
     "use_degree_importance",
     "degree_importance_strength",
     "semantic_change_hidden_dim",
+    "lambda_semantic_tree_change_mi_aux",
     "use_node_keep_in_change_pool",
     "use_semantic_tree_transformer",
+    "semantic_tree_input_mode",
     "semantic_tree_transformer_layers",
     "semantic_tree_transformer_heads",
     "semantic_tree_num_topics",
@@ -52,6 +54,7 @@ SWEEP_PARAM_ORDER = [
     "semantic_tree_transformer_max_depth",
     "semantic_tree_depth_dim",
     "semantic_tree_transformer_pool",
+    "semantic_tree_uncertainty_bias_scale",
     "vertical_path_attention_heads",
     "vertical_path_attention_uncertainty_scale",
     "vertical_path_attention_residual_gate",
@@ -86,7 +89,9 @@ FIXED_TRACE_PARAMS = [
     "classification_fusion_hidden_dim",
     "semantic_change_encoder",
     "use_uncertainty_sampling",
+    "edge_relation_distribution",
     "use_semantic_tree_transformer",
+    "use_semantic_tree_change_uncertainty_bias",
     "use_vertical_path_attention",
 ]
 
@@ -146,8 +151,10 @@ ALIASES = {
     "use_degree_importance": "degimp",
     "degree_importance_strength": "deg",
     "semantic_change_hidden_dim": "chid",
+    "lambda_semantic_tree_change_mi_aux": "stmi",
     "use_node_keep_in_change_pool": "poolkeep",
     "use_semantic_tree_transformer": "stree",
+    "semantic_tree_input_mode": "stinput",
     "semantic_tree_transformer_layers": "stlayers",
     "semantic_tree_transformer_heads": "stheads",
     "semantic_tree_num_topics": "sttopics",
@@ -158,6 +165,7 @@ ALIASES = {
     "semantic_tree_transformer_max_depth": "stdepth",
     "semantic_tree_depth_dim": "stde",
     "semantic_tree_transformer_pool": "stpool",
+    "semantic_tree_uncertainty_bias_scale": "stbias",
     "vertical_path_attention_heads": "vheads",
     "vertical_path_attention_uncertainty_scale": "vunc",
     "vertical_path_attention_residual_gate": "vgate",
@@ -260,6 +268,11 @@ def parse_args(defaults):
         "--dry-run",
         action="store_true",
         help="Print planned trials without writing configs or training.",
+    )
+    parser.add_argument(
+        "--write-configs-only",
+        action="store_true",
+        help="Write generated trial configs without running training.",
     )
     parser.add_argument(
         "--device",
@@ -773,6 +786,16 @@ def run_cli(defaults):
         with open(generated_config, "w", encoding="utf-8") as file_obj:
             dump_config(trial_config, file_obj)
 
+        if args.write_configs_only:
+            print(
+                "[write-config] {:04d} {} config={}".format(
+                    trial_index,
+                    result_name,
+                    generated_config,
+                )
+            )
+            continue
+
         print("[run] {:04d} {} config={}".format(trial_index, result_name, generated_config))
         result = run_trial(trial_config)
         if result is None:
@@ -790,5 +813,8 @@ def run_cli(defaults):
             )
         )
 
-    print("Aggregate CSV: {}".format(csv_path))
-    print("Aggregate JSONL: {}".format(jsonl_path))
+    if args.write_configs_only:
+        print("Generated configs: {}".format(config_out_dir))
+    else:
+        print("Aggregate CSV: {}".format(csv_path))
+        print("Aggregate JSONL: {}".format(jsonl_path))
