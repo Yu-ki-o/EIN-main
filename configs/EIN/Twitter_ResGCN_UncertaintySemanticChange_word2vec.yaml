@@ -6,7 +6,7 @@ word_embedding: word2vec
 e5_model_name: intfloat/multilingual-e5-base
 e5_max_length: 128
 e5_batch_size: 64
-result_name: Twitter_ResGCN_UncertaintySemanticChange_dirichlet_gcb_stmi_ubias_word2vec
+result_name: zhengli_ResGCN_NouncertaintySemanticChange_change_semantic_tree_softmax_layer3
 experiment_mode: id
 ood_source_datasets: []
 ood_val_domain: source
@@ -28,7 +28,7 @@ tokenize_mode: nltk
 k: 10000
 vector_size: 200
 undirected: false
-n_layers_conv: 2
+n_layers_conv: 3
 dropout: 0.1
 global_pool: mean
 base_model: ResGCN_UncertaintySemanticChange
@@ -45,9 +45,9 @@ stance_route_hard: true
 lambda_edge_relation_aux: 0.1
 lambda_edge_relation_warmup: 0.5
 lambda_view_mi_aux: 0.01
-edge_relation_distribution: dirichlet
+edge_relation_distribution: softmax
 use_ds_mass_routing: false
-use_dirichlet_relation_routing: true
+use_dirichlet_relation_routing: False
 dirichlet_relation_prior: 1.0
 dirichlet_relation_sample: false
 dirichlet_teacher_strength: 10.0
@@ -79,7 +79,7 @@ vertical_path_attention_uncertainty_scale: 1.0
 vertical_path_attention_residual_gate: 1.0
 vertical_path_attention_dropout: 0.1
 use_semantic_tree_transformer: true
-semantic_tree_input_mode: support_deny
+semantic_tree_input_mode: support_deny_original
 semantic_tree_query_mode: learned
 semantic_tree_num_queries: 1
 semantic_tree_transformer_layers: 1
