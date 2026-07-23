@@ -141,6 +141,7 @@ class EdgeRelationUncertaintyRouter(nn.Module):
         self.eps = 1e-6
 
         self.relation_encoder = nn.Sequential(
+            #这里修改判别边支持冲突语义的输入特征维度
             nn.Linear(hidden_dim * 4, relation_hidden),
             nn.ReLU(),
             nn.Linear(relation_hidden, relation_hidden),
