@@ -499,6 +499,128 @@ class SemanticParityDirectionEncoder(nn.Module):
         )
 
 
+class SemanticParityGCNDirectionEncoder(nn.Module):
+    """
+    GCN propagation over the lifted support/deny parity graph.
+
+    Each original node is represented by a same-channel node and a
+    diff-channel node. Support edges stay within a channel, while deny edges
+    cross between channels. A single GCN normalization is therefore computed
+    over the complete parity graph instead of normalizing the support and deny
+    subgraphs independently.
+    """
+
+    def __init__(
+        self,
+        input_dim,
+        hidden_dim,
+        num_layers,
+        dropout=0.0,
+        residual=True,
+    ):
+        super().__init__()
+        self.input_dim = int(input_dim)
+        self.hidden_dim = int(hidden_dim)
+        self.num_layers = max(1, int(num_layers))
+        self.dropout = float(dropout)
+        self.residual = bool(residual)
+
+        self.input_projection = nn.Linear(self.input_dim, self.hidden_dim)
+        self.layers = nn.ModuleList(
+            [
+                GCNConv(
+                    self.hidden_dim,
+                    self.hidden_dim,
+                    bias=False,
+                    add_self_loops=True,
+                    normalize=True,
+                )
+                for _ in range(self.num_layers)
+            ]
+        )
+        self.norms = nn.ModuleList(
+            [nn.LayerNorm(self.hidden_dim) for _ in range(self.num_layers)]
+        )
+
+    def forward(self, node_features, edge_index, support_weight, deny_weight):
+        same = self.input_projection(node_features.float())
+        diff = same.new_zeros(same.size())
+        parity_edge_index, parity_edge_weight = self._lift_parity_graph(
+            edge_index,
+            support_weight,
+            deny_weight,
+            num_nodes=same.size(0),
+            dtype=same.dtype,
+            device=same.device,
+        )
+
+        for layer, norm in zip(self.layers, self.norms):
+            lifted = torch.cat((same, diff), dim=0)
+            update = layer(
+                lifted,
+                parity_edge_index,
+                edge_weight=parity_edge_weight,
+            )
+            same_update, diff_update = update.split(same.size(0), dim=0)
+            same_update = F.relu(norm(same_update))
+            diff_update = F.relu(norm(diff_update))
+            same_update = F.dropout(
+                same_update,
+                p=self.dropout,
+                training=self.training,
+            )
+            diff_update = F.dropout(
+                diff_update,
+                p=self.dropout,
+                training=self.training,
+            )
+            if self.residual:
+                same = same + same_update
+                diff = diff + diff_update
+            else:
+                same = same_update
+                diff = diff_update
+        return same, diff
+
+    def _lift_parity_graph(
+        self,
+        edge_index,
+        support_weight,
+        deny_weight,
+        num_nodes,
+        dtype,
+        device,
+    ):
+        if edge_index.numel() == 0:
+            return (
+                edge_index.new_empty((2, 0)),
+                torch.empty(0, dtype=dtype, device=device),
+            )
+
+        src, dst = edge_index
+        support = support_weight.to(device=device, dtype=dtype).view(-1)
+        deny = deny_weight.to(device=device, dtype=dtype).view(-1)
+        same_src = src
+        same_dst = dst
+        diff_src = src + num_nodes
+        diff_dst = dst + num_nodes
+
+        parity_edge_index = torch.cat(
+            (
+                torch.stack((same_src, same_dst), dim=0),
+                torch.stack((diff_src, diff_dst), dim=0),
+                torch.stack((same_src, diff_dst), dim=0),
+                torch.stack((diff_src, same_dst), dim=0),
+            ),
+            dim=1,
+        )
+        parity_edge_weight = torch.cat(
+            (support, support, deny, deny),
+            dim=0,
+        )
+        return parity_edge_index, parity_edge_weight
+
+
 class SemanticParityEncoder(nn.Module):
     """
     Support/deny view encoder with optional bidirectional tree propagation.
@@ -512,10 +634,31 @@ class SemanticParityEncoder(nn.Module):
         dropout=0.0,
         bidirectional=False,
         residual=True,
+        aggregation="mean",
     ):
         super().__init__()
         self.bidirectional = bool(bidirectional)
-        self.top_down = SemanticParityDirectionEncoder(
+        aggregation = str(aggregation).strip().lower()
+        aggregation_aliases = {
+            "average": "mean",
+            "simple": "mean",
+            "plain_gcn": "gcn",
+        }
+        self.aggregation = aggregation_aliases.get(aggregation, aggregation)
+        direction_encoder_types = {
+            "mean": SemanticParityDirectionEncoder,
+            "gcn": SemanticParityGCNDirectionEncoder,
+        }
+        if self.aggregation not in direction_encoder_types:
+            raise ValueError(
+                "semantic parity aggregation must be one of {}, got {}".format(
+                    sorted(direction_encoder_types),
+                    aggregation,
+                )
+            )
+        direction_encoder_type = direction_encoder_types[self.aggregation]
+
+        self.top_down = direction_encoder_type(
             input_dim,
             hidden_dim,
             num_layers,
@@ -523,7 +666,7 @@ class SemanticParityEncoder(nn.Module):
             residual=residual,
         )
         if self.bidirectional:
-            self.bottom_up = SemanticParityDirectionEncoder(
+            self.bottom_up = direction_encoder_type(
                 input_dim,
                 hidden_dim,
                 num_layers,
@@ -2556,6 +2699,27 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 )
             )
         self.semantic_parity_direction = parity_direction
+        parity_aggregation = str(
+            getattr(args, "semantic_parity_aggregation", "mean")
+        ).strip().lower()
+        parity_aggregation_aliases = {
+            "average": "mean",
+            "simple": "mean",
+            "plain_gcn": "gcn",
+        }
+        parity_aggregation = parity_aggregation_aliases.get(
+            parity_aggregation,
+            parity_aggregation,
+        )
+        valid_parity_aggregations = {"mean", "gcn"}
+        if parity_aggregation not in valid_parity_aggregations:
+            raise ValueError(
+                "semantic_parity_aggregation must be one of {}, got {}".format(
+                    sorted(valid_parity_aggregations),
+                    parity_aggregation,
+                )
+            )
+        self.semantic_parity_aggregation = parity_aggregation
         self.semantic_node_weight_mode = str(
             getattr(args, "semantic_node_weight_mode", "local")
         ).strip().lower()
@@ -2580,6 +2744,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 residual=bool(
                     getattr(args, "semantic_parity_residual", True)
                 ),
+                aggregation=self.semantic_parity_aggregation,
             )
             if self.use_semantic_parity_gnn
             else None

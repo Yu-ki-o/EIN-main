@@ -9,6 +9,7 @@ from model.BiGCN_UncertaintySemanticChange import (
     BiGCN_UncertaintySemanticChange,
     EdgeRelationUncertaintyRouter,
     SemanticParityDirectionEncoder,
+    SemanticParityGCNDirectionEncoder,
     SemanticTreeTransformerBranch,
 )
 from model.ResGCN_UncertaintySemanticChange import (
@@ -57,6 +58,7 @@ def make_args():
         lambda_edge_relation_aux=0.1,
         lambda_view_mi_aux=0.0,
         use_semantic_parity_gnn=True,
+        semantic_parity_aggregation="mean",
         semantic_parity_residual=True,
         semantic_node_weight_mode="local",
         semantic_change_encoder="mlp",
@@ -374,6 +376,95 @@ class SemanticParityDirectionEncoderTest(unittest.TestCase):
                 else:
                     self.assertEqual(float(support_mass), 0.0)
                     self.assertGreater(float(deny_mass), 0.0)
+
+
+class SemanticParityGCNDirectionEncoderTest(unittest.TestCase):
+    def _identity_encoder(self, num_layers):
+        encoder = SemanticParityGCNDirectionEncoder(
+            input_dim=2,
+            hidden_dim=2,
+            num_layers=num_layers,
+            dropout=0.0,
+            residual=False,
+        ).eval()
+        with torch.no_grad():
+            encoder.input_projection.weight.copy_(torch.eye(2))
+            encoder.input_projection.bias.zero_()
+            for layer in encoder.layers:
+                layer.lin.weight.copy_(torch.eye(2))
+            for norm in encoder.norms:
+                norm.weight.fill_(1.0)
+                norm.bias.zero_()
+        return encoder
+
+    def _root_channels_for_path(self, signs):
+        num_layers = len(signs)
+        encoder = self._identity_encoder(num_layers)
+        num_nodes = num_layers + 1
+        x = torch.zeros(num_nodes, 2)
+        x[-1, 0] = 1.0
+        edge_index = torch.tensor(
+            [
+                list(range(num_layers, 0, -1)),
+                list(range(num_layers - 1, -1, -1)),
+            ],
+            dtype=torch.long,
+        )
+        support_weight = torch.tensor(
+            [1.0 if sign == "S" else 0.0 for sign in signs]
+        )
+        deny_weight = 1.0 - support_weight
+        support_nodes, deny_nodes = encoder(
+            x,
+            edge_index,
+            support_weight,
+            deny_weight,
+        )
+        return support_nodes[0].abs().sum(), deny_nodes[0].abs().sum()
+
+    def test_gcn_path_parity_is_valid_for_one_to_four_layers(self):
+        cases = [
+            ("S", "support"),
+            ("D", "deny"),
+            ("DD", "support"),
+            ("SSD", "deny"),
+            ("DSD", "support"),
+            ("SDSD", "support"),
+            ("SSSD", "deny"),
+        ]
+        for signs, expected in cases:
+            with self.subTest(signs=signs):
+                support_mass, deny_mass = self._root_channels_for_path(signs)
+                if expected == "support":
+                    self.assertGreater(float(support_mass), 0.0)
+                    self.assertEqual(float(deny_mass), 0.0)
+                else:
+                    self.assertEqual(float(support_mass), 0.0)
+                    self.assertGreater(float(deny_mass), 0.0)
+
+    def test_model_selects_gcn_parity_aggregation(self):
+        args = make_args()
+        args.semantic_parity_aggregation = "gcn"
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).eval()
+
+        output, unknown, support, deny = model(make_batch())
+
+        self.assertEqual(model.semantic_parity_encoder.aggregation, "gcn")
+        self.assertIsInstance(
+            model.semantic_parity_encoder.top_down,
+            SemanticParityGCNDirectionEncoder,
+        )
+        self.assertEqual(tuple(output.shape), (2, 2))
+        self.assertTrue(torch.isfinite(unknown).all())
+        self.assertTrue(torch.isfinite(support).all())
+        self.assertTrue(torch.isfinite(deny).all())
 
 
 class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):

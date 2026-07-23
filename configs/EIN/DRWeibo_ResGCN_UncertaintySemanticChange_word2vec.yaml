@@ -41,6 +41,7 @@ global_pool: mean
 base_model: BiGCN_UncertaintySemanticChange
 max_hop: 20
 lamda: 0.0
+semantic_parity_aggregation: gcn
 semantic_parity_direction: bottom_up
 
 # edge support/deny relation encoder
