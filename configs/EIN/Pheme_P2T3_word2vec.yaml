@@ -58,7 +58,7 @@ p2t3_pretrained_path: checkpoints/P2T3/Pheme_UTwitter_word2vec.pt
 
 # native pre-training
 p2t3_pretrain_dataset: UTwitter
-p2t3_pretrain_raw_dir: dataset/UTwitter/dataset/raw
+p2t3_pretrain_raw_dir: /public/wc/EIN-main/dataset/UTwitter/UTwitter
 p2t3_pretrain_processed_dir: dataset/UTwitter/dataset/processed
 p2t3_pretrain_epochs: 30
 p2t3_pretrain_batch_size: 8
