@@ -7,7 +7,7 @@ word_embedding: word2vec
 e5_model_name: intfloat/multilingual-e5-base
 e5_max_length: 128
 e5_batch_size: 64
-result_name: zhengli_BIGCN_Nouncertain_softmax_semantic_tree_gaussian_threeview_addoriginal # set a name to save logs under experiments/EIN/DRWeibo/<result_name>
+result_name: zhengli_BiGCN_Nouncertain_softmax_semantic_tree_gaussian_threeview_2bias # set a name to save logs under experiments/EIN/DRWeibo/<result_name>
 experiment_mode: id
 ood_source_datasets: []
 ood_val_domain: source
@@ -41,7 +41,7 @@ global_pool: mean
 base_model: BiGCN_UncertaintySemanticChange
 max_hop: 20
 lamda: 0.0
-semantic_parity_aggregation: gcn
+#semantic_parity_aggregation: gcn
 semantic_parity_direction: bottom_up
 
 # edge support/deny relation encoder
@@ -105,7 +105,7 @@ semantic_tree_depth_dim: 128
 semantic_tree_transformer_pool: mean
 use_semantic_tree_change_uncertainty_bias: True #修True
 semantic_tree_uncertainty_source: edge_relation
-semantic_tree_uncertainty_bias_scale:  0.5 #0.5
+semantic_tree_uncertainty_bias_scale:  2 #0.5
 semantic_tree_change_uncertainty_detach: True
 
 # root-relative support/uncertain/deny state, depth size, and growth trend
@@ -113,7 +113,7 @@ uncertainty_trend_hidden_dim: 128
 use_trend_graph: False
 
 # final branch fusion
-classification_fusion_mode: original_change_semantic_tree # change_semantic_tree
+classification_fusion_mode: change_semantic_tree # change_semantic_tree
 classification_fusion_hidden_dim: 256
 classification_class_weights: [1.0, 1.0] #原来是[1.0, 1.0]
 
@@ -142,3 +142,9 @@ lambda_conflict_redundancy_aux: 0.01
 conflict_keep_threshold: 0.5
 conflict_balance_weight: 1.0
 conflict_high_frequency_weight: 0.5
+
+
+
+# TDdroprate: 0.2
+# BUdroprate: 0.2
+# undirected: True
