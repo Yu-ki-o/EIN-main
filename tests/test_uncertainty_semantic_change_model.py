@@ -1055,6 +1055,125 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
         self.assertFalse(torch.allclose(shallow_value, branch.last_value))
         self.assertFalse(torch.allclose(shallow_nodes, deep_nodes))
 
+    def test_gaussian_shared_exclusive_query_uses_uncertainty_fusion(self):
+        args = make_args()
+        args.semantic_tree_query_mode = "gaussian_shared_exclusive"
+        args.semantic_tree_depth_dim = 4
+        args.semantic_tree_gaussian_query_sample = False
+        args.semantic_tree_gaussian_query_condition_shared_variance = False
+        args.lambda_semantic_tree_query_classification_aux = 0.1
+        branch = SemanticTreeTransformerBranch(
+            8,
+            args=args,
+            num_classes=2,
+        ).train()
+        with torch.no_grad():
+            branch.shared_query_logvar.fill_(-6.0)
+            branch.exclusive_query_logvar_head.weight.zero_()
+            branch.exclusive_query_logvar_head.bias.fill_(2.0)
+
+        original = torch.randn(5, 8)
+        support = torch.randn(5, 8)
+        deny = torch.randn(5, 8)
+        depth = torch.tensor([0, 1, 2, 0, 1])
+        batch = torch.tensor([0, 0, 0, 1, 1])
+        graph, nodes = branch(
+            original,
+            support,
+            deny,
+            depth,
+            batch,
+            target=torch.tensor([1, 0]),
+        )
+
+        self.assertEqual(tuple(graph.shape), (2, 8))
+        self.assertEqual(tuple(nodes.shape), (5, 8))
+        self.assertEqual(
+            tuple(branch.last_shared_attention.shape),
+            (2, 1, 3),
+        )
+        self.assertEqual(
+            tuple(branch.last_exclusive_attention.shape),
+            (2, 1, 3),
+        )
+        self.assertEqual(
+            tuple(branch.last_query_fusion_weights.shape),
+            (2, 2),
+        )
+        self.assertTrue(
+            torch.allclose(
+                branch.last_query_fusion_weights.sum(dim=-1),
+                torch.ones(2),
+                atol=1e-6,
+            )
+        )
+        self.assertTrue(
+            torch.all(
+                branch.last_query_fusion_weights[:, 0]
+                > branch.last_query_fusion_weights[:, 1]
+            )
+        )
+        self.assertEqual(
+            tuple(branch.last_exclusive_query_mean.shape),
+            (2, 1, 8),
+        )
+        self.assertTrue(torch.isfinite(branch.last_query_kl_loss))
+        self.assertTrue(torch.isfinite(branch.last_query_diversity_loss))
+        self.assertGreater(
+            float(branch.last_query_classification_loss),
+            0.0,
+        )
+
+    def test_gaussian_shared_exclusive_query_auxiliary_losses_backpropagate(
+        self,
+    ):
+        args = make_args()
+        args.use_trend_graph = False
+        args.use_semantic_tree_transformer = True
+        args.classification_fusion_mode = "semantic_tree"
+        args.semantic_tree_query_mode = "gaussian_shared_exclusive"
+        args.semantic_tree_depth_dim = 4
+        args.semantic_tree_gaussian_query_sample = True
+        args.lambda_semantic_tree_query_kl_aux = 0.01
+        args.lambda_semantic_tree_query_diversity_aux = 0.01
+        args.lambda_semantic_tree_query_classification_aux = 0.01
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).train()
+        data = make_batch()
+
+        output, _, _, _ = model(data)
+        loss = F.nll_loss(output, data.y) + model.auxiliary_loss()
+        loss.backward()
+
+        branch = model.semantic_tree_transformer
+        self.assertEqual(tuple(output.shape), (2, 2))
+        self.assertIsNotNone(branch.learned_query.grad)
+        self.assertIsNotNone(branch.shared_query_logvar.grad)
+        self.assertIsNotNone(branch.exclusive_query_mean_head.weight.grad)
+        self.assertIsNotNone(branch.exclusive_query_logvar_head.weight.grad)
+        self.assertGreater(
+            float(model._last_semantic_tree_query_kl_loss),
+            0.0,
+        )
+        self.assertGreaterEqual(
+            float(model._last_semantic_tree_query_diversity_loss),
+            0.0,
+        )
+        self.assertGreater(
+            float(model._last_semantic_tree_query_classification_loss),
+            0.0,
+        )
+        self.assertEqual(
+            tuple(model._last_semantic_tree_query_fusion_weights.shape),
+            (2, 2),
+        )
+
     def test_semantic_tree_original_keys_and_configurable_semantic_values(self):
         expected_input_dims = {
             "support_deny": 20,

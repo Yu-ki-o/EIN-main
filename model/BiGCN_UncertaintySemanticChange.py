@@ -1075,7 +1075,7 @@ class _GlobalQueryCrossAttentionLayer(nn.Module):
 class SemanticTreeTransformerBranch(nn.Module):
     """Linear topic-query attention from original keys to semantic values."""
 
-    def __init__(self, hidden_dim, args=None):
+    def __init__(self, hidden_dim, args=None, num_classes=None):
         super().__init__()
         self.hidden_dim = int(hidden_dim)
         self.max_depth = max(
@@ -1237,7 +1237,18 @@ class SemanticTreeTransformerBranch(nn.Module):
         query_mode = str(
             getattr(args, "semantic_tree_query_mode", "root_learned")
         ).strip().lower()
-        valid_query_modes = {"learned", "root", "root_learned"}
+        query_mode_aliases = {
+            "dual_gaussian": "gaussian_shared_exclusive",
+            "gaussian_dual": "gaussian_shared_exclusive",
+            "shared_exclusive": "gaussian_shared_exclusive",
+        }
+        query_mode = query_mode_aliases.get(query_mode, query_mode)
+        valid_query_modes = {
+            "learned",
+            "root",
+            "root_learned",
+            "gaussian_shared_exclusive",
+        }
         if query_mode not in valid_query_modes:
             raise ValueError(
                 "semantic_tree_query_mode must be one of {}, got {}".format(
@@ -1246,6 +1257,82 @@ class SemanticTreeTransformerBranch(nn.Module):
                 )
             )
         self.query_mode = query_mode
+        self.use_gaussian_shared_exclusive_query = (
+            self.query_mode == "gaussian_shared_exclusive"
+        )
+        self.gaussian_query_sample = bool(
+            getattr(args, "semantic_tree_gaussian_query_sample", True)
+        )
+        self.gaussian_query_condition_shared_variance = bool(
+            getattr(
+                args,
+                "semantic_tree_gaussian_query_condition_shared_variance",
+                True,
+            )
+        )
+        self.gaussian_query_min_logvar = float(
+            getattr(
+                args,
+                "semantic_tree_gaussian_query_min_logvar",
+                -8.0,
+            )
+        )
+        self.gaussian_query_max_logvar = float(
+            getattr(
+                args,
+                "semantic_tree_gaussian_query_max_logvar",
+                4.0,
+            )
+        )
+        if self.gaussian_query_min_logvar > self.gaussian_query_max_logvar:
+            raise ValueError(
+                "semantic_tree_gaussian_query_min_logvar must be no greater "
+                "than semantic_tree_gaussian_query_max_logvar"
+            )
+        self.gaussian_query_initial_logvar = min(
+            self.gaussian_query_max_logvar,
+            max(
+                self.gaussian_query_min_logvar,
+                float(
+                    getattr(
+                        args,
+                        "semantic_tree_gaussian_query_initial_logvar",
+                        -4.0,
+                    )
+                ),
+            ),
+        )
+        self.gaussian_query_reliability_temperature = max(
+            1e-6,
+            float(
+                getattr(
+                    args,
+                    "semantic_tree_gaussian_query_reliability_temperature",
+                    1.0,
+                )
+            ),
+        )
+        self.gaussian_query_detach_uncertainty = bool(
+            getattr(
+                args,
+                "semantic_tree_gaussian_query_detach_uncertainty",
+                False,
+            )
+        )
+        self.dual_query_output_mode = str(
+            getattr(
+                args,
+                "semantic_tree_dual_query_output_mode",
+                "context",
+            )
+        ).strip().lower()
+        if self.dual_query_output_mode not in {"context", "query"}:
+            raise ValueError(
+                "semantic_tree_dual_query_output_mode must be one of "
+                "['context', 'query'], got {}".format(
+                    self.dual_query_output_mode
+                )
+            )
         self.pool = str(
             getattr(args, "semantic_tree_transformer_pool", "mean")
         ).strip().lower()
@@ -1284,6 +1371,79 @@ class SemanticTreeTransformerBranch(nn.Module):
             nn.GELU(),
             nn.Dropout(dropout),
         )
+        if self.use_gaussian_shared_exclusive_query:
+            query_output_dim = self.num_queries * self.hidden_dim
+            self.shared_query_logvar = nn.Parameter(
+                torch.full(
+                    (self.num_queries, self.hidden_dim),
+                    self.gaussian_query_initial_logvar,
+                )
+            )
+            self.dual_query_graph_norm = nn.LayerNorm(self.hidden_dim)
+            self.dual_query_root_norm = nn.LayerNorm(self.hidden_dim)
+            self.exclusive_query_encoder = nn.Sequential(
+                nn.LayerNorm(self.hidden_dim * 2),
+                nn.Linear(self.hidden_dim * 2, self.hidden_dim),
+                nn.GELU(),
+                nn.Dropout(dropout),
+            )
+            self.exclusive_query_mean_head = nn.Linear(
+                self.hidden_dim,
+                query_output_dim,
+            )
+            self.exclusive_query_logvar_head = nn.Linear(
+                self.hidden_dim,
+                query_output_dim,
+            )
+            nn.init.zeros_(self.exclusive_query_logvar_head.weight)
+            nn.init.constant_(
+                self.exclusive_query_logvar_head.bias,
+                self.gaussian_query_initial_logvar,
+            )
+            if self.gaussian_query_condition_shared_variance:
+                self.shared_query_logvar_head = nn.Linear(
+                    self.hidden_dim,
+                    query_output_dim,
+                    bias=False,
+                )
+                nn.init.zeros_(self.shared_query_logvar_head.weight)
+            else:
+                self.shared_query_logvar_head = None
+
+            query_aux_weight = max(
+                0.0,
+                float(
+                    getattr(
+                        args,
+                        "lambda_semantic_tree_query_classification_aux",
+                        0.0,
+                    )
+                ),
+            )
+            if num_classes is None:
+                num_classes = getattr(args, "num_classes", None)
+            if query_aux_weight > 0.0 and num_classes is not None:
+                self.shared_query_classifier = nn.Linear(
+                    self.hidden_dim,
+                    int(num_classes),
+                )
+                self.exclusive_query_classifier = nn.Linear(
+                    self.hidden_dim,
+                    int(num_classes),
+                )
+            else:
+                self.shared_query_classifier = None
+                self.exclusive_query_classifier = None
+        else:
+            self.register_parameter("shared_query_logvar", None)
+            self.dual_query_graph_norm = None
+            self.dual_query_root_norm = None
+            self.exclusive_query_encoder = None
+            self.exclusive_query_mean_head = None
+            self.exclusive_query_logvar_head = None
+            self.shared_query_logvar_head = None
+            self.shared_query_classifier = None
+            self.exclusive_query_classifier = None
         self.attention_dropout = nn.Dropout(dropout)
         self.propagation_layers = nn.ModuleList(
             [
@@ -1310,6 +1470,18 @@ class SemanticTreeTransformerBranch(nn.Module):
         self.last_query = None
         self.last_key = None
         self.last_value = None
+        self.last_shared_attention = None
+        self.last_exclusive_attention = None
+        self.last_query_fusion_weights = None
+        self.last_shared_query_mean = None
+        self.last_shared_query_logvar = None
+        self.last_exclusive_query_mean = None
+        self.last_exclusive_query_logvar = None
+        self.last_shared_query_graph = None
+        self.last_exclusive_query_graph = None
+        self.last_query_kl_loss = None
+        self.last_query_diversity_loss = None
+        self.last_query_classification_loss = None
 
     @property
     def uncertainty_bias_active(self):
@@ -1363,6 +1535,128 @@ class SemanticTreeTransformerBranch(nn.Module):
             return root.expand(-1, self.num_queries, -1)
         return learned + root
 
+    def _dual_query_graph_context(self, original_dense, valid_mask):
+        valid_weight = valid_mask.to(dtype=original_dense.dtype).unsqueeze(-1)
+        graph_mean = (original_dense * valid_weight).sum(dim=1)
+        graph_mean = graph_mean / valid_weight.sum(dim=1).clamp_min(1.0)
+        graph_mean = self.dual_query_graph_norm(graph_mean)
+        root = self.dual_query_root_norm(original_dense[:, 0])
+        return self.exclusive_query_encoder(
+            torch.cat((graph_mean, root), dim=-1)
+        )
+
+    def _reshape_query_parameters(self, parameters):
+        return parameters.view(
+            parameters.size(0),
+            self.num_queries,
+            self.hidden_dim,
+        )
+
+    def _gaussian_shared_exclusive_queries(
+        self,
+        original_dense,
+        valid_mask,
+    ):
+        batch_size = original_dense.size(0)
+        graph_context = self._dual_query_graph_context(
+            original_dense,
+            valid_mask,
+        )
+        shared_mean = self.learned_query.unsqueeze(0).expand(
+            batch_size,
+            -1,
+            -1,
+        )
+        shared_logvar = self.shared_query_logvar.unsqueeze(0).expand(
+            batch_size,
+            -1,
+            -1,
+        )
+        if self.shared_query_logvar_head is not None:
+            shared_logvar = shared_logvar + self._reshape_query_parameters(
+                self.shared_query_logvar_head(graph_context)
+            )
+        shared_logvar = shared_logvar.clamp(
+            self.gaussian_query_min_logvar,
+            self.gaussian_query_max_logvar,
+        )
+
+        exclusive_mean = self._reshape_query_parameters(
+            self.exclusive_query_mean_head(graph_context)
+        )
+        exclusive_logvar = self._reshape_query_parameters(
+            self.exclusive_query_logvar_head(graph_context)
+        ).clamp(
+            self.gaussian_query_min_logvar,
+            self.gaussian_query_max_logvar,
+        )
+        return (
+            shared_mean,
+            shared_logvar,
+            exclusive_mean,
+            exclusive_logvar,
+        )
+
+    def _sample_gaussian_query(self, mean, logvar):
+        if not (self.training and self.gaussian_query_sample):
+            return mean
+        standard_deviation = torch.exp(0.5 * logvar)
+        return mean + standard_deviation * torch.randn_like(mean)
+
+    def _gaussian_query_uncertainty(self, logvar):
+        entropy_constant = math.log(2.0 * math.pi * math.e)
+        entropy = 0.5 * (logvar + entropy_constant)
+        return entropy.mean(dim=(1, 2))
+
+    def _gaussian_query_kl(self, mean, logvar):
+        kl = -0.5 * (
+            1.0
+            + logvar
+            - mean.pow(2)
+            - logvar.exp()
+        )
+        return kl.mean()
+
+    def _pool_query_tokens(self, tokens):
+        if self.pool == "sum":
+            return tokens.sum(dim=1)
+        if self.pool == "root":
+            return tokens[:, 0]
+        return tokens.mean(dim=1)
+
+    def _query_diversity_loss(self, shared_graph, exclusive_graph):
+        if shared_graph.size(0) > 1:
+            shared = shared_graph - shared_graph.mean(dim=0, keepdim=True)
+            exclusive = (
+                exclusive_graph
+                - exclusive_graph.mean(dim=0, keepdim=True)
+            )
+            shared = shared / shared.pow(2).mean(
+                dim=0,
+                keepdim=True,
+            ).add(self.topic_eps).sqrt()
+            exclusive = exclusive / exclusive.pow(2).mean(
+                dim=0,
+                keepdim=True,
+            ).add(self.topic_eps).sqrt()
+            cross_covariance = shared.t().matmul(exclusive)
+            cross_covariance = cross_covariance / shared.size(0)
+            return cross_covariance.pow(2).mean()
+
+        shared = F.normalize(
+            shared_graph,
+            p=2,
+            dim=-1,
+            eps=self.topic_eps,
+        )
+        exclusive = F.normalize(
+            exclusive_graph,
+            p=2,
+            dim=-1,
+            eps=self.topic_eps,
+        )
+        return (shared * exclusive).sum(dim=-1).pow(2).mean()
+
     def _cross_attention(
         self,
         query,
@@ -1406,6 +1700,7 @@ class SemanticTreeTransformerBranch(nn.Module):
         support_node_weight=None,
         deny_node_weight=None,
         change_node_uncertainty=None,
+        target=None,
     ):
         support_nodes = self._inject_missing_view(
             support_nodes,
@@ -1442,26 +1737,170 @@ class SemanticTreeTransformerBranch(nn.Module):
                 batch,
             )
             valid_mask = valid_mask & uncertainty_mask
-        query = self._initial_query(original_dense)
-        attention = None
-        uncertainty_bias = None
-        for layer in self.propagation_layers:
-            attention, uncertainty_bias = self._cross_attention(
-                layer.query_norm(query),
-                key_dense,
+        if self.use_gaussian_shared_exclusive_query:
+            (
+                shared_mean,
+                shared_logvar,
+                exclusive_mean,
+                exclusive_logvar,
+            ) = self._gaussian_shared_exclusive_queries(
+                original_dense,
                 valid_mask,
-                change_uncertainty_dense,
             )
-            context = torch.matmul(attention, value_dense)
-            query = layer(query, context)
+            shared_query = self._sample_gaussian_query(
+                shared_mean,
+                shared_logvar,
+            )
+            exclusive_query = self._sample_gaussian_query(
+                exclusive_mean,
+                exclusive_logvar,
+            )
+            shared_attention = None
+            exclusive_attention = None
+            shared_context = None
+            exclusive_context = None
+            uncertainty_bias = None
+            for layer in self.propagation_layers:
+                shared_attention, uncertainty_bias = self._cross_attention(
+                    layer.query_norm(shared_query),
+                    key_dense,
+                    valid_mask,
+                    change_uncertainty_dense,
+                )
+                shared_context = torch.matmul(
+                    shared_attention,
+                    value_dense,
+                )
+                shared_query = layer(shared_query, shared_context)
 
-        if self.pool == "sum":
-            graph_hidden = query.sum(dim=1)
-        elif self.pool == "root":
-            graph_hidden = query[:, 0]
+                (
+                    exclusive_attention,
+                    _,
+                ) = self._cross_attention(
+                    layer.query_norm(exclusive_query),
+                    key_dense,
+                    valid_mask,
+                    change_uncertainty_dense,
+                )
+                exclusive_context = torch.matmul(
+                    exclusive_attention,
+                    value_dense,
+                )
+                exclusive_query = layer(
+                    exclusive_query,
+                    exclusive_context,
+                )
+
+            if self.dual_query_output_mode == "query":
+                shared_tokens = shared_query
+                exclusive_tokens = exclusive_query
+            else:
+                # A graph-conditioned exclusive query can itself carry class
+                # information. Using only its retrieved context prevents a
+                # direct graph-summary -> query -> classifier shortcut.
+                shared_tokens = shared_context
+                exclusive_tokens = exclusive_context
+
+            shared_graph_hidden = self.graph_output(
+                self._pool_query_tokens(shared_tokens)
+            )
+            exclusive_graph_hidden = self.graph_output(
+                self._pool_query_tokens(exclusive_tokens)
+            )
+            shared_uncertainty = self._gaussian_query_uncertainty(
+                shared_logvar
+            )
+            exclusive_uncertainty = self._gaussian_query_uncertainty(
+                exclusive_logvar
+            )
+            query_uncertainty = torch.stack(
+                (shared_uncertainty, exclusive_uncertainty),
+                dim=-1,
+            )
+            if self.gaussian_query_detach_uncertainty:
+                query_uncertainty = query_uncertainty.detach()
+            query_fusion_weights = F.softmax(
+                -query_uncertainty
+                / self.gaussian_query_reliability_temperature,
+                dim=-1,
+            )
+            graph_hidden = (
+                query_fusion_weights[:, :1] * shared_graph_hidden
+                + query_fusion_weights[:, 1:] * exclusive_graph_hidden
+            )
+            attention = (
+                query_fusion_weights[:, :1].unsqueeze(-1)
+                * shared_attention
+                + query_fusion_weights[:, 1:].unsqueeze(-1)
+                * exclusive_attention
+            )
+            query = (
+                query_fusion_weights[:, :1].unsqueeze(-1)
+                * shared_query
+                + query_fusion_weights[:, 1:].unsqueeze(-1)
+                * exclusive_query
+            )
+            self.last_shared_attention = shared_attention
+            self.last_exclusive_attention = exclusive_attention
+            self.last_query_fusion_weights = query_fusion_weights
+            self.last_shared_query_mean = shared_mean
+            self.last_shared_query_logvar = shared_logvar
+            self.last_exclusive_query_mean = exclusive_mean
+            self.last_exclusive_query_logvar = exclusive_logvar
+            self.last_shared_query_graph = shared_graph_hidden
+            self.last_exclusive_query_graph = exclusive_graph_hidden
+            self.last_query_kl_loss = 0.5 * (
+                self._gaussian_query_kl(shared_mean, shared_logvar)
+                + self._gaussian_query_kl(
+                    exclusive_mean,
+                    exclusive_logvar,
+                )
+            )
+            self.last_query_diversity_loss = (
+                self._query_diversity_loss(
+                    shared_graph_hidden,
+                    exclusive_graph_hidden,
+                )
+            )
+            if (
+                target is not None
+                and self.shared_query_classifier is not None
+                and self.exclusive_query_classifier is not None
+            ):
+                target = target.view(-1).long()
+                shared_logits = self.shared_query_classifier(
+                    shared_graph_hidden
+                )
+                exclusive_logits = self.exclusive_query_classifier(
+                    exclusive_graph_hidden
+                )
+                self.last_query_classification_loss = 0.5 * (
+                    F.cross_entropy(shared_logits, target)
+                    + F.cross_entropy(exclusive_logits, target)
+                )
+            else:
+                self.last_query_classification_loss = None
         else:
-            graph_hidden = query.mean(dim=1)
-        graph_hidden = self.graph_output(graph_hidden)
+            query = self._initial_query(original_dense)
+            attention = None
+            uncertainty_bias = None
+            for layer in self.propagation_layers:
+                attention, uncertainty_bias = self._cross_attention(
+                    layer.query_norm(query),
+                    key_dense,
+                    valid_mask,
+                    change_uncertainty_dense,
+                )
+                context = torch.matmul(attention, value_dense)
+                query = layer(query, context)
+
+            if self.pool == "sum":
+                graph_hidden = query.sum(dim=1)
+            elif self.pool == "root":
+                graph_hidden = query[:, 0]
+            else:
+                graph_hidden = query.mean(dim=1)
+            graph_hidden = self.graph_output(graph_hidden)
 
         node_relevance = attention.mean(dim=1).unsqueeze(-1)
         encoded_dense = self.node_output(value_dense * node_relevance)
@@ -2601,6 +3040,36 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 )
             ),
         )
+        self.lambda_semantic_tree_query_kl = max(
+            0.0,
+            float(
+                getattr(
+                    args,
+                    "lambda_semantic_tree_query_kl_aux",
+                    0.0,
+                )
+            ),
+        )
+        self.lambda_semantic_tree_query_diversity = max(
+            0.0,
+            float(
+                getattr(
+                    args,
+                    "lambda_semantic_tree_query_diversity_aux",
+                    0.0,
+                )
+            ),
+        )
+        self.lambda_semantic_tree_query_classification = max(
+            0.0,
+            float(
+                getattr(
+                    args,
+                    "lambda_semantic_tree_query_classification_aux",
+                    0.0,
+                )
+            ),
+        )
         self.view_mi_eps = max(
             1e-12,
             float(getattr(args, "view_mi_eps", 1e-6)),
@@ -2774,6 +3243,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             SemanticTreeTransformerBranch(
                 hid_feats,
                 args=args,
+                num_classes=num_classes,
             )
             if self.semantic_tree_active
             else None
@@ -2847,6 +3317,9 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_view_mi_loss = None
         self._last_semantic_change_bottleneck_loss = None
         self._last_semantic_tree_change_mi_loss = None
+        self._last_semantic_tree_query_kl_loss = None
+        self._last_semantic_tree_query_diversity_loss = None
+        self._last_semantic_tree_query_classification_loss = None
         self._last_branch_logits = None
         self._last_global_ds_masses = None
         self._last_global_ds_branch_masses = None
@@ -2875,6 +3348,13 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_semantic_tree_attention = None
         self._last_semantic_tree_query = None
         self._last_semantic_tree_uncertainty_bias = None
+        self._last_semantic_tree_shared_attention = None
+        self._last_semantic_tree_exclusive_attention = None
+        self._last_semantic_tree_query_fusion_weights = None
+        self._last_semantic_tree_shared_query_mean = None
+        self._last_semantic_tree_shared_query_logvar = None
+        self._last_semantic_tree_exclusive_query_mean = None
+        self._last_semantic_tree_exclusive_query_logvar = None
         self._last_change_node_uncertainty = None
         self._last_semantic_tree_node_uncertainty = None
         self._last_node_uncertainty = None
@@ -3390,6 +3870,38 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 (semantic_tree * change).sum(dim=-1).pow(2).mean()
             )
         return self.lambda_semantic_tree_change_mi * mi_proxy
+
+    def _semantic_tree_query_auxiliary_losses(self):
+        zero = self.classifier.weight.new_zeros(())
+        if self.semantic_tree_transformer is None:
+            return zero, zero, zero
+
+        raw_kl = self.semantic_tree_transformer.last_query_kl_loss
+        raw_diversity = (
+            self.semantic_tree_transformer.last_query_diversity_loss
+        )
+        raw_classification = (
+            self.semantic_tree_transformer.last_query_classification_loss
+        )
+        kl_loss = (
+            zero
+            if raw_kl is None
+            else self.lambda_semantic_tree_query_kl * raw_kl
+        )
+        diversity_loss = (
+            zero
+            if raw_diversity is None
+            else self.lambda_semantic_tree_query_diversity * raw_diversity
+        )
+        classification_loss = (
+            zero
+            if raw_classification is None
+            else (
+                self.lambda_semantic_tree_query_classification
+                * raw_classification
+            )
+        )
+        return kl_loss, diversity_loss, classification_loss
 
     def _node_depths(self, data, edge_index):
         num_nodes = data.x.size(0)
@@ -3948,6 +4460,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 support_node_weight=support_node_weight,
                 deny_node_weight=deny_node_weight,
                 change_node_uncertainty=semantic_tree_node_uncertainty,
+                target=getattr(data, "y", None),
             )
 
         conflict_graph = None
@@ -4057,6 +4570,11 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 change_graph,
             )
         )
+        (
+            semantic_tree_query_kl_loss,
+            semantic_tree_query_diversity_loss,
+            semantic_tree_query_classification_loss,
+        ) = self._semantic_tree_query_auxiliary_losses()
         conflict_aux_loss = (
             relation_logits.new_zeros(())
             if conflict_outputs is None
@@ -4067,6 +4585,9 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             + view_mi_loss
             + change_bottleneck_loss
             + semantic_tree_change_mi_loss
+            + semantic_tree_query_kl_loss
+            + semantic_tree_query_diversity_loss
+            + semantic_tree_query_classification_loss
             + conflict_aux_loss
         )
         self._last_edge_relation_loss = edge_relation_loss.detach()
@@ -4076,6 +4597,15 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         )
         self._last_semantic_tree_change_mi_loss = (
             semantic_tree_change_mi_loss.detach()
+        )
+        self._last_semantic_tree_query_kl_loss = (
+            semantic_tree_query_kl_loss.detach()
+        )
+        self._last_semantic_tree_query_diversity_loss = (
+            semantic_tree_query_diversity_loss.detach()
+        )
+        self._last_semantic_tree_query_classification_loss = (
+            semantic_tree_query_classification_loss.detach()
         )
         self._last_conflict_aux_loss = conflict_aux_loss.detach()
         self._last_global_ds_masses = (
@@ -4185,6 +4715,95 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 or self.semantic_tree_transformer.last_uncertainty_bias is None
             )
             else self.semantic_tree_transformer.last_uncertainty_bias.detach()
+        )
+        self._last_semantic_tree_shared_attention = (
+            None
+            if (
+                self.semantic_tree_transformer is None
+                or self.semantic_tree_transformer.last_shared_attention is None
+            )
+            else self.semantic_tree_transformer.last_shared_attention.detach()
+        )
+        self._last_semantic_tree_exclusive_attention = (
+            None
+            if (
+                self.semantic_tree_transformer is None
+                or (
+                    self.semantic_tree_transformer
+                    .last_exclusive_attention is None
+                )
+            )
+            else (
+                self.semantic_tree_transformer
+                .last_exclusive_attention.detach()
+            )
+        )
+        self._last_semantic_tree_query_fusion_weights = (
+            None
+            if (
+                self.semantic_tree_transformer is None
+                or (
+                    self.semantic_tree_transformer
+                    .last_query_fusion_weights is None
+                )
+            )
+            else (
+                self.semantic_tree_transformer
+                .last_query_fusion_weights.detach()
+            )
+        )
+        self._last_semantic_tree_shared_query_mean = (
+            None
+            if (
+                self.semantic_tree_transformer is None
+                or (
+                    self.semantic_tree_transformer
+                    .last_shared_query_mean is None
+                )
+            )
+            else self.semantic_tree_transformer.last_shared_query_mean.detach()
+        )
+        self._last_semantic_tree_shared_query_logvar = (
+            None
+            if (
+                self.semantic_tree_transformer is None
+                or (
+                    self.semantic_tree_transformer
+                    .last_shared_query_logvar is None
+                )
+            )
+            else (
+                self.semantic_tree_transformer
+                .last_shared_query_logvar.detach()
+            )
+        )
+        self._last_semantic_tree_exclusive_query_mean = (
+            None
+            if (
+                self.semantic_tree_transformer is None
+                or (
+                    self.semantic_tree_transformer
+                    .last_exclusive_query_mean is None
+                )
+            )
+            else (
+                self.semantic_tree_transformer
+                .last_exclusive_query_mean.detach()
+            )
+        )
+        self._last_semantic_tree_exclusive_query_logvar = (
+            None
+            if (
+                self.semantic_tree_transformer is None
+                or (
+                    self.semantic_tree_transformer
+                    .last_exclusive_query_logvar is None
+                )
+            )
+            else (
+                self.semantic_tree_transformer
+                .last_exclusive_query_logvar.detach()
+            )
         )
         self._last_change_node_uncertainty = (
             None
