@@ -1312,6 +1312,26 @@ class SemanticTreeTransformerBranch(nn.Module):
                 )
             ),
         )
+        self.gaussian_query_shared_mi_temperature = max(
+            1e-6,
+            float(
+                getattr(
+                    args,
+                    "semantic_tree_gaussian_query_shared_mi_temperature",
+                    0.2,
+                )
+            ),
+        )
+        self.gaussian_query_exclusive_mi_temperature = max(
+            1e-6,
+            float(
+                getattr(
+                    args,
+                    "semantic_tree_gaussian_query_exclusive_mi_temperature",
+                    0.2,
+                )
+            ),
+        )
         self.gaussian_query_detach_uncertainty = bool(
             getattr(
                 args,
@@ -1381,12 +1401,24 @@ class SemanticTreeTransformerBranch(nn.Module):
             )
             self.dual_query_graph_norm = nn.LayerNorm(self.hidden_dim)
             self.dual_query_root_norm = nn.LayerNorm(self.hidden_dim)
+            self.shared_query_encoder = nn.Sequential(
+                nn.LayerNorm(self.hidden_dim * 2),
+                nn.Linear(self.hidden_dim * 2, self.hidden_dim),
+                nn.GELU(),
+                nn.Dropout(dropout),
+            )
             self.exclusive_query_encoder = nn.Sequential(
                 nn.LayerNorm(self.hidden_dim * 2),
                 nn.Linear(self.hidden_dim * 2, self.hidden_dim),
                 nn.GELU(),
                 nn.Dropout(dropout),
             )
+            self.shared_query_mean_head = nn.Linear(
+                self.hidden_dim,
+                query_output_dim,
+                bias=False,
+            )
+            nn.init.zeros_(self.shared_query_mean_head.weight)
             self.exclusive_query_mean_head = nn.Linear(
                 self.hidden_dim,
                 query_output_dim,
@@ -1438,7 +1470,9 @@ class SemanticTreeTransformerBranch(nn.Module):
             self.register_parameter("shared_query_logvar", None)
             self.dual_query_graph_norm = None
             self.dual_query_root_norm = None
+            self.shared_query_encoder = None
             self.exclusive_query_encoder = None
+            self.shared_query_mean_head = None
             self.exclusive_query_mean_head = None
             self.exclusive_query_logvar_head = None
             self.shared_query_logvar_head = None
@@ -1480,6 +1514,8 @@ class SemanticTreeTransformerBranch(nn.Module):
         self.last_shared_query_graph = None
         self.last_exclusive_query_graph = None
         self.last_query_kl_loss = None
+        self.last_query_shared_mi_loss = None
+        self.last_query_exclusive_mi_loss = None
         self.last_query_diversity_loss = None
         self.last_query_classification_loss = None
 
@@ -1541,8 +1577,10 @@ class SemanticTreeTransformerBranch(nn.Module):
         graph_mean = graph_mean / valid_weight.sum(dim=1).clamp_min(1.0)
         graph_mean = self.dual_query_graph_norm(graph_mean)
         root = self.dual_query_root_norm(original_dense[:, 0])
-        return self.exclusive_query_encoder(
-            torch.cat((graph_mean, root), dim=-1)
+        query_input = torch.cat((graph_mean, root), dim=-1)
+        return (
+            self.shared_query_encoder(query_input),
+            self.exclusive_query_encoder(query_input),
         )
 
     def _reshape_query_parameters(self, parameters):
@@ -1558,14 +1596,22 @@ class SemanticTreeTransformerBranch(nn.Module):
         valid_mask,
     ):
         batch_size = original_dense.size(0)
-        graph_context = self._dual_query_graph_context(
+        (
+            shared_graph_context,
+            exclusive_graph_context,
+        ) = self._dual_query_graph_context(
             original_dense,
             valid_mask,
         )
-        shared_mean = self.learned_query.unsqueeze(0).expand(
-            batch_size,
-            -1,
-            -1,
+        shared_mean = (
+            self.learned_query.unsqueeze(0).expand(
+                batch_size,
+                -1,
+                -1,
+            )
+            + self._reshape_query_parameters(
+                self.shared_query_mean_head(shared_graph_context)
+            )
         )
         shared_logvar = self.shared_query_logvar.unsqueeze(0).expand(
             batch_size,
@@ -1574,7 +1620,7 @@ class SemanticTreeTransformerBranch(nn.Module):
         )
         if self.shared_query_logvar_head is not None:
             shared_logvar = shared_logvar + self._reshape_query_parameters(
-                self.shared_query_logvar_head(graph_context)
+                self.shared_query_logvar_head(shared_graph_context)
             )
         shared_logvar = shared_logvar.clamp(
             self.gaussian_query_min_logvar,
@@ -1582,10 +1628,10 @@ class SemanticTreeTransformerBranch(nn.Module):
         )
 
         exclusive_mean = self._reshape_query_parameters(
-            self.exclusive_query_mean_head(graph_context)
+            self.exclusive_query_mean_head(exclusive_graph_context)
         )
         exclusive_logvar = self._reshape_query_parameters(
-            self.exclusive_query_logvar_head(graph_context)
+            self.exclusive_query_logvar_head(exclusive_graph_context)
         ).clamp(
             self.gaussian_query_min_logvar,
             self.gaussian_query_max_logvar,
@@ -1616,6 +1662,89 @@ class SemanticTreeTransformerBranch(nn.Module):
             - logvar.exp()
         )
         return kl.mean()
+
+    def _pairwise_gaussian_wasserstein(self, mean, logvar):
+        mean = mean.flatten(start_dim=1)
+        standard_deviation = torch.exp(0.5 * logvar).flatten(start_dim=1)
+        mean_distance = (
+            mean.unsqueeze(1) - mean.unsqueeze(0)
+        ).pow(2).mean(dim=-1)
+        deviation_distance = (
+            standard_deviation.unsqueeze(1)
+            - standard_deviation.unsqueeze(0)
+        ).pow(2).mean(dim=-1)
+        return mean_distance + deviation_distance
+
+    def _query_shared_mi_loss(self, mean, logvar, target):
+        zero = mean.new_zeros(())
+        if target is None or mean.size(0) < 2:
+            return zero
+        target = target.view(-1).long()
+        if target.numel() != mean.size(0):
+            return zero
+
+        distance = self._pairwise_gaussian_wasserstein(mean, logvar)
+        same_label = target.unsqueeze(1).eq(target.unsqueeze(0))
+        identity = torch.eye(
+            mean.size(0),
+            dtype=torch.bool,
+            device=mean.device,
+        )
+        positive_mask = same_label & ~identity
+        positive_count = positive_mask.sum(dim=1)
+        valid_anchor = positive_count > 0
+        if not valid_anchor.any():
+            return zero
+
+        logits = (
+            -distance / self.gaussian_query_shared_mi_temperature
+        ).masked_fill(identity, -1e9)
+        log_probability = logits - torch.logsumexp(
+            logits,
+            dim=1,
+            keepdim=True,
+        )
+        mean_positive_log_probability = (
+            (log_probability * positive_mask.to(log_probability.dtype)).sum(
+                dim=1
+            )
+            / positive_count.clamp_min(1).to(log_probability.dtype)
+        )
+        contrastive_loss = -mean_positive_log_probability[
+            valid_anchor
+        ].mean()
+        positive_distance = (
+            (
+                distance
+                * positive_mask.to(distance.dtype)
+            ).sum(dim=1)
+            / positive_count.clamp_min(1).to(distance.dtype)
+        )[valid_anchor].mean()
+        return contrastive_loss + positive_distance
+
+    def _query_exclusive_mi_loss(self, mean, logvar, target):
+        zero = mean.new_zeros(())
+        if target is None or mean.size(0) < 2:
+            return zero
+        target = target.view(-1).long()
+        if target.numel() != mean.size(0):
+            return zero
+
+        distance = self._pairwise_gaussian_wasserstein(mean, logvar)
+        same_label = target.unsqueeze(1).eq(target.unsqueeze(0))
+        identity = torch.eye(
+            mean.size(0),
+            dtype=torch.bool,
+            device=mean.device,
+        )
+        conditional_pair_mask = same_label & ~identity
+        if not conditional_pair_mask.any():
+            return zero
+
+        gaussian_overlap = torch.exp(
+            -distance / self.gaussian_query_exclusive_mi_temperature
+        )
+        return gaussian_overlap[conditional_pair_mask].mean()
 
     def _pool_query_tokens(self, tokens):
         if self.pool == "sum":
@@ -1854,6 +1983,18 @@ class SemanticTreeTransformerBranch(nn.Module):
                 + self._gaussian_query_kl(
                     exclusive_mean,
                     exclusive_logvar,
+                )
+            )
+            self.last_query_shared_mi_loss = self._query_shared_mi_loss(
+                shared_mean,
+                shared_logvar,
+                target,
+            )
+            self.last_query_exclusive_mi_loss = (
+                self._query_exclusive_mi_loss(
+                    exclusive_mean,
+                    exclusive_logvar,
+                    target,
                 )
             )
             self.last_query_diversity_loss = (
@@ -3050,6 +3191,26 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 )
             ),
         )
+        self.lambda_semantic_tree_query_shared_mi = max(
+            0.0,
+            float(
+                getattr(
+                    args,
+                    "lambda_semantic_tree_query_shared_mi_aux",
+                    0.0,
+                )
+            ),
+        )
+        self.lambda_semantic_tree_query_exclusive_mi = max(
+            0.0,
+            float(
+                getattr(
+                    args,
+                    "lambda_semantic_tree_query_exclusive_mi_aux",
+                    0.0,
+                )
+            ),
+        )
         self.lambda_semantic_tree_query_diversity = max(
             0.0,
             float(
@@ -3318,6 +3479,8 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_semantic_change_bottleneck_loss = None
         self._last_semantic_tree_change_mi_loss = None
         self._last_semantic_tree_query_kl_loss = None
+        self._last_semantic_tree_query_shared_mi_loss = None
+        self._last_semantic_tree_query_exclusive_mi_loss = None
         self._last_semantic_tree_query_diversity_loss = None
         self._last_semantic_tree_query_classification_loss = None
         self._last_branch_logits = None
@@ -3874,9 +4037,15 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
     def _semantic_tree_query_auxiliary_losses(self):
         zero = self.classifier.weight.new_zeros(())
         if self.semantic_tree_transformer is None:
-            return zero, zero, zero
+            return zero, zero, zero, zero, zero
 
         raw_kl = self.semantic_tree_transformer.last_query_kl_loss
+        raw_shared_mi = (
+            self.semantic_tree_transformer.last_query_shared_mi_loss
+        )
+        raw_exclusive_mi = (
+            self.semantic_tree_transformer.last_query_exclusive_mi_loss
+        )
         raw_diversity = (
             self.semantic_tree_transformer.last_query_diversity_loss
         )
@@ -3887,6 +4056,22 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             zero
             if raw_kl is None
             else self.lambda_semantic_tree_query_kl * raw_kl
+        )
+        shared_mi_loss = (
+            zero
+            if raw_shared_mi is None
+            else (
+                self.lambda_semantic_tree_query_shared_mi
+                * raw_shared_mi
+            )
+        )
+        exclusive_mi_loss = (
+            zero
+            if raw_exclusive_mi is None
+            else (
+                self.lambda_semantic_tree_query_exclusive_mi
+                * raw_exclusive_mi
+            )
         )
         diversity_loss = (
             zero
@@ -3901,7 +4086,13 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 * raw_classification
             )
         )
-        return kl_loss, diversity_loss, classification_loss
+        return (
+            kl_loss,
+            shared_mi_loss,
+            exclusive_mi_loss,
+            diversity_loss,
+            classification_loss,
+        )
 
     def _node_depths(self, data, edge_index):
         num_nodes = data.x.size(0)
@@ -4572,6 +4763,8 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         )
         (
             semantic_tree_query_kl_loss,
+            semantic_tree_query_shared_mi_loss,
+            semantic_tree_query_exclusive_mi_loss,
             semantic_tree_query_diversity_loss,
             semantic_tree_query_classification_loss,
         ) = self._semantic_tree_query_auxiliary_losses()
@@ -4586,6 +4779,8 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             + change_bottleneck_loss
             + semantic_tree_change_mi_loss
             + semantic_tree_query_kl_loss
+            + semantic_tree_query_shared_mi_loss
+            + semantic_tree_query_exclusive_mi_loss
             + semantic_tree_query_diversity_loss
             + semantic_tree_query_classification_loss
             + conflict_aux_loss
@@ -4600,6 +4795,12 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         )
         self._last_semantic_tree_query_kl_loss = (
             semantic_tree_query_kl_loss.detach()
+        )
+        self._last_semantic_tree_query_shared_mi_loss = (
+            semantic_tree_query_shared_mi_loss.detach()
+        )
+        self._last_semantic_tree_query_exclusive_mi_loss = (
+            semantic_tree_query_exclusive_mi_loss.detach()
         )
         self._last_semantic_tree_query_diversity_loss = (
             semantic_tree_query_diversity_loss.detach()

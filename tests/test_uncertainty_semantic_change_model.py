@@ -1118,11 +1118,64 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
             (2, 1, 8),
         )
         self.assertTrue(torch.isfinite(branch.last_query_kl_loss))
+        self.assertTrue(torch.isfinite(branch.last_query_shared_mi_loss))
+        self.assertTrue(torch.isfinite(branch.last_query_exclusive_mi_loss))
         self.assertTrue(torch.isfinite(branch.last_query_diversity_loss))
         self.assertGreater(
             float(branch.last_query_classification_loss),
             0.0,
         )
+
+    def test_gaussian_shared_exclusive_queries_are_graph_conditioned(
+        self,
+    ):
+        args = make_args()
+        args.semantic_tree_query_mode = "gaussian_shared_exclusive"
+        args.semantic_tree_depth_dim = 4
+        args.semantic_tree_gaussian_query_sample = False
+        args.semantic_tree_gaussian_query_shared_mi_temperature = 0.2
+        args.semantic_tree_gaussian_query_exclusive_mi_temperature = 0.2
+        args.lambda_semantic_tree_query_classification_aux = 0.1
+        branch = SemanticTreeTransformerBranch(
+            8,
+            args=args,
+            num_classes=2,
+        ).train()
+        with torch.no_grad():
+            branch.shared_query_mean_head.weight.normal_(0.0, 0.1)
+            branch.shared_query_logvar_head.weight.normal_(0.0, 0.05)
+
+        original = torch.randn(8, 8)
+        support = torch.randn(8, 8)
+        deny = torch.randn(8, 8)
+        depth = torch.tensor([0, 1, 0, 1, 0, 1, 0, 1])
+        batch = torch.tensor([0, 0, 1, 1, 2, 2, 3, 3])
+        target = torch.tensor([0, 0, 1, 1])
+        branch(
+            original,
+            support,
+            deny,
+            depth,
+            batch,
+            target=target,
+        )
+
+        shared_mean = branch.last_shared_query_mean.flatten(start_dim=1)
+        exclusive_mean = branch.last_exclusive_query_mean.flatten(
+            start_dim=1
+        )
+        self.assertGreater(float(shared_mean.var(dim=0).sum()), 0.0)
+        self.assertGreater(float(exclusive_mean.var(dim=0).sum()), 0.0)
+        self.assertGreater(float(branch.last_query_shared_mi_loss), 0.0)
+        self.assertGreater(float(branch.last_query_exclusive_mi_loss), 0.0)
+
+        cross_graph_loss = (
+            branch.last_query_shared_mi_loss
+            + branch.last_query_exclusive_mi_loss
+        )
+        cross_graph_loss.backward()
+        self.assertIsNotNone(branch.shared_query_mean_head.weight.grad)
+        self.assertIsNotNone(branch.exclusive_query_mean_head.weight.grad)
 
     def test_gaussian_shared_exclusive_query_auxiliary_losses_backpropagate(
         self,
@@ -1135,6 +1188,8 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
         args.semantic_tree_depth_dim = 4
         args.semantic_tree_gaussian_query_sample = True
         args.lambda_semantic_tree_query_kl_aux = 0.01
+        args.lambda_semantic_tree_query_shared_mi_aux = 0.01
+        args.lambda_semantic_tree_query_exclusive_mi_aux = 0.01
         args.lambda_semantic_tree_query_diversity_aux = 0.01
         args.lambda_semantic_tree_query_classification_aux = 0.01
         model = BiGCN_UncertaintySemanticChange(
@@ -1155,10 +1210,19 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
         self.assertEqual(tuple(output.shape), (2, 2))
         self.assertIsNotNone(branch.learned_query.grad)
         self.assertIsNotNone(branch.shared_query_logvar.grad)
+        self.assertIsNotNone(branch.shared_query_mean_head.weight.grad)
         self.assertIsNotNone(branch.exclusive_query_mean_head.weight.grad)
         self.assertIsNotNone(branch.exclusive_query_logvar_head.weight.grad)
         self.assertGreater(
             float(model._last_semantic_tree_query_kl_loss),
+            0.0,
+        )
+        self.assertGreaterEqual(
+            float(model._last_semantic_tree_query_shared_mi_loss),
+            0.0,
+        )
+        self.assertGreaterEqual(
+            float(model._last_semantic_tree_query_exclusive_mi_loss),
             0.0,
         )
         self.assertGreaterEqual(

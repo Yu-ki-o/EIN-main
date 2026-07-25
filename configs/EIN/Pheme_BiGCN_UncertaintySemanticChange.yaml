@@ -105,9 +105,13 @@ semantic_tree_gaussian_query_initial_logvar: -4.0
 semantic_tree_gaussian_query_min_logvar: -8.0
 semantic_tree_gaussian_query_max_logvar: 4.0
 semantic_tree_gaussian_query_reliability_temperature: 1.0
+semantic_tree_gaussian_query_shared_mi_temperature: 0.2
+semantic_tree_gaussian_query_exclusive_mi_temperature: 0.2
 semantic_tree_gaussian_query_detach_uncertainty: false
 semantic_tree_dual_query_output_mode: context
 lambda_semantic_tree_query_kl_aux: 0.001
+lambda_semantic_tree_query_shared_mi_aux: 0.01
+lambda_semantic_tree_query_exclusive_mi_aux: 0.01
 lambda_semantic_tree_query_diversity_aux: 0.01
 lambda_semantic_tree_query_classification_aux: 0.01
 semantic_tree_transformer_layers: 1
