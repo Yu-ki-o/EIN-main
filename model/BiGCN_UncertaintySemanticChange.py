@@ -1241,6 +1241,15 @@ class SemanticTreeTransformerBranch(nn.Module):
             "dual_gaussian": "gaussian_shared_exclusive",
             "gaussian_dual": "gaussian_shared_exclusive",
             "shared_exclusive": "gaussian_shared_exclusive",
+            "learned_gaussian_exclusive": (
+                "learned_shared_gaussian_exclusive"
+            ),
+            "learned_shared_exclusive": (
+                "learned_shared_gaussian_exclusive"
+            ),
+            "hybrid_shared_exclusive": (
+                "learned_shared_gaussian_exclusive"
+            ),
         }
         query_mode = query_mode_aliases.get(query_mode, query_mode)
         valid_query_modes = {
@@ -1248,6 +1257,7 @@ class SemanticTreeTransformerBranch(nn.Module):
             "root",
             "root_learned",
             "gaussian_shared_exclusive",
+            "learned_shared_gaussian_exclusive",
         }
         if query_mode not in valid_query_modes:
             raise ValueError(
@@ -1259,6 +1269,13 @@ class SemanticTreeTransformerBranch(nn.Module):
         self.query_mode = query_mode
         self.use_gaussian_shared_exclusive_query = (
             self.query_mode == "gaussian_shared_exclusive"
+        )
+        self.use_learned_shared_gaussian_exclusive_query = (
+            self.query_mode == "learned_shared_gaussian_exclusive"
+        )
+        self.use_shared_exclusive_query = (
+            self.use_gaussian_shared_exclusive_query
+            or self.use_learned_shared_gaussian_exclusive_query
         )
         self.gaussian_query_sample = bool(
             getattr(args, "semantic_tree_gaussian_query_sample", True)
@@ -1466,6 +1483,58 @@ class SemanticTreeTransformerBranch(nn.Module):
             else:
                 self.shared_query_classifier = None
                 self.exclusive_query_classifier = None
+        elif self.use_learned_shared_gaussian_exclusive_query:
+            query_output_dim = self.num_queries * self.hidden_dim
+            self.register_parameter("shared_query_logvar", None)
+            self.dual_query_graph_norm = nn.LayerNorm(self.hidden_dim)
+            self.dual_query_root_norm = nn.LayerNorm(self.hidden_dim)
+            self.shared_query_encoder = None
+            self.exclusive_query_encoder = nn.Sequential(
+                nn.LayerNorm(self.hidden_dim * 2),
+                nn.Linear(self.hidden_dim * 2, self.hidden_dim),
+                nn.GELU(),
+                nn.Dropout(dropout),
+            )
+            self.shared_query_mean_head = None
+            self.exclusive_query_mean_head = nn.Linear(
+                self.hidden_dim,
+                query_output_dim,
+            )
+            self.exclusive_query_logvar_head = nn.Linear(
+                self.hidden_dim,
+                query_output_dim,
+            )
+            nn.init.zeros_(self.exclusive_query_logvar_head.weight)
+            nn.init.constant_(
+                self.exclusive_query_logvar_head.bias,
+                self.gaussian_query_initial_logvar,
+            )
+            self.shared_query_logvar_head = None
+
+            query_aux_weight = max(
+                0.0,
+                float(
+                    getattr(
+                        args,
+                        "lambda_semantic_tree_query_classification_aux",
+                        0.0,
+                    )
+                ),
+            )
+            if num_classes is None:
+                num_classes = getattr(args, "num_classes", None)
+            if query_aux_weight > 0.0 and num_classes is not None:
+                self.shared_query_classifier = nn.Linear(
+                    self.hidden_dim,
+                    int(num_classes),
+                )
+                self.exclusive_query_classifier = nn.Linear(
+                    self.hidden_dim,
+                    int(num_classes),
+                )
+            else:
+                self.shared_query_classifier = None
+                self.exclusive_query_classifier = None
         else:
             self.register_parameter("shared_query_logvar", None)
             self.dual_query_graph_norm = None
@@ -1642,6 +1711,39 @@ class SemanticTreeTransformerBranch(nn.Module):
             exclusive_mean,
             exclusive_logvar,
         )
+
+    def _learned_shared_gaussian_exclusive_queries(
+        self,
+        original_dense,
+        valid_mask,
+    ):
+        batch_size = original_dense.size(0)
+        valid_weight = valid_mask.to(
+            dtype=original_dense.dtype
+        ).unsqueeze(-1)
+        graph_mean = (original_dense * valid_weight).sum(dim=1)
+        graph_mean = graph_mean / valid_weight.sum(dim=1).clamp_min(1.0)
+        graph_mean = self.dual_query_graph_norm(graph_mean)
+        root = self.dual_query_root_norm(original_dense[:, 0])
+        exclusive_graph_context = self.exclusive_query_encoder(
+            torch.cat((graph_mean, root), dim=-1)
+        )
+
+        shared_query = self.learned_query.unsqueeze(0).expand(
+            batch_size,
+            -1,
+            -1,
+        )
+        exclusive_mean = self._reshape_query_parameters(
+            self.exclusive_query_mean_head(exclusive_graph_context)
+        )
+        exclusive_logvar = self._reshape_query_parameters(
+            self.exclusive_query_logvar_head(exclusive_graph_context)
+        ).clamp(
+            self.gaussian_query_min_logvar,
+            self.gaussian_query_max_logvar,
+        )
+        return shared_query, exclusive_mean, exclusive_logvar
 
     def _sample_gaussian_query(self, mean, logvar):
         if not (self.training and self.gaussian_query_sample):
@@ -1866,20 +1968,32 @@ class SemanticTreeTransformerBranch(nn.Module):
                 batch,
             )
             valid_mask = valid_mask & uncertainty_mask
-        if self.use_gaussian_shared_exclusive_query:
-            (
-                shared_mean,
-                shared_logvar,
-                exclusive_mean,
-                exclusive_logvar,
-            ) = self._gaussian_shared_exclusive_queries(
-                original_dense,
-                valid_mask,
-            )
-            shared_query = self._sample_gaussian_query(
-                shared_mean,
-                shared_logvar,
-            )
+        if self.use_shared_exclusive_query:
+            if self.use_gaussian_shared_exclusive_query:
+                (
+                    shared_mean,
+                    shared_logvar,
+                    exclusive_mean,
+                    exclusive_logvar,
+                ) = self._gaussian_shared_exclusive_queries(
+                    original_dense,
+                    valid_mask,
+                )
+                shared_query = self._sample_gaussian_query(
+                    shared_mean,
+                    shared_logvar,
+                )
+            else:
+                (
+                    shared_mean,
+                    exclusive_mean,
+                    exclusive_logvar,
+                ) = self._learned_shared_gaussian_exclusive_queries(
+                    original_dense,
+                    valid_mask,
+                )
+                shared_logvar = None
+                shared_query = shared_mean
             exclusive_query = self._sample_gaussian_query(
                 exclusive_mean,
                 exclusive_logvar,
@@ -1936,12 +2050,29 @@ class SemanticTreeTransformerBranch(nn.Module):
             exclusive_graph_hidden = self.graph_output(
                 self._pool_query_tokens(exclusive_tokens)
             )
-            shared_uncertainty = self._gaussian_query_uncertainty(
-                shared_logvar
-            )
             exclusive_uncertainty = self._gaussian_query_uncertainty(
                 exclusive_logvar
             )
+            if self.use_gaussian_shared_exclusive_query:
+                shared_uncertainty = self._gaussian_query_uncertainty(
+                    shared_logvar
+                )
+            else:
+                # The dataset-level learned query is deterministic and gets a
+                # fixed zero reliability logit. Centering the private entropy
+                # at its configured initial value makes fusion start at 0.5
+                # without assigning a variance to the shared query.
+                shared_uncertainty = exclusive_logvar.new_zeros(
+                    exclusive_logvar.size(0)
+                )
+                entropy_constant = math.log(2.0 * math.pi * math.e)
+                initial_uncertainty = 0.5 * (
+                    self.gaussian_query_initial_logvar
+                    + entropy_constant
+                )
+                exclusive_uncertainty = (
+                    exclusive_uncertainty - initial_uncertainty
+                )
             query_uncertainty = torch.stack(
                 (shared_uncertainty, exclusive_uncertainty),
                 dim=-1,
@@ -1978,18 +2109,27 @@ class SemanticTreeTransformerBranch(nn.Module):
             self.last_exclusive_query_logvar = exclusive_logvar
             self.last_shared_query_graph = shared_graph_hidden
             self.last_exclusive_query_graph = exclusive_graph_hidden
-            self.last_query_kl_loss = 0.5 * (
-                self._gaussian_query_kl(shared_mean, shared_logvar)
-                + self._gaussian_query_kl(
+            if self.use_gaussian_shared_exclusive_query:
+                self.last_query_kl_loss = 0.5 * (
+                    self._gaussian_query_kl(shared_mean, shared_logvar)
+                    + self._gaussian_query_kl(
+                        exclusive_mean,
+                        exclusive_logvar,
+                    )
+                )
+                self.last_query_shared_mi_loss = (
+                    self._query_shared_mi_loss(
+                        shared_mean,
+                        shared_logvar,
+                        target,
+                    )
+                )
+            else:
+                self.last_query_kl_loss = self._gaussian_query_kl(
                     exclusive_mean,
                     exclusive_logvar,
                 )
-            )
-            self.last_query_shared_mi_loss = self._query_shared_mi_loss(
-                shared_mean,
-                shared_logvar,
-                target,
-            )
+                self.last_query_shared_mi_loss = None
             self.last_query_exclusive_mi_loss = (
                 self._query_exclusive_mi_loss(
                     exclusive_mean,
