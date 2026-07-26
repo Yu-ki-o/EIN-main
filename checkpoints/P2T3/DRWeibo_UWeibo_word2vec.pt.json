@@ -1,0 +1,7 @@
+{
+  "checkpoint": "/public/wc/EIN-main/checkpoints/P2T3/DRWeibo_UWeibo_word2vec.pt",
+  "dataset": "UWeibo",
+  "raw_dir": "/public/wc/EIN-main/dataset/UWeibo/UWeibo",
+  "word2vec_model_path": "/public/wc/EIN-main/word2vec/w2v_DRWeibo_UWeibo_jieba_200.model",
+  "epochs": 30
+}
