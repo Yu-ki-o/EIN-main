@@ -258,11 +258,26 @@ def _make_data(
 def _forward_with_xg(
     model: torch.nn.Module,
     data: Any,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    captured: list[torch.Tensor] = []
+) -> tuple[
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+]:
+    captured_z: list[torch.Tensor] = []
+    captured_xg: list[torch.Tensor] = []
 
-    def capture_xg(_module, _inputs, output):
-        captured.append(output.detach().clone())
+    def capture_xg(_module, inputs, output):
+        if len(inputs) != 1:
+            raise RuntimeError(
+                "Expected W_x to receive one tensor, got {}".format(
+                    len(inputs)
+                )
+            )
+        captured_z.append(inputs[0].detach().clone())
+        captured_xg.append(output.detach().clone())
 
     hook = model.W_x.register_forward_hook(capture_xg)
     try:
@@ -271,13 +286,15 @@ def _forward_with_xg(
     finally:
         hook.remove()
 
-    if len(captured) != 1:
+    if len(captured_z) != 1 or len(captured_xg) != 1:
         raise RuntimeError(
-            "Expected exactly one W_x output, captured {}".format(
-                len(captured)
+            "Expected exactly one W_x input/output pair, captured {}/{}"
+            .format(
+                len(captured_z),
+                len(captured_xg),
             )
         )
-    return output, u, s, d, captured[0]
+    return output, u, s, d, captured_z[0], captured_xg[0]
 
 
 def _max_abs_difference(first: torch.Tensor, second: torch.Tensor) -> float:
@@ -326,12 +343,19 @@ def run_counterfactual_check(tolerance: float = 1e-7) -> bool:
         num_hop=3,
     )
 
-    out_a, u_a, s_a, d_a, xg_a = _forward_with_xg(model, data_a)
-    out_state, u_state, s_state, d_state, xg_state = _forward_with_xg(
+    out_a, u_a, s_a, d_a, z_a, xg_a = _forward_with_xg(
         model,
-        state_counterfactual,
+        data_a,
     )
-    out_graph, _, _, _, xg_graph = _forward_with_xg(
+    (
+        out_state,
+        u_state,
+        s_state,
+        d_state,
+        z_state,
+        xg_state,
+    ) = _forward_with_xg(model, state_counterfactual)
+    out_graph, _, _, _, z_graph, xg_graph = _forward_with_xg(
         model,
         graph_counterfactual,
     )
@@ -341,8 +365,10 @@ def run_counterfactual_check(tolerance: float = 1e-7) -> bool:
         _max_abs_difference(s_a, s_state),
         _max_abs_difference(d_a, d_state),
     )
+    z_state_difference = _max_abs_difference(z_a, z_state)
     xg_state_difference = _max_abs_difference(xg_a, xg_state)
     output_state_difference = _max_abs_difference(out_a, out_state)
+    z_graph_difference = _max_abs_difference(z_a, z_graph)
     xg_graph_difference = _max_abs_difference(xg_a, xg_graph)
     output_graph_difference = _max_abs_difference(out_a, out_graph)
 
@@ -372,12 +398,22 @@ def run_counterfactual_check(tolerance: float = 1e-7) -> bool:
         "{:.10g}".format(trajectory_difference)
     )
     print(
+        "Terminal concatenated state Z=[U_H;S_H;D_H] max |difference| "
+        "after changing only the state trajectory: {:.10g}".format(
+            z_state_difference
+        )
+    )
+    print(
         "Epidemiology embedding x_g max |difference| after changing only "
         "the state trajectory: {:.10g}".format(xg_state_difference)
     )
     print(
         "Full prediction max |difference| after changing only the state "
         "trajectory: {:.10g}".format(output_state_difference)
+    )
+    print(
+        "Terminal concatenated state Z max |difference| after also changing "
+        "text/topology: {:.10g}".format(z_graph_difference)
     )
     print(
         "Epidemiology embedding x_g max |difference| after also changing "
@@ -394,8 +430,10 @@ def run_counterfactual_check(tolerance: float = 1e-7) -> bool:
 
     invariant = (
         trajectory_difference <= tolerance
+        and z_state_difference <= tolerance
         and xg_state_difference <= tolerance
         and output_state_difference <= tolerance
+        and z_graph_difference <= tolerance
         and xg_graph_difference <= tolerance
     )
     graph_branch_responds = output_graph_difference > tolerance
