@@ -25,6 +25,7 @@ from model.GCN_UncertaintySemanticChange import GCN_UncertaintySemanticChange
 from model.GIN_UncertaintySemanticChange import GIN_UncertaintySemanticChange
 from model.KAGNN_UncertaintySemanticChange import KAGNN_UncertaintySemanticChange
 from model.DepthAwareGraphTransformer import DepthAwareGraphTransformer
+from model.P2T3 import P2T3
 from model.SEEGraphMAE import SEEGraphMAE
 from model.KAGNN import KAGNN
 from model.LIRS import LIRSGIN
@@ -113,10 +114,19 @@ def resolve_device(args):
 
 def build_text_encoder(args, device, label_source_path):
     if args.word_embedding == 'word2vec':
-        model_path = os.path.join('word2vec',
-                            f'w2v_{args.dataset}_{args.tokenize_mode}_{args.vector_size}.model')
+        configured_model_path = getattr(args, 'word2vec_model_path', None)
+        if configured_model_path is not None and str(configured_model_path).strip():
+            model_path = os.path.expanduser(str(configured_model_path).strip())
+        else:
+            model_path = os.path.join(
+                'word2vec',
+                f'w2v_{args.dataset}_{args.tokenize_mode}_{args.vector_size}.model',
+            )
 
         if not os.path.exists(model_path):
+            model_dir = os.path.dirname(model_path)
+            if model_dir:
+                os.makedirs(model_dir, exist_ok=True)
             sentences = collect_sentences(label_source_path, args.language, args.tokenize_mode)
             w2v_model = train_word2vec(sentences, args.vector_size, args.seed)
             w2v_model.save(model_path)
@@ -169,6 +179,8 @@ def _safe_cache_part(value):
 
 def _graph_dataset_cache_part(args):
     base_model = str(getattr(args, 'base_model', '')).strip()
+    if base_model == 'P2T3':
+        return 'p2t3-tree'
     if base_model == 'LIRS_EBGCN':
         backbone = str(
             getattr(args, 'lirs_ebgcn_backbone', 'bigcn')
@@ -192,6 +204,7 @@ def _graph_dataset_cache_part(args):
         'BiGCN_StaticDynamicSemanticChange',
         'BiGCN_BackboneOnly',
         'DepthAwareGraphTransformer',
+        'P2T3',
         'LIRS',
         'EBGCN',
         'EBGCN_BiGCN_StateAuxSameDiff',
@@ -467,6 +480,7 @@ def load_graph_dataset(args, path, text_encoder):
         'BiGCN_StaticDynamicSemanticChange',
         'BiGCN_BackboneOnly',
         'DepthAwareGraphTransformer',
+        'P2T3',
         'LIRS',
         'EBGCN',
         'EBGCN_BiGCN_StateAuxSameDiff',
@@ -1385,6 +1399,62 @@ def EIN_DepthAwareGraphTransformer_supervisor(args):
         args,
         device,
     ).to(device)
+
+    optimizer = base_model.init_optimizer(args)
+    datasets = [train_dataset, val_dataset, test_dataset]
+    trainer = EINTrainer(datasets, base_model, optimizer, args, device)
+
+    print('Seed {} | Start training'.format(args.seed), flush=True)
+    return trainer.train_process()
+
+
+def EIN_P2T3_supervisor(args):
+    init_seed(args.seed, need_deepfix=True)
+
+    device = resolve_device(args)
+
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
+    text_encoder = build_text_encoder(args, device, label_source_path)
+
+    print('Seed {} | Building experiment datasets'.format(args.seed), flush=True)
+    train_dataset, val_dataset, test_dataset = build_experiment_datasets(
+        args,
+        text_encoder,
+    )
+
+    print('Seed {} | Initializing P2T3'.format(args.seed), flush=True)
+    base_model = P2T3(
+        args.in_feats,
+        args.hidden_dim,
+        args.hidden_dim,
+        args.num_classes,
+        args,
+        device,
+    ).to(device)
+
+    pretrained_path = getattr(args, 'p2t3_pretrained_path', None)
+    if pretrained_path is not None and str(pretrained_path).strip():
+        pretrained_path = os.path.expanduser(str(pretrained_path).strip())
+        if not os.path.isfile(pretrained_path):
+            raise FileNotFoundError(
+                'P2T3 pre-trained checkpoint not found: {}'.format(
+                    pretrained_path
+                )
+            )
+        incompatible = base_model.load_pretrained(
+            pretrained_path,
+            map_location=device,
+        )
+        print(
+            'Seed {} | Loaded P2T3 checkpoint {} | missing={} unexpected={}'.format(
+                args.seed,
+                pretrained_path,
+                list(incompatible.missing_keys),
+                list(incompatible.unexpected_keys),
+            ),
+            flush=True,
+        )
 
     optimizer = base_model.init_optimizer(args)
     datasets = [train_dataset, val_dataset, test_dataset]

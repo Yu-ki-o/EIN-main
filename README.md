@@ -6,6 +6,35 @@ This repository is the implementation of The Web Conference 2025 (WWW'25) paper:
 
 run main.py to train and test the model.
 
+## P2T3
+
+The repository includes an EIN-compatible implementation of **P2T3:
+Pre-Trained Propagation Tree Transformer**. It converts each propagation tree
+to source, deep-conversation-chain, and shallow-conversation tokens, then adds
+the released orthogonal chain identifiers, sinusoidal depth embeddings, and
+conversation-type embeddings before Transformer encoding.
+
+Ready-to-run Word2Vec configurations are available for the project datasets:
+
+```bash
+python scripts/pretrain_p2t3.py --config_filename configs/EIN/DRWeibo_P2T3_word2vec.yaml --device cuda:0
+python main.py --config_filename configs/EIN/DRWeibo_P2T3_word2vec.yaml
+python main.py --config_filename configs/EIN/Weibo_P2T3_word2vec.yaml
+python main.py --config_filename configs/EIN/Twitter_P2T3_word2vec.yaml
+python main.py --config_filename configs/EIN/Pheme_P2T3_word2vec.yaml
+```
+
+Put the downloaded unlabeled JSON files directly under
+`dataset/UWeibo/dataset/raw` for Chinese experiments or
+`dataset/UTwitter/dataset/raw` for English experiments. The native pre-training
+command builds one shared Word2Vec encoder, caches conversation-chain tensors
+under that dataset's `processed` directory, optimizes the released JSD
+local-global MI objective, and saves the stable checkpoint configured by
+`p2t3_pretrained_path`. Running the command again resumes that checkpoint.
+The classifier is intentionally reinitialized during EIN fine-tuning.
+`p2t3_unsup_weight` can additionally apply the MI objective during supervised
+fine-tuning; it defaults to `0.0`, matching the released fine-tuning script.
+
 ## Requirements:
 - python==3.12
 - pytorch==2.3.1

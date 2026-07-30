@@ -10,6 +10,7 @@ from torch_geometric.data import Batch, Data, InMemoryDataset
 from torch.utils.data import Dataset
 from torch_geometric.utils import degree, to_networkx, to_undirected
 from torch_scatter import scatter
+from utils.p2t3 import attach_p2t3_sequence_metadata
 
 
 
@@ -160,9 +161,11 @@ def build_optional_ragcl_centrality(post, x, edge_index, no_root_edge_index, arg
     )
 
 
-def attach_optional_fields(data, post):
+def attach_optional_fields(data, post, args=None):
     if 'domain_id' in post['source']:
         data.domain_id = torch.LongTensor([post['source']['domain_id']])
+    if str(getattr(args, 'base_model', '')).strip() == 'P2T3':
+        data = attach_p2t3_sequence_metadata(data, args)
     return data
 
 
@@ -620,7 +623,7 @@ class ResGCNTreeDataset(InMemoryDataset):
 
             one_data = Data(x=x, y=y, edge_index=edge_index, directed_edge_index=directed_edge_index, no_root_edge_index=no_root_edge_index, user_state=user_state, num_hop=num_hop, node_state=node_state, edge_stance=edge_stance, centrality=centrality) if 'label' in post['source'].keys() else \
                 Data(x=x, edge_index=edge_index, directed_edge_index=directed_edge_index, no_root_edge_index=no_root_edge_index, user_state=user_state, num_hop=num_hop, node_state=node_state, edge_stance=edge_stance, centrality=centrality)
-            one_data = attach_optional_fields(one_data, post)
+            one_data = attach_optional_fields(one_data, post, self.args)
             data_list.append(one_data)
 
         if self.pre_filter is not None:
@@ -711,7 +714,7 @@ class TreeDataset(InMemoryDataset):
 
             one_data = Data(x=x, y=y, edge_index=edge_index, directed_edge_index=directed_edge_index, no_root_edge_index=no_root_edge_index, user_state=user_state, num_hop=num_hop, node_state=node_state, edge_stance=edge_stance, centrality=centrality) if 'label' in post['source'].keys() else \
                 Data(x=x, edge_index=edge_index, directed_edge_index=directed_edge_index, no_root_edge_index=no_root_edge_index, user_state=user_state, num_hop=num_hop, node_state=node_state, edge_stance=edge_stance, centrality=centrality)
-            one_data = attach_optional_fields(one_data, post)
+            one_data = attach_optional_fields(one_data, post, self.args)
             data_list.append(one_data)
 
         if self.pre_filter is not None:
