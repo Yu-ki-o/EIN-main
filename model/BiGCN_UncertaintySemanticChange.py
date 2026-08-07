@@ -3501,7 +3501,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                     self.semantic_node_weight_mode,
                 )
             )
-        parity_layers = max(1, int(getattr(args, "n_layers_conv", 2)))
+        parity_layers =  max(1, int(getattr(args, "n_layers_conv", 2)))
         self.semantic_parity_encoder = (
             SemanticParityEncoder(
                 input_dim=in_feats,

@@ -237,6 +237,15 @@ def _graph_dataset_cache_part(args):
     return base_model or 'unknown'
 
 
+def _requires_ragcl_centrality(args):
+    """Return whether processed graphs must include RAGCL centrality values."""
+    return (
+        str(getattr(args, 'base_model', '')).strip()
+        in {'RAGCL_ResGCN', 'RAGCL_BiGCN'}
+        and _as_bool(getattr(args, 'use_unsup_loss', False))
+    )
+
+
 def get_dataset_cache_name(args):
     word_embedding = str(getattr(args, 'word_embedding', 'unknown')).strip()
     parts = [
@@ -247,6 +256,17 @@ def get_dataset_cache_name(args):
         'hop-{}'.format(getattr(args, 'max_hop', 'na')),
         'centrality-{}'.format(getattr(args, 'centrality', 'PageRank')),
     ]
+
+    # Plain and RAGCL baselines share the same ResGCN tree format, but only
+    # RAGCL can serialize per-node centrality. Keep RAGCL caches separate
+    # without changing the long-established cache keys of other models.
+    if str(getattr(args, 'base_model', '')).strip() in {
+        'RAGCL_ResGCN',
+        'RAGCL_BiGCN',
+    }:
+        parts.append(
+            'ragcl-centrality-{}'.format(_requires_ragcl_centrality(args))
+        )
 
     if _graph_dataset_cache_part(args) == 'resgcn-tree':
         parts.append(

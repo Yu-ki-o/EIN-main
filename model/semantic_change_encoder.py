@@ -103,6 +103,75 @@ class MLPSemanticChangeEncoder(nn.Module):
             )
 
 
+class DeltaMLPTanhSemanticChangeEncoder(nn.Module):
+    """Encode the signed support/deny difference with an MLP and ``tanh``.
+
+    The direction follows the rest of the change branch:
+
+        delta = deny_nodes - support_nodes
+
+    Unlike :class:`MLPSemanticChangeEncoder`, this encoder deliberately uses
+    only ``delta`` (not ``abs(delta)`` or total evidence) and bounds its final
+    node-level output to ``[-1, 1]`` with ``tanh``.
+    """
+
+    def __init__(
+        self,
+        input_dim,
+        output_dim=None,
+        hidden_dim=None,
+        dropout=0.0,
+    ):
+        super().__init__()
+        self.input_dim = int(input_dim)
+        self.output_dim = (
+            self.input_dim if output_dim is None else int(output_dim)
+        )
+        mlp_hidden_dim = (
+            self.input_dim if hidden_dim is None else int(hidden_dim)
+        )
+
+        if self.input_dim <= 0:
+            raise ValueError("input_dim must be positive")
+        if self.output_dim <= 0:
+            raise ValueError("output_dim must be positive")
+        if mlp_hidden_dim <= 0:
+            raise ValueError("hidden_dim must be positive")
+
+        # Bias-free layers preserve zero change for identical view embeddings.
+        self.encoder = nn.Sequential(
+            nn.Linear(self.input_dim, mlp_hidden_dim, bias=False),
+            nn.ReLU(),
+            nn.Dropout(float(dropout)),
+            nn.Linear(mlp_hidden_dim, self.output_dim, bias=False),
+        )
+
+    def change_features(self, support_nodes, deny_nodes):
+        self._validate_inputs(support_nodes, deny_nodes)
+        return deny_nodes - support_nodes
+
+    def forward(self, support_nodes, deny_nodes, **kwargs):
+        features = self.change_features(support_nodes, deny_nodes)
+        return torch.tanh(self.encoder(features))
+
+    def _validate_inputs(self, support_nodes, deny_nodes):
+        if support_nodes.shape != deny_nodes.shape:
+            raise ValueError(
+                "support_nodes and deny_nodes must have identical shapes, "
+                "got {} and {}".format(
+                    tuple(support_nodes.shape),
+                    tuple(deny_nodes.shape),
+                )
+            )
+        if support_nodes.size(-1) != self.input_dim:
+            raise ValueError(
+                "expected node feature dimension {}, got {}".format(
+                    self.input_dim,
+                    support_nodes.size(-1),
+                )
+            )
+
+
 class GaussianSemanticChangeBottleneck(nn.Module):
     """
     Encodes support/deny semantic change through a diagonal Gaussian
@@ -610,9 +679,10 @@ def build_semantic_change_encoder(
     """
 
     name = str(encoder_name).strip().lower()
+    delta_mlp_tanh_names = {"tanh", "delta_mlp_tanh", "mlp_delta_tanh"}
     if _as_bool(
         getattr(args, "use_gaussian_semantic_change_bottleneck", False)
-    ):
+    ) and name not in delta_mlp_tanh_names:
         name = "gaussian"
     include_sum = _as_bool(
         getattr(
@@ -628,6 +698,13 @@ def build_semantic_change_encoder(
             hidden_dim=hidden_dim,
             dropout=dropout,
             include_sum=include_sum,
+        )
+    if name in delta_mlp_tanh_names:
+        return DeltaMLPTanhSemanticChangeEncoder(
+            input_dim=input_dim,
+            output_dim=output_dim,
+            hidden_dim=hidden_dim,
+            dropout=dropout,
         )
     if name in {"gaussian", "gaussian_mlp", "gaussian_bottleneck"}:
         return GaussianSemanticChangeBottleneck(

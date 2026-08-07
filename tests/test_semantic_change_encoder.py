@@ -3,6 +3,7 @@ import unittest
 import torch
 
 from model.semantic_change_encoder import (
+    DeltaMLPTanhSemanticChangeEncoder,
     DPGASemanticChangeEncoder,
     GaussianSemanticChangeBottleneck,
     MLPSemanticChangeEncoder,
@@ -62,6 +63,52 @@ class MLPSemanticChangeEncoderTest(unittest.TestCase):
         encoder = MLPSemanticChangeEncoder(input_dim=4)
         with self.assertRaises(ValueError):
             encoder(torch.randn(3, 4), torch.randn(4, 4))
+
+
+class DeltaMLPTanhSemanticChangeEncoderTest(unittest.TestCase):
+    def test_uses_only_signed_difference_and_bounds_output(self):
+        encoder = DeltaMLPTanhSemanticChangeEncoder(
+            input_dim=2,
+            output_dim=3,
+            hidden_dim=4,
+            dropout=0.0,
+        )
+        support = torch.tensor([[1.0, -2.0]], requires_grad=True)
+        deny = torch.tensor([[3.0, -5.0]], requires_grad=True)
+
+        features = encoder.change_features(support, deny)
+        change = encoder(support, deny)
+
+        self.assertTrue(torch.equal(features, torch.tensor([[2.0, -3.0]])))
+        self.assertEqual(tuple(change.shape), (1, 3))
+        self.assertTrue(torch.all(change >= -1.0))
+        self.assertTrue(torch.all(change <= 1.0))
+
+        change.sum().backward()
+        self.assertIsNotNone(support.grad)
+        self.assertIsNotNone(deny.grad)
+
+    def test_identical_views_produce_zero_change(self):
+        encoder = DeltaMLPTanhSemanticChangeEncoder(input_dim=4).eval()
+        nodes = torch.randn(7, 4)
+
+        change = encoder(nodes, nodes)
+
+        self.assertTrue(torch.equal(change, torch.zeros_like(change)))
+
+    def test_factory_option_overrides_legacy_gaussian_switch(self):
+        class Args:
+            use_gaussian_semantic_change_bottleneck = True
+
+        encoder = build_semantic_change_encoder(
+            "tanh",
+            input_dim=4,
+            output_dim=4,
+            hidden_dim=8,
+            args=Args(),
+        )
+
+        self.assertIsInstance(encoder, DeltaMLPTanhSemanticChangeEncoder)
 
 
 class DPGASemanticChangeEncoderTest(unittest.TestCase):

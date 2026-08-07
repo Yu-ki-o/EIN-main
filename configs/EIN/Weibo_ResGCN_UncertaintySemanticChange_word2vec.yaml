@@ -7,7 +7,7 @@ word_embedding: word2vec
 e5_model_name: intfloat/multilingual-e5-base
 e5_max_length: 128
 e5_batch_size: 64
-result_name: A_resgcn_mlpmi0.00_sharemi0_bias0.1
+result_name: Tanh_zhengli_NouncertaintySemanticChange_resGCN_change_semantic_tree_layer3_threeview_class1.0and1.0_nobias #Final_resgcn_0.5bias_viewmi1 #zhengli_NouncertaintySemanticChange_resGCN_change_semantic_tree_threeview_1.0bias #test_weibo_resgcn_miaux0.01_bias1
 experiment_mode: id
 ood_source_datasets: []
 ood_val_domain: source
@@ -51,7 +51,7 @@ stance_route_temperature: 0.5
 stance_route_hard: True
 lambda_edge_relation_aux: 0.1 #0.1
 lambda_edge_relation_warmup: 0.5 #0.5
-lambda_view_mi_aux: 0.00 #原来是0.0,第二次是0.01
+lambda_view_mi_aux: 0.01 #原来是0.0,第二次是0.01
 
 # mutually exclusive edge relation routing: softmax, ds, or dirichlet
 edge_relation_distribution: softmax
@@ -73,13 +73,13 @@ use_degree_importance: True
 degree_importance_strength: 1.0
 
 # replaceable node-level semantic change encoder
-semantic_change_encoder: mlp
+semantic_change_encoder: tanh
 semantic_change_hidden_dim: 128
-use_gaussian_semantic_change_bottleneck: False
+use_gaussian_semantic_change_bottleneck: True
 semantic_change_gaussian_latent_dim: 128
 semantic_change_gaussian_sample: False
-lambda_semantic_change_bottleneck: 0.000 #0.001
-lambda_semantic_tree_change_mi_aux: 0.0 #原0.01
+lambda_semantic_change_bottleneck: 0.001 #0.001
+lambda_semantic_tree_change_mi_aux: 0.01 #原0.01
 # True: node_keep-weighted change pooling; False: ordinary graph pooling
 use_node_keep_in_change_pool: False
 
@@ -94,9 +94,9 @@ vertical_path_attention_dropout: 0.3
 # original-graph topics guide shared attention over dual-view values + depth
 use_semantic_tree_transformer: True
 semantic_tree_input_mode: support_deny_original #support_deny
-semantic_tree_query_mode: gaussian_shared_exclusive
+semantic_tree_query_mode: learned #learned_shared_gaussian_exclusive #gaussian_shared_exclusive
 semantic_tree_num_queries: 1
-semantic_tree_gaussian_query_sample: true
+semantic_tree_gaussian_query_sample: False
 semantic_tree_gaussian_query_condition_shared_variance: true
 semantic_tree_gaussian_query_initial_logvar: -4.0
 semantic_tree_gaussian_query_min_logvar: -8.0
@@ -118,9 +118,9 @@ semantic_tree_transformer_dropout: 0.3
 semantic_tree_transformer_max_depth: 72 #扫描结果显示这个是关键参数
 semantic_tree_depth_dim: 128
 semantic_tree_transformer_pool: sum
-use_semantic_tree_change_uncertainty_bias: True
+use_semantic_tree_change_uncertainty_bias: False
 semantic_tree_uncertainty_source: edge_relation
-semantic_tree_uncertainty_bias_scale: 0.1 #原1.0
+semantic_tree_uncertainty_bias_scale: 0.5 #原1.0
 semantic_tree_change_uncertainty_detach: True
 
 # root-relative support/uncertain/deny state, depth size, and growth trend
