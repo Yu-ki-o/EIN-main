@@ -18,6 +18,7 @@ from torch_geometric.utils import softmax, to_dense_batch
 
 from model.collective_revision import CollectiveRevisionEncoder
 from model.semantic_change_encoder import build_semantic_change_encoder
+from model.stance_motif_codebook import StanceMotifCodebookBranch
 
 
 class EdgeRelationUncertaintyRouter(nn.Module):
@@ -3108,6 +3109,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         ).strip().lower()
         fusion_mode_branches = {
             "change": ("change",),
+            "codebook": ("codebook",),
             "semantic_tree": ("semantic_tree",),
             "conflict": ("conflict",),
             "change_conflict": ("change", "conflict"),
@@ -3282,6 +3284,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self.collective_revision_active = (
             "collective_revision" in self.classification_branch_names
         )
+        self.codebook_active = "codebook" in self.classification_branch_names
         self.use_global_ds_fusion = bool(
             getattr(args, "use_global_ds_fusion", False)
         )
@@ -3549,6 +3552,15 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             if self.semantic_tree_active
             else None
         )
+        self.stance_motif_codebook = (
+            StanceMotifCodebookBranch(
+                hid_feats,
+                self.max_hop,
+                args=args,
+            )
+            if self.codebook_active
+            else None
+        )
         self.conflict_field_bottleneck = (
             ConflictFieldBottleneck(
                 hid_feats,
@@ -3689,6 +3701,18 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_conflict_label_loss = None
         self._last_conflict_size_loss = None
         self._last_conflict_redundancy_loss = None
+        self._last_codebook_graph = None
+        self._last_codebook_aux_loss = None
+        self._last_codebook_prototype_loss = None
+        self._last_codebook_commitment_loss = None
+        self._last_codebook_separation_loss = None
+        self._last_codebook_motif_types = None
+        self._last_codebook_prototype_indices = None
+        self._last_codebook_motif_depth = None
+        self._last_codebook_motif_batch = None
+        self._last_codebook_attention = None
+        self._last_codebook_tokens = None
+        self._last_codebook_path_tokens = None
 
     def _build_view_backbone(
         self,
@@ -4629,6 +4653,19 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             )
         if "original" in self.classification_branch_names:
             original_graph = self.global_pool(original_nodes, data.batch)
+
+        codebook_graph = None
+        codebook_outputs = None
+        if self.stance_motif_codebook is not None:
+            codebook_depth = self._node_depths(data, data.edge_index)
+            codebook_graph, codebook_outputs = self.stance_motif_codebook(
+                node_hidden,
+                data.edge_index,
+                getattr(data, "edge_stance", None),
+                codebook_depth,
+                data.batch,
+                self._root_indices(data),
+            )
         child_degree_importance = self._child_degree_importance(data)
 
         (
@@ -4855,6 +4892,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             "support": support_graph,
             "deny": deny_graph,
             "change": change_graph,
+            "codebook": codebook_graph,
             "trend": trend_graph,
             "collective_revision": collective_revision_graph,
             "vertical": vertical_graph,
@@ -4913,6 +4951,11 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             if conflict_outputs is None
             else conflict_outputs["aux_loss"]
         )
+        codebook_aux_loss = (
+            relation_logits.new_zeros(())
+            if codebook_outputs is None
+            else codebook_outputs["aux_loss"]
+        )
         self._last_aux_loss = (
             edge_relation_loss
             + view_mi_loss
@@ -4924,6 +4967,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             + semantic_tree_query_diversity_loss
             + semantic_tree_query_classification_loss
             + conflict_aux_loss
+            + codebook_aux_loss
         )
         self._last_edge_relation_loss = edge_relation_loss.detach()
         self._last_view_mi_loss = view_mi_loss.detach()
@@ -4949,6 +4993,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             semantic_tree_query_classification_loss.detach()
         )
         self._last_conflict_aux_loss = conflict_aux_loss.detach()
+        self._last_codebook_aux_loss = codebook_aux_loss.detach()
         self._last_global_ds_masses = (
             None
             if global_ds_masses is None
@@ -5244,6 +5289,48 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             self._last_conflict_redundancy_loss = (
                 conflict_outputs["redundancy_loss"].detach()
             )
+        if codebook_outputs is None:
+            self._last_codebook_graph = None
+            self._last_codebook_prototype_loss = None
+            self._last_codebook_commitment_loss = None
+            self._last_codebook_separation_loss = None
+            self._last_codebook_motif_types = None
+            self._last_codebook_prototype_indices = None
+            self._last_codebook_motif_depth = None
+            self._last_codebook_motif_batch = None
+            self._last_codebook_attention = None
+            self._last_codebook_tokens = None
+            self._last_codebook_path_tokens = None
+        else:
+            self._last_codebook_graph = codebook_graph.detach()
+            self._last_codebook_prototype_loss = codebook_outputs[
+                "prototype_loss"
+            ].detach()
+            self._last_codebook_commitment_loss = codebook_outputs[
+                "commitment_loss"
+            ].detach()
+            self._last_codebook_separation_loss = codebook_outputs[
+                "separation_loss"
+            ].detach()
+            self._last_codebook_motif_types = codebook_outputs[
+                "motif_type"
+            ].detach()
+            self._last_codebook_prototype_indices = codebook_outputs[
+                "prototype_index"
+            ].detach()
+            self._last_codebook_motif_depth = codebook_outputs[
+                "motif_depth"
+            ].detach()
+            self._last_codebook_motif_batch = codebook_outputs[
+                "motif_batch"
+            ].detach()
+            self._last_codebook_attention = codebook_outputs[
+                "attention"
+            ].detach()
+            self._last_codebook_tokens = codebook_outputs["tokens"].detach()
+            self._last_codebook_path_tokens = codebook_outputs[
+                "path_tokens"
+            ].detach()
         self._last_node_uncertainty = (
             None if node_uncertainty is None else node_uncertainty.detach()
         )

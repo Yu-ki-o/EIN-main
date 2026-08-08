@@ -87,6 +87,6 @@ uncertainty_trend_hidden_dim: 128
 use_trend_graph: False
 
 # final branch fusion
-classification_fusion_mode: change_semantic_tree
+classification_fusion_mode: change_semantic_tree # alternatives: codebook | codebook_semantic_tree
 classification_fusion_hidden_dim: 256
 classification_class_weights: [1.0, 1.0]

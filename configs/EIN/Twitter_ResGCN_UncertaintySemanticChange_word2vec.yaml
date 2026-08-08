@@ -110,7 +110,7 @@ semantic_tree_uncertainty_bias_scale: 1.0
 semantic_tree_change_uncertainty_detach: true
 uncertainty_trend_hidden_dim: 64
 use_trend_graph: false
-classification_fusion_mode: change_semantic_tree
+classification_fusion_mode: change_semantic_tree # alternatives: codebook | codebook_semantic_tree
 classification_fusion_hidden_dim: 128
 classification_class_weights:
 - 1.0

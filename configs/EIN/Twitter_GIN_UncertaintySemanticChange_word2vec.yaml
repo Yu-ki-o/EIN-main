@@ -50,7 +50,7 @@ semantic_change_hidden_dim: 64
 use_node_keep_in_change_pool: false
 uncertainty_trend_hidden_dim: 64
 use_trend_graph: false
-classification_fusion_mode: original_change
+classification_fusion_mode: original_change # alternatives: codebook | codebook_semantic_tree
 classification_fusion_hidden_dim: 128
 classification_class_weights:
 - 1.0
