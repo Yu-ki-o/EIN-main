@@ -18,6 +18,9 @@ from torch_geometric.utils import softmax, to_dense_batch
 
 from model.collective_revision import CollectiveRevisionEncoder
 from model.local_stance_ot import LocalStanceOptimalTransportBranch
+from model.reciprocal_evidence_collaboration import (
+    ReciprocalEvidenceCollaboration,
+)
 from model.semantic_change_encoder import build_semantic_change_encoder
 from model.stance_motif_codebook import StanceMotifCodebookBranch
 
@@ -1570,9 +1573,12 @@ class SemanticTreeTransformerBranch(nn.Module):
         self.last_topic_distribution = None
         self.last_topic_similarity = None
         self.last_attention = None
+        self.last_attention_probability = None
         self.last_change_uncertainty = None
         self.last_uncertainty_bias = None
+        self.last_proposal_attention_bias = None
         self.last_query = None
+        self.last_context = None
         self.last_key = None
         self.last_value = None
         self.last_shared_attention = None
@@ -1896,6 +1902,7 @@ class SemanticTreeTransformerBranch(nn.Module):
         key,
         valid_mask,
         change_uncertainty,
+        proposal_attention_bias=None,
     ):
         score = torch.matmul(
             query,
@@ -1918,10 +1925,20 @@ class SemanticTreeTransformerBranch(nn.Module):
             )
             uncertainty_bias = uncertainty_bias.expand_as(score)
             score = score + uncertainty_bias
+        if proposal_attention_bias is not None:
+            if proposal_attention_bias.shape != score.shape:
+                raise ValueError(
+                    "proposal_attention_bias must have shape {}, got {}"
+                    .format(tuple(score.shape), tuple(proposal_attention_bias.shape))
+                )
+            score = score + proposal_attention_bias.to(
+                device=score.device,
+                dtype=score.dtype,
+            )
         score = score.masked_fill(~valid_mask.unsqueeze(1), -1e9)
-        attention = F.softmax(score, dim=-1)
-        attention = self.attention_dropout(attention)
-        return attention, uncertainty_bias
+        attention_probability = F.softmax(score, dim=-1)
+        attention = self.attention_dropout(attention_probability)
+        return attention, uncertainty_bias, attention_probability
 
     def forward(
         self,
@@ -1934,6 +1951,8 @@ class SemanticTreeTransformerBranch(nn.Module):
         deny_node_weight=None,
         change_node_uncertainty=None,
         target=None,
+        external_queries=None,
+        proposal_attention_bias=None,
     ):
         support_nodes = self._inject_missing_view(
             support_nodes,
@@ -1970,6 +1989,11 @@ class SemanticTreeTransformerBranch(nn.Module):
                 batch,
             )
             valid_mask = valid_mask & uncertainty_mask
+        if external_queries is not None and self.use_shared_exclusive_query:
+            raise ValueError(
+                "external Semantic-tree queries are not supported by "
+                "shared/exclusive Gaussian query modes"
+            )
         if self.use_shared_exclusive_query:
             if self.use_gaussian_shared_exclusive_query:
                 (
@@ -2005,8 +2029,14 @@ class SemanticTreeTransformerBranch(nn.Module):
             shared_context = None
             exclusive_context = None
             uncertainty_bias = None
+            shared_attention_probability = None
+            exclusive_attention_probability = None
             for layer in self.propagation_layers:
-                shared_attention, uncertainty_bias = self._cross_attention(
+                (
+                    shared_attention,
+                    uncertainty_bias,
+                    shared_attention_probability,
+                ) = self._cross_attention(
                     layer.query_norm(shared_query),
                     key_dense,
                     valid_mask,
@@ -2021,6 +2051,7 @@ class SemanticTreeTransformerBranch(nn.Module):
                 (
                     exclusive_attention,
                     _,
+                    exclusive_attention_probability,
                 ) = self._cross_attention(
                     layer.query_norm(exclusive_query),
                     key_dense,
@@ -2096,6 +2127,18 @@ class SemanticTreeTransformerBranch(nn.Module):
                 + query_fusion_weights[:, 1:].unsqueeze(-1)
                 * exclusive_attention
             )
+            attention_probability = (
+                query_fusion_weights[:, :1].unsqueeze(-1)
+                * shared_attention_probability
+                + query_fusion_weights[:, 1:].unsqueeze(-1)
+                * exclusive_attention_probability
+            )
+            context = (
+                query_fusion_weights[:, :1].unsqueeze(-1)
+                * shared_context
+                + query_fusion_weights[:, 1:].unsqueeze(-1)
+                * exclusive_context
+            )
             query = (
                 query_fusion_weights[:, :1].unsqueeze(-1)
                 * shared_query
@@ -2164,15 +2207,54 @@ class SemanticTreeTransformerBranch(nn.Module):
             else:
                 self.last_query_classification_loss = None
         else:
-            query = self._initial_query(original_dense)
+            if external_queries is None:
+                query = self._initial_query(original_dense)
+            else:
+                if (
+                    external_queries.dim() != 3
+                    or external_queries.size(0) != original_dense.size(0)
+                    or external_queries.size(2) != self.hidden_dim
+                ):
+                    raise ValueError(
+                        "external_queries must have shape [batch, slots, {}], "
+                        "got {}".format(
+                            self.hidden_dim,
+                            tuple(external_queries.shape),
+                        )
+                    )
+                query = external_queries.to(
+                    device=original_dense.device,
+                    dtype=original_dense.dtype,
+                )
+            if proposal_attention_bias is not None:
+                expected_bias_shape = (
+                    original_dense.size(0),
+                    query.size(1),
+                    original_dense.size(1),
+                )
+                if tuple(proposal_attention_bias.shape) != expected_bias_shape:
+                    raise ValueError(
+                        "proposal_attention_bias must have shape {}, got {}"
+                        .format(
+                            expected_bias_shape,
+                            tuple(proposal_attention_bias.shape),
+                        )
+                    )
             attention = None
+            attention_probability = None
             uncertainty_bias = None
+            context = None
             for layer in self.propagation_layers:
-                attention, uncertainty_bias = self._cross_attention(
+                (
+                    attention,
+                    uncertainty_bias,
+                    attention_probability,
+                ) = self._cross_attention(
                     layer.query_norm(query),
                     key_dense,
                     valid_mask,
                     change_uncertainty_dense,
+                    proposal_attention_bias=proposal_attention_bias,
                 )
                 context = torch.matmul(attention, value_dense)
                 query = layer(query, context)
@@ -2195,9 +2277,12 @@ class SemanticTreeTransformerBranch(nn.Module):
         self.last_topic_distribution = attention.transpose(1, 2)
         self.last_topic_similarity = None
         self.last_attention = attention
+        self.last_attention_probability = attention_probability
         self.last_change_uncertainty = change_uncertainty_dense
         self.last_uncertainty_bias = uncertainty_bias
+        self.last_proposal_attention_bias = proposal_attention_bias
         self.last_query = query
+        self.last_context = context
         self.last_key = key_dense
         self.last_value = value_dense
         encoded_nodes = encoded_dense[valid_mask]
@@ -3271,6 +3356,22 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self.classification_branch_names = fusion_mode_branches[
             self.classification_fusion_mode
         ]
+        self.use_reciprocal_evidence_collaboration = bool(
+            getattr(
+                args,
+                "use_reciprocal_evidence_collaboration",
+                False,
+            )
+        )
+        if self.use_reciprocal_evidence_collaboration and not {
+            "change",
+            "semantic_tree",
+        }.issubset(self.classification_branch_names):
+            raise ValueError(
+                "use_reciprocal_evidence_collaboration requires a "
+                "classification_fusion_mode containing both 'change' and "
+                "'semantic_tree'"
+            )
         self.vertical_path_active = (
             self.use_vertical_path_attention
             or "vertical" in self.classification_branch_names
@@ -3555,6 +3656,23 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             if self.semantic_tree_active
             else None
         )
+        if (
+            self.use_reciprocal_evidence_collaboration
+            and self.semantic_tree_transformer.use_shared_exclusive_query
+        ):
+            raise ValueError(
+                "REPV currently requires semantic_tree_query_mode to be "
+                "'learned', 'root', or 'root_learned'"
+            )
+        self.reciprocal_evidence_collaboration = (
+            ReciprocalEvidenceCollaboration(
+                hid_feats,
+                num_classes,
+                args=args,
+            )
+            if self.use_reciprocal_evidence_collaboration
+            else None
+        )
         self.stance_motif_codebook = (
             StanceMotifCodebookBranch(
                 hid_feats,
@@ -3673,6 +3791,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_semantic_tree_topics = None
         self._last_semantic_tree_topic_similarity = None
         self._last_semantic_tree_attention = None
+        self._last_semantic_tree_attention_probability = None
         self._last_semantic_tree_query = None
         self._last_semantic_tree_uncertainty_bias = None
         self._last_semantic_tree_shared_attention = None
@@ -3741,6 +3860,22 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_ot_attention = None
         self._last_ot_transport_anchors = None
         self._last_ot_transport_plans = None
+        self._last_repv_base_change_graph = None
+        self._last_repv_base_semantic_tree_graph = None
+        self._last_repv_graph = None
+        self._last_repv_aux_loss = None
+        self._last_repv_classification_loss = None
+        self._last_repv_feedback_loss = None
+        self._last_repv_overlap_loss = None
+        self._last_repv_diversity_loss = None
+        self._last_repv_feedback_scale = None
+        self._last_repv_prototypes = None
+        self._last_repv_external_queries = None
+        self._last_repv_proposal_attention = None
+        self._last_repv_tree_attention = None
+        self._last_repv_slot_weights = None
+        self._last_repv_counterfactual_necessity = None
+        self._last_repv_feedback_target = None
 
     def _build_view_backbone(
         self,
@@ -3783,6 +3918,8 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self.edge_router.set_epoch(epoch)
         if self.conflict_field_bottleneck is not None:
             self.conflict_field_bottleneck.set_epoch(epoch)
+        if self.reciprocal_evidence_collaboration is not None:
+            self.reciprocal_evidence_collaboration.set_epoch(epoch)
 
     def init_optimizer(self, args):
         return torch.optim.Adam(
@@ -4845,6 +4982,8 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         semantic_tree_nodes = None
         semantic_tree_depth = None
         semantic_tree_node_uncertainty = None
+        repv_proposal_outputs = None
+        repv_outputs = None
         if self.semantic_tree_transformer is not None:
             if self.semantic_tree_transformer.uncertainty_bias_active:
                 if (
@@ -4862,6 +5001,24 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 if path_depth is not None
                 else self._node_depths(data, data.edge_index)
             )
+            semantic_tree_extra_kwargs = {}
+            if self.reciprocal_evidence_collaboration is not None:
+                root_nodes = original_nodes[self._root_indices(data)]
+                repv_proposal_outputs = (
+                    self.reciprocal_evidence_collaboration.propose(
+                        change_nodes,
+                        root_nodes,
+                        data.batch,
+                    )
+                )
+                semantic_tree_extra_kwargs = {
+                    "external_queries": repv_proposal_outputs[
+                        "external_queries"
+                    ],
+                    "proposal_attention_bias": repv_proposal_outputs[
+                        "proposal_bias"
+                    ],
+                }
             (
                 semantic_tree_graph,
                 semantic_tree_nodes,
@@ -4875,7 +5032,24 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 deny_node_weight=deny_node_weight,
                 change_node_uncertainty=semantic_tree_node_uncertainty,
                 target=getattr(data, "y", None),
+                **semantic_tree_extra_kwargs,
             )
+
+        base_change_graph = change_graph
+        base_semantic_tree_graph = semantic_tree_graph
+        if self.reciprocal_evidence_collaboration is not None:
+            repv_outputs = self.reciprocal_evidence_collaboration.verify(
+                repv_proposal_outputs,
+                self.semantic_tree_transformer.last_context,
+                self.semantic_tree_transformer.last_attention_probability,
+                base_change_graph,
+                base_semantic_tree_graph,
+                target=getattr(data, "y", None),
+            )
+            change_graph = repv_outputs["refined_change_graph"]
+            semantic_tree_graph = repv_outputs[
+                "refined_tree_graph"
+            ]
 
         conflict_graph = None
         conflict_nodes = None
@@ -4982,8 +5156,8 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         change_bottleneck_loss = self._semantic_change_bottleneck_loss()
         semantic_tree_change_mi_loss = (
             self._semantic_tree_change_mutual_information_loss(
-                semantic_tree_graph,
-                change_graph,
+                base_semantic_tree_graph,
+                base_change_graph,
             )
         )
         (
@@ -5008,6 +5182,11 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             if ot_outputs is None
             else ot_outputs["aux_loss"]
         )
+        repv_aux_loss = (
+            relation_logits.new_zeros(())
+            if repv_outputs is None
+            else repv_outputs["aux_loss"]
+        )
         self._last_aux_loss = (
             edge_relation_loss
             + view_mi_loss
@@ -5021,6 +5200,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             + conflict_aux_loss
             + codebook_aux_loss
             + ot_aux_loss
+            + repv_aux_loss
         )
         self._last_edge_relation_loss = edge_relation_loss.detach()
         self._last_view_mi_loss = view_mi_loss.detach()
@@ -5048,6 +5228,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_conflict_aux_loss = conflict_aux_loss.detach()
         self._last_codebook_aux_loss = codebook_aux_loss.detach()
         self._last_ot_aux_loss = ot_aux_loss.detach()
+        self._last_repv_aux_loss = repv_aux_loss.detach()
         self._last_global_ds_masses = (
             None
             if global_ds_masses is None
@@ -5139,6 +5320,20 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             None
             if self.semantic_tree_transformer is None
             else self.semantic_tree_transformer.last_attention.detach()
+        )
+        self._last_semantic_tree_attention_probability = (
+            None
+            if (
+                self.semantic_tree_transformer is None
+                or (
+                    self.semantic_tree_transformer
+                    .last_attention_probability is None
+                )
+            )
+            else (
+                self.semantic_tree_transformer
+                .last_attention_probability.detach()
+            )
         )
         self._last_semantic_tree_query = (
             None
@@ -5433,6 +5628,74 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             self._last_ot_transport_plans = ot_outputs[
                 "transport_plans"
             ].detach()
+        if repv_outputs is None:
+            self._last_repv_base_change_graph = None
+            self._last_repv_base_semantic_tree_graph = None
+            self._last_repv_graph = None
+            self._last_repv_classification_loss = None
+            self._last_repv_feedback_loss = None
+            self._last_repv_overlap_loss = None
+            self._last_repv_diversity_loss = None
+            self._last_repv_feedback_scale = None
+            self._last_repv_prototypes = None
+            self._last_repv_external_queries = None
+            self._last_repv_proposal_attention = None
+            self._last_repv_tree_attention = None
+            self._last_repv_slot_weights = None
+            self._last_repv_counterfactual_necessity = None
+            self._last_repv_feedback_target = None
+        else:
+            self._last_repv_base_change_graph = (
+                base_change_graph.detach()
+            )
+            self._last_repv_base_semantic_tree_graph = (
+                base_semantic_tree_graph.detach()
+            )
+            self._last_repv_graph = repv_outputs[
+                "collaboration_graph"
+            ].detach()
+            self._last_repv_classification_loss = repv_outputs[
+                "classification_loss"
+            ].detach()
+            self._last_repv_feedback_loss = repv_outputs[
+                "feedback_loss"
+            ].detach()
+            self._last_repv_overlap_loss = repv_outputs[
+                "overlap_loss"
+            ].detach()
+            self._last_repv_diversity_loss = repv_outputs[
+                "diversity_loss"
+            ].detach()
+            self._last_repv_feedback_scale = repv_outputs[
+                "feedback_scale"
+            ].detach()
+            self._last_repv_prototypes = repv_outputs[
+                "prototypes"
+            ].detach()
+            self._last_repv_external_queries = repv_outputs[
+                "external_queries"
+            ].detach()
+            self._last_repv_proposal_attention = repv_outputs[
+                "proposal_attention"
+            ].detach()
+            self._last_repv_tree_attention = repv_outputs[
+                "tree_attention"
+            ].detach()
+            self._last_repv_slot_weights = repv_outputs[
+                "slot_weights"
+            ].detach()
+            self._last_repv_counterfactual_necessity = (
+                None
+                if repv_outputs["counterfactual_necessity"] is None
+                else repv_outputs[
+                    "counterfactual_necessity"
+                ].detach()
+            )
+            self._last_repv_feedback_target = (
+                None
+                if repv_outputs["feedback_target"] is None
+                else repv_outputs["feedback_target"].detach()
+            )
         self._last_node_uncertainty = (
             None if node_uncertainty is None else node_uncertainty.detach()
         )

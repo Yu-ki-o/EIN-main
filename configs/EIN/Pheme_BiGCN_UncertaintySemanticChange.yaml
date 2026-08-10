@@ -140,6 +140,23 @@ ot_structure_cost_weight: 0.25
 ot_max_events_per_side: 16
 ot_detach_transport_plan: false
 
+# reciprocal evidence proposal-verification collaboration
+# Requires classification_fusion_mode to contain both change and semantic_tree.
+# Query mode must be learned, root, or root_learned when this switch is true.
+use_reciprocal_evidence_collaboration: false
+repv_num_slots: 4
+repv_proposal_temperature: 1.0
+repv_proposal_bias_scale: 0.5
+repv_counterfactual_temperature: 1.0
+repv_warmup_epochs: 5
+repv_ramp_epochs: 5
+repv_residual_gate_init: -2.0
+repv_dropout: 0.3
+lambda_repv_classification_aux: 0.1
+lambda_repv_feedback_aux: 0.1
+lambda_repv_overlap_aux: 0.01
+lambda_repv_diversity_aux: 0.001
+
 # final branch fusion
 classification_fusion_mode: change_semantic_tree # alternatives: codebook | codebook_semantic_tree | ot | ot_semantic_tree
 classification_fusion_hidden_dim: 128
