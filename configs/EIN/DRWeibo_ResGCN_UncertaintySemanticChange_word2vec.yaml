@@ -92,7 +92,9 @@ vertical_path_attention_residual_gate: 1.0
 vertical_path_attention_dropout: 0.3
 
 # inject support/deny node semantics and depth into the propagation tree
-use_semantic_tree_transformer: True
+# The *_semantic_tree fusion modes activate this branch automatically.  Keep
+# the standalone flag off so classification_fusion_mode: ot is a pure OT run.
+use_semantic_tree_transformer: False
 semantic_tree_input_mode: support_deny_original
 semantic_tree_query_mode:  learned #gaussian_shared_exclusive #learned_shared_gaussian_exclusive 
 semantic_tree_num_queries: 1
@@ -127,8 +129,16 @@ semantic_tree_change_uncertainty_detach: True
 uncertainty_trend_hidden_dim: 128
 use_trend_graph: False
 
+# local support/deny conflict OT (used only by ot / ot_semantic_tree)
+ot_local_hops: 3
+ot_entropic_regularization: 0.1
+ot_sinkhorn_iterations: 20
+ot_structure_cost_weight: 0.25
+ot_max_events_per_side: 16
+ot_detach_transport_plan: false
+
 # final branch fusion
-classification_fusion_mode: change_semantic_tree # alternatives: codebook | codebook_semantic_tree
+classification_fusion_mode: change_semantic_tree # alternatives: codebook | codebook_semantic_tree | ot | ot_semantic_tree
 classification_fusion_hidden_dim: 256
 classification_class_weights: [1.0, 1.0] #原来是[1.0, 1.0]
 

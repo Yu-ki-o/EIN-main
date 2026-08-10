@@ -17,6 +17,7 @@ from torch_geometric.nn import (
 from torch_geometric.utils import softmax, to_dense_batch
 
 from model.collective_revision import CollectiveRevisionEncoder
+from model.local_stance_ot import LocalStanceOptimalTransportBranch
 from model.semantic_change_encoder import build_semantic_change_encoder
 from model.stance_motif_codebook import StanceMotifCodebookBranch
 
@@ -3110,6 +3111,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         fusion_mode_branches = {
             "change": ("change",),
             "codebook": ("codebook",),
+            "ot": ("ot",),
             "semantic_tree": ("semantic_tree",),
             "conflict": ("conflict",),
             "change_conflict": ("change", "conflict"),
@@ -3285,6 +3287,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             "collective_revision" in self.classification_branch_names
         )
         self.codebook_active = "codebook" in self.classification_branch_names
+        self.ot_active = "ot" in self.classification_branch_names
         self.use_global_ds_fusion = bool(
             getattr(args, "use_global_ds_fusion", False)
         )
@@ -3561,6 +3564,15 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             if self.codebook_active
             else None
         )
+        self.local_stance_ot = (
+            LocalStanceOptimalTransportBranch(
+                hid_feats,
+                self.max_hop,
+                args=args,
+            )
+            if self.ot_active
+            else None
+        )
         self.conflict_field_bottleneck = (
             ConflictFieldBottleneck(
                 hid_feats,
@@ -3713,6 +3725,22 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_codebook_attention = None
         self._last_codebook_tokens = None
         self._last_codebook_path_tokens = None
+        self._last_ot_graph = None
+        self._last_ot_nodes = None
+        self._last_ot_aux_loss = None
+        self._last_ot_transport_cost = None
+        self._last_ot_transport_entropy = None
+        self._last_ot_support_mass = None
+        self._last_ot_deny_mass = None
+        self._last_ot_selected_support_mass = None
+        self._last_ot_selected_deny_mass = None
+        self._last_ot_coverage = None
+        self._last_ot_balance = None
+        self._last_ot_conflict_strength = None
+        self._last_ot_active_anchor = None
+        self._last_ot_attention = None
+        self._last_ot_transport_anchors = None
+        self._last_ot_transport_plans = None
 
     def _build_view_backbone(
         self,
@@ -4656,13 +4684,31 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
 
         codebook_graph = None
         codebook_outputs = None
+        local_pattern_depth = None
         if self.stance_motif_codebook is not None:
-            codebook_depth = self._node_depths(data, data.edge_index)
+            local_pattern_depth = self._node_depths(data, data.edge_index)
             codebook_graph, codebook_outputs = self.stance_motif_codebook(
                 node_hidden,
                 data.edge_index,
                 getattr(data, "edge_stance", None),
-                codebook_depth,
+                local_pattern_depth,
+                data.batch,
+                self._root_indices(data),
+            )
+        ot_graph = None
+        ot_nodes = None
+        ot_outputs = None
+        if self.local_stance_ot is not None:
+            if local_pattern_depth is None:
+                local_pattern_depth = self._node_depths(
+                    data,
+                    data.edge_index,
+                )
+            ot_graph, ot_nodes, ot_outputs = self.local_stance_ot(
+                node_hidden,
+                data.edge_index,
+                getattr(data, "edge_stance", None),
+                local_pattern_depth,
                 data.batch,
                 self._root_indices(data),
             )
@@ -4893,6 +4939,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             "deny": deny_graph,
             "change": change_graph,
             "codebook": codebook_graph,
+            "ot": ot_graph,
             "trend": trend_graph,
             "collective_revision": collective_revision_graph,
             "vertical": vertical_graph,
@@ -4956,6 +5003,11 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             if codebook_outputs is None
             else codebook_outputs["aux_loss"]
         )
+        ot_aux_loss = (
+            relation_logits.new_zeros(())
+            if ot_outputs is None
+            else ot_outputs["aux_loss"]
+        )
         self._last_aux_loss = (
             edge_relation_loss
             + view_mi_loss
@@ -4968,6 +5020,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             + semantic_tree_query_classification_loss
             + conflict_aux_loss
             + codebook_aux_loss
+            + ot_aux_loss
         )
         self._last_edge_relation_loss = edge_relation_loss.detach()
         self._last_view_mi_loss = view_mi_loss.detach()
@@ -4994,6 +5047,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         )
         self._last_conflict_aux_loss = conflict_aux_loss.detach()
         self._last_codebook_aux_loss = codebook_aux_loss.detach()
+        self._last_ot_aux_loss = ot_aux_loss.detach()
         self._last_global_ds_masses = (
             None
             if global_ds_masses is None
@@ -5330,6 +5384,54 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             self._last_codebook_tokens = codebook_outputs["tokens"].detach()
             self._last_codebook_path_tokens = codebook_outputs[
                 "path_tokens"
+            ].detach()
+        if ot_outputs is None:
+            self._last_ot_graph = None
+            self._last_ot_nodes = None
+            self._last_ot_transport_cost = None
+            self._last_ot_transport_entropy = None
+            self._last_ot_support_mass = None
+            self._last_ot_deny_mass = None
+            self._last_ot_selected_support_mass = None
+            self._last_ot_selected_deny_mass = None
+            self._last_ot_coverage = None
+            self._last_ot_balance = None
+            self._last_ot_conflict_strength = None
+            self._last_ot_active_anchor = None
+            self._last_ot_attention = None
+            self._last_ot_transport_anchors = None
+            self._last_ot_transport_plans = None
+        else:
+            self._last_ot_graph = ot_graph.detach()
+            self._last_ot_nodes = ot_nodes.detach()
+            self._last_ot_transport_cost = ot_outputs[
+                "transport_cost"
+            ].detach()
+            self._last_ot_transport_entropy = ot_outputs[
+                "transport_entropy"
+            ].detach()
+            self._last_ot_support_mass = ot_outputs["support_mass"].detach()
+            self._last_ot_deny_mass = ot_outputs["deny_mass"].detach()
+            self._last_ot_selected_support_mass = ot_outputs[
+                "selected_support_mass"
+            ].detach()
+            self._last_ot_selected_deny_mass = ot_outputs[
+                "selected_deny_mass"
+            ].detach()
+            self._last_ot_coverage = ot_outputs["coverage"].detach()
+            self._last_ot_balance = ot_outputs["balance"].detach()
+            self._last_ot_conflict_strength = ot_outputs[
+                "conflict_strength"
+            ].detach()
+            self._last_ot_active_anchor = ot_outputs[
+                "active_anchor"
+            ].detach()
+            self._last_ot_attention = ot_outputs["attention"].detach()
+            self._last_ot_transport_anchors = ot_outputs[
+                "transport_anchors"
+            ].detach()
+            self._last_ot_transport_plans = ot_outputs[
+                "transport_plans"
             ].detach()
         self._last_node_uncertainty = (
             None if node_uncertainty is None else node_uncertainty.detach()

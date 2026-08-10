@@ -80,7 +80,15 @@ vertical_path_attention_dropout: 0.1
 uncertainty_trend_hidden_dim: 64
 use_trend_graph: False
 
+# local support/deny conflict OT (used only by ot / ot_semantic_tree)
+ot_local_hops: 3
+ot_entropic_regularization: 0.1
+ot_sinkhorn_iterations: 20
+ot_structure_cost_weight: 0.25
+ot_max_events_per_side: 16
+ot_detach_transport_plan: false
+
 # final branch fusion
-classification_fusion_mode: original_change_vertical # alternatives: codebook | codebook_semantic_tree
+classification_fusion_mode: original_change_vertical # alternatives: codebook | codebook_semantic_tree | ot | ot_semantic_tree
 classification_fusion_hidden_dim: 128
 classification_class_weights: [1.0, 1.5]
