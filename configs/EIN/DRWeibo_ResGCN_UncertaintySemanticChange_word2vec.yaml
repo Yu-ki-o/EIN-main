@@ -72,6 +72,18 @@ uncertainty_sampling_warmup_epochs: 5
 use_degree_importance: True
 degree_importance_strength: 1.0
 
+# Uncertainty-Calibrated Continuous Semantic Transport (UCST).
+# False preserves the original hard support/deny parity propagation.
+use_ucst: false
+ucst_reversal_temperature: 1.0
+ucst_uncertainty_strength: 1.0
+ucst_reliability_strength: 0.5
+ucst_detach_uncertainty: true
+ucst_delta_hidden_dim: 128
+ucst_delta_dropout: 0.3
+ucst_delta_warmup_epochs: 5
+lambda_ucst_delta_aux: 0.001
+
 # replaceable node-level semantic change encoder: mlp, tanh, or dpga
 semantic_change_encoder: tanh
 semantic_change_hidden_dim: 128

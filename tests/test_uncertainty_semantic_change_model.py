@@ -121,6 +121,50 @@ class EdgeRelationUncertaintyRouterTest(unittest.TestCase):
         self.assertAlmostEqual(float(equal_entropy), 1.0, places=6)
         self.assertLess(float(confident_entropy), 1e-4)
 
+    def test_ucst_moves_ambiguous_reversal_toward_half(self):
+        args = make_args()
+        args.use_ucst = True
+        args.ucst_reversal_temperature = 1.0
+        args.ucst_uncertainty_strength = 1.0
+        args.ucst_reliability_strength = 0.75
+        router = EdgeRelationUncertaintyRouter(4, args).eval()
+        logits = torch.tensor([[0.0, 2.0], [0.0, 2.0]])
+        uncertainty = torch.tensor([1.0, 0.0])
+        edge_features = torch.zeros(2, 16)
+
+        delta, reversal, calibrated, reliability = (
+            router.ucst_transport_parameters(
+                logits,
+                uncertainty,
+                edge_features,
+            )
+        )
+        expected_reversal = torch.sigmoid(torch.tensor(2.0))
+
+        self.assertTrue(torch.equal(delta, torch.zeros_like(delta)))
+        self.assertTrue(
+            torch.allclose(
+                reversal,
+                expected_reversal.expand_as(reversal),
+            )
+        )
+        self.assertAlmostEqual(float(calibrated[0]), 0.5, places=6)
+        self.assertAlmostEqual(
+            float(calibrated[1]),
+            float(expected_reversal),
+            places=6,
+        )
+        self.assertTrue(
+            torch.allclose(reliability, torch.tensor([0.25, 1.0]))
+        )
+
+        preserve, reverse = router.ucst_transport_weights(
+            calibrated,
+            reliability,
+            torch.ones(2),
+        )
+        self.assertTrue(torch.allclose(preserve + reverse, reliability))
+
     def test_eval_soft_sample_is_expected_keep_probability(self):
         router = EdgeRelationUncertaintyRouter(4, make_args()).eval()
         keep_probability = torch.tensor([0.1, 0.5, 0.9])
@@ -468,6 +512,89 @@ class SemanticParityGCNDirectionEncoderTest(unittest.TestCase):
 
 
 class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
+    def test_ucst_disabled_preserves_legacy_parameterization(self):
+        legacy_args = make_args()
+        explicit_args = make_args()
+        explicit_args.use_ucst = False
+
+        torch.manual_seed(13)
+        legacy_model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=legacy_args,
+            device=torch.device("cpu"),
+        ).eval()
+        torch.manual_seed(13)
+        explicit_model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=explicit_args,
+            device=torch.device("cpu"),
+        ).eval()
+
+        legacy_state = legacy_model.state_dict()
+        explicit_state = explicit_model.state_dict()
+        self.assertEqual(set(legacy_state), set(explicit_state))
+        for name in legacy_state:
+            self.assertTrue(
+                torch.equal(legacy_state[name], explicit_state[name]),
+                msg=name,
+            )
+        self.assertIsNone(legacy_model.edge_router.reversal_delta_head)
+
+    def test_ucst_enabled_runs_continuous_transport_and_backpropagates(self):
+        args = make_args()
+        args.use_ucst = True
+        args.use_uncertainty_sampling = False
+        args.ucst_reversal_temperature = 1.0
+        args.ucst_uncertainty_strength = 1.0
+        args.ucst_reliability_strength = 0.5
+        args.ucst_detach_uncertainty = True
+        args.ucst_delta_warmup_epochs = 0
+        args.lambda_ucst_delta_aux = 1e-3
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).train()
+        data = make_batch()
+
+        output, _, _, _ = model(data)
+        loss = F.nll_loss(output, data.y) + model.auxiliary_loss()
+        loss.backward()
+
+        num_edges = data.edge_index.size(1)
+        self.assertEqual(
+            tuple(model._last_ucst_reversal_strength.shape),
+            (num_edges,),
+        )
+        self.assertTrue(
+            ((model._last_ucst_calibrated_reversal >= 0.0)
+             & (model._last_ucst_calibrated_reversal <= 1.0)).all()
+        )
+        self.assertTrue(
+            ((model._last_ucst_reliability >= 0.0)
+             & (model._last_ucst_reliability <= 1.0)).all()
+        )
+        self.assertTrue(
+            torch.allclose(
+                model._last_support_weight + model._last_deny_weight,
+                model._last_ucst_reliability,
+                atol=1e-6,
+            )
+        )
+        self.assertIsNotNone(
+            model.edge_router.reversal_delta_head[-1].weight.grad
+        )
+        self.assertTrue(torch.isfinite(model.auxiliary_loss()))
+
     def test_forward_outputs_all_framework_branches(self):
         model = BiGCN_UncertaintySemanticChange(
             in_feats=5,

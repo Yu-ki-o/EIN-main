@@ -145,6 +145,32 @@ class EdgeRelationUncertaintyRouter(nn.Module):
         )
         self.eps = 1e-6
 
+        # UCST is opt-in so old configurations and checkpoints retain the
+        # exact hard-parity parameterization and forward path.
+        self.use_ucst = bool(getattr(args, "use_ucst", False))
+        self.ucst_reversal_temperature = max(
+            1e-6,
+            float(getattr(args, "ucst_reversal_temperature", 1.0)),
+        )
+        self.ucst_uncertainty_strength = max(
+            0.0,
+            float(getattr(args, "ucst_uncertainty_strength", 1.0)),
+        )
+        self.ucst_reliability_strength = min(
+            max(
+                float(getattr(args, "ucst_reliability_strength", 1.0)),
+                0.0,
+            ),
+            1.0,
+        )
+        self.ucst_detach_uncertainty = bool(
+            getattr(args, "ucst_detach_uncertainty", True)
+        )
+        self.ucst_delta_warmup_epochs = max(
+            0,
+            int(getattr(args, "ucst_delta_warmup_epochs", 0)),
+        )
+
         self.relation_encoder = nn.Sequential(
             #这里修改判别边支持冲突语义的输入特征维度
             nn.Linear(hidden_dim * 4, relation_hidden),
@@ -153,6 +179,27 @@ class EdgeRelationUncertaintyRouter(nn.Module):
             nn.ReLU(),
         )
         self.logit_head = nn.Linear(relation_hidden, 2)
+        if self.use_ucst:
+            reversal_hidden = max(
+                1,
+                int(getattr(args, "ucst_delta_hidden_dim", relation_hidden)),
+            )
+            reversal_dropout = min(
+                max(float(getattr(args, "ucst_delta_dropout", 0.0)), 0.0),
+                1.0,
+            )
+            self.reversal_delta_head = nn.Sequential(
+                nn.Linear(hidden_dim * 4, reversal_hidden),
+                nn.ReLU(),
+                nn.Dropout(reversal_dropout),
+                nn.Linear(reversal_hidden, 1),
+            )
+            # UCST starts from the relation-logit prior and learns only a
+            # residual correction to the edge reversal strength.
+            nn.init.zeros_(self.reversal_delta_head[-1].weight)
+            nn.init.zeros_(self.reversal_delta_head[-1].bias)
+        else:
+            self.reversal_delta_head = None
 
     def relation_probabilities(self, logits):
         return F.softmax(logits / self.relation_temperature, dim=-1)
@@ -294,24 +341,14 @@ class EdgeRelationUncertaintyRouter(nn.Module):
 
 
 ####这里根据边的特征构造边stance语义属于支持or反对的概率，以及不确定性，现在时ds方法建模，原始为softmax方法
-    def relation_outputs(
-        self,
-        node_hidden,
-        edge_index,
-    ):
+    def edge_features(self, node_hidden, edge_index):
         if edge_index.numel() == 0:
-            empty_logits = node_hidden.new_zeros((0, 2))
-            empty_scalar = node_hidden.new_zeros((0,))
-            return (
-                empty_logits,
-                empty_logits,
-                empty_scalar,
-            )
+            return node_hidden.new_zeros((0, self.hidden_dim * 4))
 
         src, dst = edge_index
         parent = node_hidden[src]
         child = node_hidden[dst]
-        edge_features = torch.cat(
+        return torch.cat(
             (
                 parent,
                 child,
@@ -320,6 +357,13 @@ class EdgeRelationUncertaintyRouter(nn.Module):
             ),
             dim=-1,
         )
+
+    def _relation_outputs_from_features(self, edge_features):
+        if edge_features.numel() == 0:
+            empty_logits = edge_features.new_zeros((0, 2))
+            empty_scalar = edge_features.new_zeros((0,))
+            return empty_logits, empty_logits, empty_scalar
+
         logits = self.logit_head(self.relation_encoder(edge_features))
         if self.use_dirichlet_relation_routing:
             _, probabilities = self.dirichlet_relation_probabilities(logits)
@@ -333,6 +377,115 @@ class EdgeRelationUncertaintyRouter(nn.Module):
             uncertainty = self.normalized_entropy(probabilities)
         return logits, probabilities, uncertainty
 
+    def relation_outputs(self, node_hidden, edge_index):
+        return self._relation_outputs_from_features(
+            self.edge_features(node_hidden, edge_index)
+        )
+
+    def ucst_transport_parameters(
+        self,
+        logits,
+        uncertainty,
+        edge_features,
+    ):
+        """Build continuous reversal, calibrated reversal, and reliability."""
+        if not self.use_ucst or self.reversal_delta_head is None:
+            raise RuntimeError(
+                "UCST transport parameters require use_ucst: true"
+            )
+        if logits.numel() == 0:
+            empty = uncertainty.new_zeros((0,))
+            return empty, empty, empty, empty
+
+        reversal_delta = self.reversal_delta_head(edge_features).view(-1)
+        active_delta = reversal_delta
+        if self.current_epoch < self.ucst_delta_warmup_epochs:
+            active_delta = torch.zeros_like(reversal_delta)
+
+        stance_logit = (
+            logits[:, 1] - logits[:, 0]
+        ) / self.ucst_reversal_temperature
+        reversal_strength = torch.sigmoid(stance_logit + active_delta)
+
+        uncertainty_control = uncertainty
+        if self.ucst_detach_uncertainty:
+            uncertainty_control = uncertainty_control.detach()
+        calibration = (
+            self.ucst_uncertainty_strength * uncertainty_control
+        ).clamp(0.0, 1.0)
+        calibrated_reversal = (
+            (1.0 - calibration) * reversal_strength
+            + 0.5 * calibration
+        )
+        reliability = (
+            1.0
+            - self.ucst_reliability_strength * uncertainty_control
+        ).clamp(0.0, 1.0)
+        return (
+            reversal_delta,
+            reversal_strength,
+            calibrated_reversal,
+            reliability,
+        )
+
+    def ucst_outputs(self, node_hidden, edge_index):
+        if not self.use_ucst:
+            raise RuntimeError("ucst_outputs requires use_ucst: true")
+        edge_features = self.edge_features(node_hidden, edge_index)
+        logits, probabilities, uncertainty = (
+            self._relation_outputs_from_features(edge_features)
+        )
+        transport_parameters = self.ucst_transport_parameters(
+            logits,
+            uncertainty,
+            edge_features,
+        )
+        return (
+            logits,
+            probabilities,
+            uncertainty,
+            *transport_parameters,
+        )
+
+    def route_reliability(
+        self,
+        logits,
+        uncertainty,
+        child_degree_importance=None,
+    ):
+        if logits.numel() == 0:
+            return uncertainty.new_zeros((0,))
+
+        if self.use_ds_mass_routing:
+            if (
+                not self.use_uncertainty_sampling
+                or self.current_epoch < self.warmup_epochs
+            ):
+                return torch.ones_like(uncertainty)
+            return (1.0 - uncertainty).clamp(0.0, 1.0)
+
+        if (
+            not self.use_uncertainty_sampling
+            or self.current_epoch < self.warmup_epochs
+        ):
+            return torch.ones_like(uncertainty)
+        keep_probability = self.reliability_probability(
+            uncertainty,
+            child_degree_importance,
+        )
+        return self.soft_bernoulli_sample(keep_probability)
+
+    def ucst_transport_weights(
+        self,
+        calibrated_reversal,
+        reliability,
+        keep_sample,
+    ):
+        edge_mass = keep_sample * reliability
+        preserve_weight = edge_mass * (1.0 - calibrated_reversal)
+        reverse_weight = edge_mass * calibrated_reversal
+        return preserve_weight, reverse_weight
+
     def route_edges(
         self,
         logits,
@@ -344,32 +497,16 @@ class EdgeRelationUncertaintyRouter(nn.Module):
             empty_scalar = uncertainty.new_zeros((0,))
             return empty_scalar, empty_scalar, empty_scalar
 
+        keep_sample = self.route_reliability(
+            logits,
+            uncertainty,
+            child_degree_importance,
+        )
         if self.use_ds_mass_routing:
-            if (
-                not self.use_uncertainty_sampling
-                or self.current_epoch < self.warmup_epochs
-            ):
-                keep_sample = torch.ones_like(uncertainty)
-            else:
-                keep_sample = (1.0 - uncertainty).clamp(0.0, 1.0)
             support_weight = keep_sample * probabilities[:, 0]
             deny_weight = keep_sample * probabilities[:, 1]
             return keep_sample, support_weight, deny_weight
         #这里目前设置了use_uncertainty_sampling为false，所以不进行伯努利采样
-        if (
-            not self.use_uncertainty_sampling
-            or self.current_epoch < self.warmup_epochs
-        ):
-            keep_probability = uncertainty.new_ones(uncertainty.size())
-            keep_sample = torch.ones_like(keep_probability)
-        else:
-            keep_probability = self.reliability_probability(
-                uncertainty,
-                child_degree_importance,
-            )
-            keep_sample = self.soft_bernoulli_sample(keep_probability)
-
-
         # Two-stage routing:
         #   1. keep_sample decides whether the uncertain edge is retained;
         #   2. stance_route decides which semantic view receives it.
@@ -408,9 +545,10 @@ class SemanticParityDirectionEncoder(nn.Module):
     """
     Propagates support/deny semantics as composable path parity.
 
-    Support edges preserve the current semantic channel, while deny edges swap
-    the support and deny channels. Stacking this layer therefore keeps the
-    usual conflict algebra valid for arbitrary hop counts:
+    Preserve weights keep the current semantic channel, while reversal weights
+    exchange mass between the support and deny channels. Binary weights recover
+    hard parity; UCST supplies continuous weights. Stacking hard-parity layers
+    keeps the usual conflict algebra valid for arbitrary hop counts:
 
         support + deny = deny
         deny + deny = support
@@ -3131,7 +3269,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
       edge relation logits
       -> entropy uncertainty
       -> Binary Concrete reliability sampling
-      -> support and deny weighted propagation graphs
+      -> hard parity or optional uncertainty-calibrated continuous transport
       -> shared bidirectional GCN encoders
       -> node-aligned MLP semantic change encoding
       -> support/unknown/deny depth-trend GRU
@@ -3414,6 +3552,10 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             0.0,
             float(getattr(args, "lambda_ds_unknown_edge_aux", 0.0)),
         )
+        self.lambda_ucst_delta = max(
+            0.0,
+            float(getattr(args, "lambda_ucst_delta_aux", 0.0)),
+        )
         self.lambda_semantic_change_bottleneck = max(
             0.0,
             float(getattr(args, "lambda_semantic_change_bottleneck", 0.0)),
@@ -3529,6 +3671,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             hid_feats,
             args=args,
         )
+        self.use_ucst = self.edge_router.use_ucst
 
         self._build_view_backbone(
             in_feats,
@@ -3656,6 +3799,11 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             if self.semantic_tree_active
             else None
         )
+        if self.use_ucst and self.semantic_parity_encoder is None:
+            raise ValueError(
+                "use_ucst requires use_semantic_parity_gnn: true because "
+                "UCST transports information between the two parity channels"
+            )
         if (
             self.use_reciprocal_evidence_collaboration
             and self.semantic_tree_transformer.use_shared_exclusive_query
@@ -3758,6 +3906,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_aux_loss = None
         self._last_edge_relation_loss = None
         self._last_view_mi_loss = None
+        self._last_ucst_delta_loss = None
         self._last_semantic_change_bottleneck_loss = None
         self._last_semantic_tree_change_mi_loss = None
         self._last_semantic_tree_query_kl_loss = None
@@ -3777,6 +3926,10 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_keep_sample = None
         self._last_support_weight = None
         self._last_deny_weight = None
+        self._last_ucst_reversal_delta = None
+        self._last_ucst_reversal_strength = None
+        self._last_ucst_calibrated_reversal = None
+        self._last_ucst_reliability = None
         self._last_original_nodes = None
         self._last_original_graph = None
         self._last_support_graph = None
@@ -4253,6 +4406,14 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             valid_labels,
             weight=class_weight,
         )
+
+    def _ucst_delta_regularization(self, reversal_delta):
+        zero = self.classifier.weight.new_zeros(())
+        if not self.use_ucst or self.lambda_ucst_delta <= 0.0:
+            return zero
+        if reversal_delta is None or reversal_delta.numel() == 0:
+            return zero
+        return self.lambda_ucst_delta * reversal_delta.float().pow(2).mean()
 
     def _view_mutual_information_loss(
         self,
@@ -4851,14 +5012,32 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             )
         child_degree_importance = self._child_degree_importance(data)
 
-        (
-            relation_logits,
-            probabilities,
-            edge_uncertainty,
-        ) = self.edge_router.relation_outputs(
-            node_hidden,
-            data.edge_index,
-        )
+        ucst_reversal_delta = None
+        ucst_reversal_strength = None
+        ucst_calibrated_reversal = None
+        ucst_reliability = None
+        if self.use_ucst:
+            (
+                relation_logits,
+                probabilities,
+                edge_uncertainty,
+                ucst_reversal_delta,
+                ucst_reversal_strength,
+                ucst_calibrated_reversal,
+                ucst_reliability,
+            ) = self.edge_router.ucst_outputs(
+                node_hidden,
+                data.edge_index,
+            )
+        else:
+            (
+                relation_logits,
+                probabilities,
+                edge_uncertainty,
+            ) = self.edge_router.relation_outputs(
+                node_hidden,
+                data.edge_index,
+            )
 
 
 #### vertical path 模块，现在不开启
@@ -4892,16 +5071,30 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 node_uncertainty,
             )
             vertical_graph = self.global_pool(vertical_nodes, data.batch)
-        (
-            keep_sample,
-            support_weight,
-            deny_weight,
-        ) = self.edge_router.route_edges(
-            relation_logits,
-            probabilities,
-            edge_uncertainty,
-            child_degree_importance,
-        )
+        if self.use_ucst:
+            keep_sample = self.edge_router.route_reliability(
+                relation_logits,
+                edge_uncertainty,
+                child_degree_importance,
+            )
+            support_weight, deny_weight = (
+                self.edge_router.ucst_transport_weights(
+                    ucst_calibrated_reversal,
+                    ucst_reliability,
+                    keep_sample,
+                )
+            )
+        else:
+            (
+                keep_sample,
+                support_weight,
+                deny_weight,
+            ) = self.edge_router.route_edges(
+                relation_logits,
+                probabilities,
+                edge_uncertainty,
+                child_degree_importance,
+            )
 
         #这里现在不使用伯努利采样，默认设置node_keep为1
         node_keep = self._build_root_connected_keep(
@@ -5149,6 +5342,9 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             relation_logits,
             getattr(data, "edge_stance", None),
         )
+        ucst_delta_loss = self._ucst_delta_regularization(
+            ucst_reversal_delta
+        )
         view_mi_loss = self._view_mutual_information_loss(
             support_graph,
             deny_graph,
@@ -5189,6 +5385,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         )
         self._last_aux_loss = (
             edge_relation_loss
+            + ucst_delta_loss
             + view_mi_loss
             + change_bottleneck_loss
             + semantic_tree_change_mi_loss
@@ -5203,6 +5400,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             + repv_aux_loss
         )
         self._last_edge_relation_loss = edge_relation_loss.detach()
+        self._last_ucst_delta_loss = ucst_delta_loss.detach()
         self._last_view_mi_loss = view_mi_loss.detach()
         self._last_semantic_change_bottleneck_loss = (
             change_bottleneck_loss.detach()
@@ -5267,6 +5465,26 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_keep_sample = keep_sample.detach()
         self._last_support_weight = support_weight.detach()
         self._last_deny_weight = deny_weight.detach()
+        self._last_ucst_reversal_delta = (
+            None
+            if ucst_reversal_delta is None
+            else ucst_reversal_delta.detach()
+        )
+        self._last_ucst_reversal_strength = (
+            None
+            if ucst_reversal_strength is None
+            else ucst_reversal_strength.detach()
+        )
+        self._last_ucst_calibrated_reversal = (
+            None
+            if ucst_calibrated_reversal is None
+            else ucst_calibrated_reversal.detach()
+        )
+        self._last_ucst_reliability = (
+            None
+            if ucst_reliability is None
+            else ucst_reliability.detach()
+        )
         self._last_original_nodes = (
             None if original_nodes is None else original_nodes.detach()
         )
