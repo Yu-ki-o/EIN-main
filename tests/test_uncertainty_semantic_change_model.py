@@ -1150,6 +1150,158 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
         )
         self.assertTrue(torch.isfinite(model._last_semantic_tree_graph).all())
 
+    def test_disabled_semantic_tree_experts_preserve_legacy_parameters(self):
+        legacy_args = make_args()
+        legacy_args.semantic_tree_depth_dim = 4
+        explicit_args = make_args()
+        explicit_args.semantic_tree_depth_dim = 4
+        explicit_args.use_semantic_tree_query_experts = False
+
+        torch.manual_seed(29)
+        legacy_branch = SemanticTreeTransformerBranch(
+            8,
+            args=legacy_args,
+            num_classes=2,
+        )
+        torch.manual_seed(29)
+        explicit_branch = SemanticTreeTransformerBranch(
+            8,
+            args=explicit_args,
+            num_classes=2,
+        )
+
+        legacy_state = legacy_branch.state_dict()
+        explicit_state = explicit_branch.state_dict()
+        self.assertEqual(set(legacy_state), set(explicit_state))
+        for name in legacy_state:
+            self.assertTrue(
+                torch.equal(legacy_state[name], explicit_state[name]),
+                msg=name,
+            )
+        self.assertIsNone(legacy_branch.query_experts)
+
+    def test_low_rank_semantic_tree_experts_route_and_backpropagate(self):
+        args = make_args()
+        args.semantic_tree_depth_dim = 4
+        args.semantic_tree_query_mode = "learned"
+        args.use_semantic_tree_query_experts = True
+        args.semantic_tree_query_expert_num = 4
+        args.semantic_tree_query_expert_topk = 2
+        args.semantic_tree_query_expert_basis_rank = 3
+        args.semantic_tree_query_expert_adapter_rank = 3
+        args.semantic_tree_query_expert_warmup_epochs = 0
+        branch = SemanticTreeTransformerBranch(
+            8,
+            args=args,
+            num_classes=2,
+        ).train()
+        branch.set_epoch(10)
+        original = torch.randn(7, 8)
+        support = torch.randn(7, 8)
+        deny = torch.randn(7, 8)
+        depth = torch.tensor([0, 1, 2, 0, 1, 1, 2])
+        batch = torch.tensor([0, 0, 0, 1, 1, 1, 1])
+        target = torch.tensor([0, 1])
+
+        graph, nodes = branch(
+            original,
+            support,
+            deny,
+            depth,
+            batch,
+            target=target,
+        )
+        auxiliary = (
+            branch.last_expert_classification_loss
+            + branch.last_expert_routing_loss
+            + branch.last_expert_diversity_loss
+            + branch.last_expert_counterfactual_loss
+        )
+        (graph.pow(2).mean() + auxiliary).backward()
+
+        self.assertEqual(tuple(graph.shape), (2, 8))
+        self.assertEqual(tuple(nodes.shape), (7, 8))
+        self.assertEqual(tuple(branch.last_expert_queries.shape), (2, 4, 8))
+        self.assertEqual(
+            tuple(branch.last_expert_router_probability.shape),
+            (2, 4),
+        )
+        self.assertTrue(
+            torch.allclose(
+                branch.last_expert_route_weight.sum(dim=-1),
+                torch.ones(2),
+                atol=1e-6,
+            )
+        )
+        self.assertTrue(
+            branch.last_expert_route_weight.gt(0.0).sum(dim=-1).eq(2).all()
+        )
+        self.assertTrue(
+            torch.allclose(
+                branch.last_expert_responsibility.sum(dim=-1),
+                torch.ones(2),
+                atol=1e-5,
+            )
+        )
+        self.assertIsNotNone(branch.query_experts.query_basis.grad)
+        self.assertIsNotNone(branch.query_experts.router.weight.grad)
+        self.assertTrue(torch.isfinite(auxiliary))
+
+    def test_semantic_tree_expert_losses_enter_model_auxiliary_loss(self):
+        args = make_args()
+        args.use_trend_graph = False
+        args.use_semantic_tree_transformer = True
+        args.classification_fusion_mode = "change_semantic_tree"
+        args.semantic_tree_query_mode = "learned"
+        args.semantic_tree_depth_dim = 4
+        args.use_semantic_tree_query_experts = True
+        args.semantic_tree_query_expert_num = 4
+        args.semantic_tree_query_expert_topk = 2
+        args.semantic_tree_query_expert_basis_rank = 3
+        args.semantic_tree_query_expert_adapter_rank = 3
+        args.semantic_tree_query_expert_warmup_epochs = 0
+        args.lambda_semantic_tree_query_expert_classification_aux = 0.01
+        args.lambda_semantic_tree_query_expert_routing_aux = 0.01
+        args.lambda_semantic_tree_query_expert_diversity_aux = 0.001
+        args.lambda_semantic_tree_query_expert_counterfactual_aux = 0.01
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).train()
+        model.set_epoch(10)
+        data = make_batch()
+
+        output, _, _, _ = model(data)
+        loss = model.classification_loss(output, data.y) + model.auxiliary_loss()
+        loss.backward()
+
+        self.assertEqual(tuple(output.shape), (2, 2))
+        self.assertEqual(
+            tuple(model._last_semantic_tree_expert_queries.shape),
+            (2, 4, 8),
+        )
+        self.assertEqual(
+            tuple(model._last_semantic_tree_expert_route_weight.shape),
+            (2, 4),
+        )
+        self.assertTrue(
+            torch.isfinite(
+                model._last_semantic_tree_query_expert_classification_loss
+            )
+        )
+        self.assertTrue(
+            torch.isfinite(
+                model._last_semantic_tree_query_expert_counterfactual_loss
+            )
+        )
+        self.assertIsNotNone(
+            model.semantic_tree_transformer.query_experts.query_basis.grad
+        )
+
     def test_semantic_tree_depth_is_part_of_dual_view_values(self):
         args = make_args()
         args.semantic_tree_transformer_heads = 2

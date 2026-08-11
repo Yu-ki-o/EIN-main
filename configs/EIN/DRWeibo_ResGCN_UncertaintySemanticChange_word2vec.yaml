@@ -110,6 +110,27 @@ use_semantic_tree_transformer: False
 semantic_tree_input_mode: support_deny_original
 semantic_tree_query_mode:  learned #gaussian_shared_exclusive #learned_shared_gaussian_exclusive 
 semantic_tree_num_queries: 1
+
+# Low-rank event-adaptive Semantic-tree diagnostic query experts.
+# When enabled, semantic_tree_query_mode must be learned/root/root_learned and
+# semantic_tree_num_queries must remain 1.
+use_semantic_tree_query_experts: false
+semantic_tree_query_expert_num: 4
+semantic_tree_query_expert_topk: 2
+semantic_tree_query_expert_basis_rank: 8
+semantic_tree_query_expert_adapter_rank: 8
+semantic_tree_query_expert_router_temperature: 1.0
+semantic_tree_query_expert_responsibility_temperature: 0.5
+semantic_tree_query_expert_competence_weight: 1.0
+semantic_tree_query_expert_warmup_epochs: 5
+semantic_tree_query_expert_sinkhorn_iterations: 3
+semantic_tree_query_expert_counterfactual_margin: 0.1
+semantic_tree_query_expert_detach_responsibility: true
+semantic_tree_query_expert_residual_gate_init: -4.0
+lambda_semantic_tree_query_expert_classification_aux: 0.01
+lambda_semantic_tree_query_expert_routing_aux: 0.01
+lambda_semantic_tree_query_expert_diversity_aux: 0.001
+lambda_semantic_tree_query_expert_counterfactual_aux: 0.01
 semantic_tree_gaussian_query_sample: False
 semantic_tree_gaussian_query_condition_shared_variance: true
 semantic_tree_gaussian_query_initial_logvar: -4.0

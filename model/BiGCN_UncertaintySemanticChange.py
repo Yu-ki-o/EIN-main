@@ -22,6 +22,9 @@ from model.reciprocal_evidence_collaboration import (
     ReciprocalEvidenceCollaboration,
 )
 from model.semantic_change_encoder import build_semantic_change_encoder
+from model.semantic_tree_query_experts import (
+    LowRankSemanticTreeQueryExperts,
+)
 from model.stance_motif_codebook import StanceMotifCodebookBranch
 
 
@@ -1690,6 +1693,31 @@ class SemanticTreeTransformerBranch(nn.Module):
             self.shared_query_logvar_head = None
             self.shared_query_classifier = None
             self.exclusive_query_classifier = None
+        self.use_query_experts = bool(
+            getattr(
+                args,
+                "use_semantic_tree_query_experts",
+                getattr(args, "use_low_rank_semantic_tree_experts", False),
+            )
+        )
+        if self.use_query_experts:
+            if self.use_shared_exclusive_query:
+                raise ValueError(
+                    "semantic-tree query experts are incompatible with "
+                    "shared/exclusive Gaussian query modes"
+                )
+            if self.num_queries != 1:
+                raise ValueError(
+                    "semantic-tree query experts require "
+                    "semantic_tree_num_queries: 1"
+                )
+            self.query_experts = LowRankSemanticTreeQueryExperts(
+                self.hidden_dim,
+                num_classes,
+                args=args,
+            )
+        else:
+            self.query_experts = None
         self.attention_dropout = nn.Dropout(dropout)
         self.propagation_layers = nn.ModuleList(
             [
@@ -1733,6 +1761,21 @@ class SemanticTreeTransformerBranch(nn.Module):
         self.last_query_exclusive_mi_loss = None
         self.last_query_diversity_loss = None
         self.last_query_classification_loss = None
+        self.last_expert_queries = None
+        self.last_expert_router_probability = None
+        self.last_expert_route_weight = None
+        self.last_expert_responsibility = None
+        self.last_expert_residual_gate = None
+        self.last_expert_attention = None
+        self.last_expert_graphs = None
+        self.last_expert_classification_loss = None
+        self.last_expert_routing_loss = None
+        self.last_expert_diversity_loss = None
+        self.last_expert_counterfactual_loss = None
+
+    def set_epoch(self, epoch):
+        if self.query_experts is not None:
+            self.query_experts.set_epoch(epoch)
 
     @property
     def uncertainty_bias_active(self):
@@ -2345,65 +2388,191 @@ class SemanticTreeTransformerBranch(nn.Module):
             else:
                 self.last_query_classification_loss = None
         else:
-            if external_queries is None:
-                query = self._initial_query(original_dense)
-            else:
-                if (
-                    external_queries.dim() != 3
-                    or external_queries.size(0) != original_dense.size(0)
-                    or external_queries.size(2) != self.hidden_dim
-                ):
+            if self.query_experts is not None:
+                if external_queries is not None:
                     raise ValueError(
-                        "external_queries must have shape [batch, slots, {}], "
-                        "got {}".format(
-                            self.hidden_dim,
-                            tuple(external_queries.shape),
-                        )
+                        "external Semantic-tree queries are incompatible "
+                        "with semantic-tree query experts"
                     )
-                query = external_queries.to(
-                    device=original_dense.device,
-                    dtype=original_dense.dtype,
-                )
-            if proposal_attention_bias is not None:
-                expected_bias_shape = (
-                    original_dense.size(0),
-                    query.size(1),
-                    original_dense.size(1),
-                )
-                if tuple(proposal_attention_bias.shape) != expected_bias_shape:
+                if proposal_attention_bias is not None:
                     raise ValueError(
-                        "proposal_attention_bias must have shape {}, got {}"
-                        .format(
-                            expected_bias_shape,
-                            tuple(proposal_attention_bias.shape),
-                        )
+                        "proposal attention bias is incompatible with "
+                        "semantic-tree query experts"
                     )
-            attention = None
-            attention_probability = None
-            uncertainty_bias = None
-            context = None
-            for layer in self.propagation_layers:
-                (
-                    attention,
-                    uncertainty_bias,
-                    attention_probability,
-                ) = self._cross_attention(
-                    layer.query_norm(query),
-                    key_dense,
+                general_query = self._initial_query(original_dense)
+                expert_prepared = self.query_experts.prepare_queries(
+                    general_query,
+                    original_dense,
                     valid_mask,
-                    change_uncertainty_dense,
-                    proposal_attention_bias=proposal_attention_bias,
                 )
-                context = torch.matmul(attention, value_dense)
-                query = layer(query, context)
+                query_tokens = torch.cat(
+                    (
+                        general_query,
+                        expert_prepared["expert_queries"],
+                    ),
+                    dim=1,
+                )
+                combined_attention = None
+                combined_attention_probability = None
+                combined_context = None
+                combined_uncertainty_bias = None
+                for layer in self.propagation_layers:
+                    (
+                        combined_attention,
+                        combined_uncertainty_bias,
+                        combined_attention_probability,
+                    ) = self._cross_attention(
+                        layer.query_norm(query_tokens),
+                        key_dense,
+                        valid_mask,
+                        change_uncertainty_dense,
+                    )
+                    combined_context = torch.matmul(
+                        combined_attention,
+                        value_dense,
+                    )
+                    query_tokens = layer(
+                        query_tokens,
+                        combined_context,
+                    )
 
-            if self.pool == "sum":
-                graph_hidden = query.sum(dim=1)
-            elif self.pool == "root":
-                graph_hidden = query[:, 0]
+                general_query = query_tokens[:, :1]
+                expert_queries = query_tokens[:, 1:]
+                general_context = combined_context[:, :1]
+                expert_contexts = combined_context[:, 1:]
+                general_attention = combined_attention[:, :1]
+                expert_attention = combined_attention[:, 1:]
+                general_attention_probability = (
+                    combined_attention_probability[:, :1]
+                )
+                expert_attention_probability = (
+                    combined_attention_probability[:, 1:]
+                )
+                general_graph = self.graph_output(
+                    general_query.squeeze(1)
+                )
+                expert_graphs = self.graph_output(expert_queries)
+                expert_outputs = self.query_experts.fuse(
+                    general_graph,
+                    expert_graphs,
+                    general_query,
+                    expert_queries,
+                    general_context,
+                    expert_contexts,
+                    general_attention,
+                    expert_attention,
+                    general_attention_probability,
+                    expert_attention_probability,
+                    valid_mask,
+                    expert_prepared,
+                    target=target,
+                )
+                graph_hidden = expert_outputs["graph_hidden"]
+                query = expert_outputs["query"]
+                context = expert_outputs["context"]
+                attention = expert_outputs["attention"]
+                attention_probability = expert_outputs[
+                    "attention_probability"
+                ]
+                uncertainty_bias = (
+                    None
+                    if combined_uncertainty_bias is None
+                    else combined_uncertainty_bias[:, :1]
+                )
+                self.last_expert_queries = (
+                    self.query_experts.last_queries
+                )
+                self.last_expert_router_probability = (
+                    self.query_experts.last_router_probability
+                )
+                self.last_expert_route_weight = (
+                    self.query_experts.last_route_weight
+                )
+                self.last_expert_responsibility = (
+                    self.query_experts.last_responsibility
+                )
+                self.last_expert_residual_gate = (
+                    self.query_experts.last_residual_gate
+                )
+                self.last_expert_attention = (
+                    self.query_experts.last_attention
+                )
+                self.last_expert_graphs = self.query_experts.last_graphs
+                self.last_expert_classification_loss = (
+                    self.query_experts.last_classification_loss
+                )
+                self.last_expert_routing_loss = (
+                    self.query_experts.last_routing_loss
+                )
+                self.last_expert_diversity_loss = (
+                    self.query_experts.last_diversity_loss
+                )
+                self.last_expert_counterfactual_loss = (
+                    self.query_experts.last_counterfactual_loss
+                )
             else:
-                graph_hidden = query.mean(dim=1)
-            graph_hidden = self.graph_output(graph_hidden)
+                if external_queries is None:
+                    query = self._initial_query(original_dense)
+                else:
+                    if (
+                        external_queries.dim() != 3
+                        or external_queries.size(0) != original_dense.size(0)
+                        or external_queries.size(2) != self.hidden_dim
+                    ):
+                        raise ValueError(
+                            "external_queries must have shape [batch, slots, "
+                            "{}], got {}".format(
+                                self.hidden_dim,
+                                tuple(external_queries.shape),
+                            )
+                        )
+                    query = external_queries.to(
+                        device=original_dense.device,
+                        dtype=original_dense.dtype,
+                    )
+                if proposal_attention_bias is not None:
+                    expected_bias_shape = (
+                        original_dense.size(0),
+                        query.size(1),
+                        original_dense.size(1),
+                    )
+                    if (
+                        tuple(proposal_attention_bias.shape)
+                        != expected_bias_shape
+                    ):
+                        raise ValueError(
+                            "proposal_attention_bias must have shape {}, got "
+                            "{}".format(
+                                expected_bias_shape,
+                                tuple(proposal_attention_bias.shape),
+                            )
+                        )
+                attention = None
+                attention_probability = None
+                uncertainty_bias = None
+                context = None
+                for layer in self.propagation_layers:
+                    (
+                        attention,
+                        uncertainty_bias,
+                        attention_probability,
+                    ) = self._cross_attention(
+                        layer.query_norm(query),
+                        key_dense,
+                        valid_mask,
+                        change_uncertainty_dense,
+                        proposal_attention_bias=proposal_attention_bias,
+                    )
+                    context = torch.matmul(attention, value_dense)
+                    query = layer(query, context)
+
+                if self.pool == "sum":
+                    graph_hidden = query.sum(dim=1)
+                elif self.pool == "root":
+                    graph_hidden = query[:, 0]
+                else:
+                    graph_hidden = query.mean(dim=1)
+                graph_hidden = self.graph_output(graph_hidden)
 
         node_relevance = attention.mean(dim=1).unsqueeze(-1)
         encoded_dense = self.node_output(value_dense * node_relevance)
@@ -3620,6 +3789,46 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 )
             ),
         )
+        self.lambda_semantic_tree_query_expert_classification = max(
+            0.0,
+            float(
+                getattr(
+                    args,
+                    "lambda_semantic_tree_query_expert_classification_aux",
+                    0.0,
+                )
+            ),
+        )
+        self.lambda_semantic_tree_query_expert_routing = max(
+            0.0,
+            float(
+                getattr(
+                    args,
+                    "lambda_semantic_tree_query_expert_routing_aux",
+                    0.0,
+                )
+            ),
+        )
+        self.lambda_semantic_tree_query_expert_diversity = max(
+            0.0,
+            float(
+                getattr(
+                    args,
+                    "lambda_semantic_tree_query_expert_diversity_aux",
+                    0.0,
+                )
+            ),
+        )
+        self.lambda_semantic_tree_query_expert_counterfactual = max(
+            0.0,
+            float(
+                getattr(
+                    args,
+                    "lambda_semantic_tree_query_expert_counterfactual_aux",
+                    0.0,
+                )
+            ),
+        )
         self.view_mi_eps = max(
             1e-12,
             float(getattr(args, "view_mi_eps", 1e-6)),
@@ -3806,11 +4015,14 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             )
         if (
             self.use_reciprocal_evidence_collaboration
-            and self.semantic_tree_transformer.use_shared_exclusive_query
+            and (
+                self.semantic_tree_transformer.use_shared_exclusive_query
+                or self.semantic_tree_transformer.use_query_experts
+            )
         ):
             raise ValueError(
-                "REPV currently requires semantic_tree_query_mode to be "
-                "'learned', 'root', or 'root_learned'"
+                "REPV currently requires a non-expert Semantic-tree query "
+                "mode: 'learned', 'root', or 'root_learned'"
             )
         self.reciprocal_evidence_collaboration = (
             ReciprocalEvidenceCollaboration(
@@ -3914,6 +4126,10 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_semantic_tree_query_exclusive_mi_loss = None
         self._last_semantic_tree_query_diversity_loss = None
         self._last_semantic_tree_query_classification_loss = None
+        self._last_semantic_tree_query_expert_classification_loss = None
+        self._last_semantic_tree_query_expert_routing_loss = None
+        self._last_semantic_tree_query_expert_diversity_loss = None
+        self._last_semantic_tree_query_expert_counterfactual_loss = None
         self._last_branch_logits = None
         self._last_global_ds_masses = None
         self._last_global_ds_branch_masses = None
@@ -3950,6 +4166,13 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_semantic_tree_shared_attention = None
         self._last_semantic_tree_exclusive_attention = None
         self._last_semantic_tree_query_fusion_weights = None
+        self._last_semantic_tree_expert_queries = None
+        self._last_semantic_tree_expert_router_probability = None
+        self._last_semantic_tree_expert_route_weight = None
+        self._last_semantic_tree_expert_responsibility = None
+        self._last_semantic_tree_expert_residual_gate = None
+        self._last_semantic_tree_expert_attention = None
+        self._last_semantic_tree_expert_graphs = None
         self._last_semantic_tree_shared_query_mean = None
         self._last_semantic_tree_shared_query_logvar = None
         self._last_semantic_tree_exclusive_query_mean = None
@@ -4069,6 +4292,8 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
 
     def set_epoch(self, epoch):
         self.edge_router.set_epoch(epoch)
+        if self.semantic_tree_transformer is not None:
+            self.semantic_tree_transformer.set_epoch(epoch)
         if self.conflict_field_bottleneck is not None:
             self.conflict_field_bottleneck.set_epoch(epoch)
         if self.reciprocal_evidence_collaboration is not None:
@@ -4582,6 +4807,40 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             exclusive_mi_loss,
             diversity_loss,
             classification_loss,
+        )
+
+    def _semantic_tree_query_expert_auxiliary_losses(self):
+        zero = self.classifier.weight.new_zeros(())
+        branch = self.semantic_tree_transformer
+        if branch is None or not branch.use_query_experts:
+            return zero, zero, zero, zero
+
+        raw_classification = branch.last_expert_classification_loss
+        raw_routing = branch.last_expert_routing_loss
+        raw_diversity = branch.last_expert_diversity_loss
+        raw_counterfactual = branch.last_expert_counterfactual_loss
+        return (
+            zero
+            if raw_classification is None
+            else (
+                self.lambda_semantic_tree_query_expert_classification
+                * raw_classification
+            ),
+            zero
+            if raw_routing is None
+            else self.lambda_semantic_tree_query_expert_routing * raw_routing,
+            zero
+            if raw_diversity is None
+            else (
+                self.lambda_semantic_tree_query_expert_diversity
+                * raw_diversity
+            ),
+            zero
+            if raw_counterfactual is None
+            else (
+                self.lambda_semantic_tree_query_expert_counterfactual
+                * raw_counterfactual
+            ),
         )
 
     def _node_depths(self, data, edge_index):
@@ -5363,6 +5622,12 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             semantic_tree_query_diversity_loss,
             semantic_tree_query_classification_loss,
         ) = self._semantic_tree_query_auxiliary_losses()
+        (
+            semantic_tree_query_expert_classification_loss,
+            semantic_tree_query_expert_routing_loss,
+            semantic_tree_query_expert_diversity_loss,
+            semantic_tree_query_expert_counterfactual_loss,
+        ) = self._semantic_tree_query_expert_auxiliary_losses()
         conflict_aux_loss = (
             relation_logits.new_zeros(())
             if conflict_outputs is None
@@ -5394,6 +5659,10 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             + semantic_tree_query_exclusive_mi_loss
             + semantic_tree_query_diversity_loss
             + semantic_tree_query_classification_loss
+            + semantic_tree_query_expert_classification_loss
+            + semantic_tree_query_expert_routing_loss
+            + semantic_tree_query_expert_diversity_loss
+            + semantic_tree_query_expert_counterfactual_loss
             + conflict_aux_loss
             + codebook_aux_loss
             + ot_aux_loss
@@ -5422,6 +5691,18 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         )
         self._last_semantic_tree_query_classification_loss = (
             semantic_tree_query_classification_loss.detach()
+        )
+        self._last_semantic_tree_query_expert_classification_loss = (
+            semantic_tree_query_expert_classification_loss.detach()
+        )
+        self._last_semantic_tree_query_expert_routing_loss = (
+            semantic_tree_query_expert_routing_loss.detach()
+        )
+        self._last_semantic_tree_query_expert_diversity_loss = (
+            semantic_tree_query_expert_diversity_loss.detach()
+        )
+        self._last_semantic_tree_query_expert_counterfactual_loss = (
+            semantic_tree_query_expert_counterfactual_loss.detach()
         )
         self._last_conflict_aux_loss = conflict_aux_loss.detach()
         self._last_codebook_aux_loss = codebook_aux_loss.detach()
@@ -5604,6 +5885,68 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 self.semantic_tree_transformer
                 .last_query_fusion_weights.detach()
             )
+        )
+        semantic_tree_branch = self.semantic_tree_transformer
+        self._last_semantic_tree_expert_queries = (
+            None
+            if (
+                semantic_tree_branch is None
+                or semantic_tree_branch.last_expert_queries is None
+            )
+            else semantic_tree_branch.last_expert_queries.detach()
+        )
+        self._last_semantic_tree_expert_router_probability = (
+            None
+            if (
+                semantic_tree_branch is None
+                or (
+                    semantic_tree_branch.last_expert_router_probability
+                    is None
+                )
+            )
+            else (
+                semantic_tree_branch.last_expert_router_probability.detach()
+            )
+        )
+        self._last_semantic_tree_expert_route_weight = (
+            None
+            if (
+                semantic_tree_branch is None
+                or semantic_tree_branch.last_expert_route_weight is None
+            )
+            else semantic_tree_branch.last_expert_route_weight.detach()
+        )
+        self._last_semantic_tree_expert_responsibility = (
+            None
+            if (
+                semantic_tree_branch is None
+                or semantic_tree_branch.last_expert_responsibility is None
+            )
+            else semantic_tree_branch.last_expert_responsibility.detach()
+        )
+        self._last_semantic_tree_expert_residual_gate = (
+            None
+            if (
+                semantic_tree_branch is None
+                or semantic_tree_branch.last_expert_residual_gate is None
+            )
+            else semantic_tree_branch.last_expert_residual_gate.detach()
+        )
+        self._last_semantic_tree_expert_attention = (
+            None
+            if (
+                semantic_tree_branch is None
+                or semantic_tree_branch.last_expert_attention is None
+            )
+            else semantic_tree_branch.last_expert_attention.detach()
+        )
+        self._last_semantic_tree_expert_graphs = (
+            None
+            if (
+                semantic_tree_branch is None
+                or semantic_tree_branch.last_expert_graphs is None
+            )
+            else semantic_tree_branch.last_expert_graphs.detach()
         )
         self._last_semantic_tree_shared_query_mean = (
             None
