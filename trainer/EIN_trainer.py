@@ -293,6 +293,52 @@ class EINTrainer(object):
                 importance.max().item()
             )
 
+        evidence_sufficiency = self._tensor_mean(
+            getattr(
+                self.model,
+                '_last_semantic_tree_evidence_sufficiency_loss',
+                None,
+            )
+        )
+        if evidence_sufficiency is not None:
+            diagnostics['semantic_tree_evidence_sufficiency_loss'] = (
+                evidence_sufficiency
+            )
+
+        evidence_rank = self._tensor_mean(
+            getattr(
+                self.model,
+                '_last_semantic_tree_evidence_rank_loss',
+                None,
+            )
+        )
+        if evidence_rank is not None:
+            diagnostics['semantic_tree_evidence_rank_loss'] = evidence_rank
+
+        conditional_redundancy = self._tensor_mean(
+            getattr(
+                self.model,
+                '_last_semantic_tree_conditional_redundancy_loss',
+                None,
+            )
+        )
+        if conditional_redundancy is not None:
+            diagnostics['semantic_tree_conditional_redundancy_loss'] = (
+                conditional_redundancy
+            )
+
+        evidence_residual_scale = self._tensor_mean(
+            getattr(
+                self.model,
+                '_last_semantic_tree_evidence_residual_scale',
+                None,
+            )
+        )
+        if evidence_residual_scale is not None:
+            diagnostics['semantic_tree_evidence_residual_scale'] = (
+                evidence_residual_scale
+            )
+
         return diagnostics
 
     def _accumulate_diagnostics(self, sums, counts):

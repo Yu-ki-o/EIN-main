@@ -22,6 +22,9 @@ from model.reciprocal_evidence_collaboration import (
     ReciprocalEvidenceCollaboration,
 )
 from model.semantic_change_encoder import build_semantic_change_encoder
+from model.semantic_tree_attention_complementary_fusion import (
+    SemanticTreeAttentionComplementaryFusion,
+)
 from model.semantic_tree_query_experts import (
     LowRankSemanticTreeQueryExperts,
 )
@@ -1747,6 +1750,7 @@ class SemanticTreeTransformerBranch(nn.Module):
         self.last_context = None
         self.last_key = None
         self.last_value = None
+        self.last_valid_mask = None
         self.last_shared_attention = None
         self.last_exclusive_attention = None
         self.last_query_fusion_weights = None
@@ -2592,6 +2596,7 @@ class SemanticTreeTransformerBranch(nn.Module):
         self.last_context = context
         self.last_key = key_dense
         self.last_value = value_dense
+        self.last_valid_mask = valid_mask
         encoded_nodes = encoded_dense[valid_mask]
         return graph_hidden, encoded_nodes
 
@@ -3699,6 +3704,24 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self.use_global_ds_fusion = bool(
             getattr(args, "use_global_ds_fusion", False)
         )
+        self.use_semantic_tree_attention_complementary_fusion = bool(
+            getattr(
+                args,
+                "use_semantic_tree_attention_complementary_fusion",
+                False,
+            )
+        )
+        if (
+            self.use_semantic_tree_attention_complementary_fusion
+            and not {"change", "semantic_tree"}.issubset(
+                self.classification_branch_names
+            )
+        ):
+            raise ValueError(
+                "Semantic-tree attention complementary fusion requires a "
+                "classification_fusion_mode containing both 'change' and "
+                "'semantic_tree'"
+            )
         self.lambda_edge_relation = max(
             0.0,
             float(getattr(args, "lambda_edge_relation_aux", 0.1)),
@@ -3825,6 +3848,36 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 getattr(
                     args,
                     "lambda_semantic_tree_query_expert_counterfactual_aux",
+                    0.0,
+                )
+            ),
+        )
+        self.lambda_semantic_tree_evidence_sufficiency = max(
+            0.0,
+            float(
+                getattr(
+                    args,
+                    "lambda_semantic_tree_evidence_sufficiency_aux",
+                    0.0,
+                )
+            ),
+        )
+        self.lambda_semantic_tree_evidence_rank = max(
+            0.0,
+            float(
+                getattr(
+                    args,
+                    "lambda_semantic_tree_evidence_rank_aux",
+                    0.0,
+                )
+            ),
+        )
+        self.lambda_semantic_tree_conditional_redundancy = max(
+            0.0,
+            float(
+                getattr(
+                    args,
+                    "lambda_semantic_tree_conditional_redundancy_aux",
                     0.0,
                 )
             ),
@@ -4114,6 +4167,26 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             if self.use_global_ds_fusion
             else None
         )
+        if self.use_semantic_tree_attention_complementary_fusion:
+            if self.classification_head_mode != "fusion":
+                raise ValueError(
+                    "Semantic-tree attention complementary fusion requires "
+                    "classification_head_mode: fusion"
+                )
+            if self.global_ds_fusion is not None:
+                raise ValueError(
+                    "Semantic-tree attention complementary fusion is "
+                    "incompatible with global DS fusion"
+                )
+            self.semantic_tree_attention_complementary_fusion = (
+                SemanticTreeAttentionComplementaryFusion(
+                    hid_feats,
+                    num_classes,
+                    args=args,
+                )
+            )
+        else:
+            self.semantic_tree_attention_complementary_fusion = None
 
         self._last_aux_loss = None
         self._last_edge_relation_loss = None
@@ -4130,6 +4203,15 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_semantic_tree_query_expert_routing_loss = None
         self._last_semantic_tree_query_expert_diversity_loss = None
         self._last_semantic_tree_query_expert_counterfactual_loss = None
+        self._last_semantic_tree_evidence_sufficiency_loss = None
+        self._last_semantic_tree_evidence_rank_loss = None
+        self._last_semantic_tree_conditional_redundancy_loss = None
+        self._last_semantic_tree_evidence_high_weight = None
+        self._last_semantic_tree_evidence_low_weight = None
+        self._last_semantic_tree_high_evidence = None
+        self._last_semantic_tree_low_evidence = None
+        self._last_semantic_tree_evidence_interaction = None
+        self._last_semantic_tree_evidence_residual_scale = None
         self._last_branch_logits = None
         self._last_global_ds_masses = None
         self._last_global_ds_branch_masses = None
@@ -4294,6 +4376,8 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self.edge_router.set_epoch(epoch)
         if self.semantic_tree_transformer is not None:
             self.semantic_tree_transformer.set_epoch(epoch)
+        if self.semantic_tree_attention_complementary_fusion is not None:
+            self.semantic_tree_attention_complementary_fusion.set_epoch(epoch)
         if self.conflict_field_bottleneck is not None:
             self.conflict_field_bottleneck.set_epoch(epoch)
         if self.reciprocal_evidence_collaboration is not None:
@@ -4840,6 +4924,35 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             else (
                 self.lambda_semantic_tree_query_expert_counterfactual
                 * raw_counterfactual
+            ),
+        )
+
+    def _semantic_tree_attention_complementary_auxiliary_losses(self):
+        zero = self.classifier.weight.new_zeros(())
+        module = self.semantic_tree_attention_complementary_fusion
+        if module is None:
+            return zero, zero, zero
+        ramp = module.auxiliary_ramp()
+        raw_sufficiency = module.last_sufficiency_loss
+        raw_rank = module.last_rank_loss
+        raw_redundancy = module.last_conditional_redundancy_loss
+        return (
+            zero
+            if raw_sufficiency is None
+            else (
+                ramp
+                * self.lambda_semantic_tree_evidence_sufficiency
+                * raw_sufficiency
+            ),
+            zero
+            if raw_rank is None
+            else ramp * self.lambda_semantic_tree_evidence_rank * raw_rank,
+            zero
+            if raw_redundancy is None
+            else (
+                ramp
+                * self.lambda_semantic_tree_conditional_redundancy
+                * raw_redundancy
             ),
         )
 
@@ -5591,6 +5704,34 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 fused = self.fusion(
                     torch.cat(classification_graphs, dim=-1)
                 )
+                if (
+                    self.semantic_tree_attention_complementary_fusion
+                    is not None
+                ):
+                    semantic_tree_branch = self.semantic_tree_transformer
+                    if (
+                        change_graph is None
+                        or semantic_tree_branch is None
+                        or semantic_tree_branch.last_value is None
+                        or (
+                            semantic_tree_branch.last_attention_probability
+                            is None
+                        )
+                        or semantic_tree_branch.last_valid_mask is None
+                    ):
+                        raise RuntimeError(
+                            "Semantic-tree attention complementary fusion "
+                            "requires change and Semantic-tree intermediate "
+                            "representations"
+                        )
+                    fused = self.semantic_tree_attention_complementary_fusion(
+                        fused,
+                        change_graph,
+                        semantic_tree_branch.last_value,
+                        semantic_tree_branch.last_attention_probability,
+                        semantic_tree_branch.last_valid_mask,
+                        target=getattr(data, "y", None),
+                    )
                 logits = self.classifier(fused)
             output_log_prob = F.log_softmax(logits, dim=-1)
             global_ds_masses = None
@@ -5628,6 +5769,11 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             semantic_tree_query_expert_diversity_loss,
             semantic_tree_query_expert_counterfactual_loss,
         ) = self._semantic_tree_query_expert_auxiliary_losses()
+        (
+            semantic_tree_evidence_sufficiency_loss,
+            semantic_tree_evidence_rank_loss,
+            semantic_tree_conditional_redundancy_loss,
+        ) = self._semantic_tree_attention_complementary_auxiliary_losses()
         conflict_aux_loss = (
             relation_logits.new_zeros(())
             if conflict_outputs is None
@@ -5663,6 +5809,9 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             + semantic_tree_query_expert_routing_loss
             + semantic_tree_query_expert_diversity_loss
             + semantic_tree_query_expert_counterfactual_loss
+            + semantic_tree_evidence_sufficiency_loss
+            + semantic_tree_evidence_rank_loss
+            + semantic_tree_conditional_redundancy_loss
             + conflict_aux_loss
             + codebook_aux_loss
             + ot_aux_loss
@@ -5704,6 +5853,47 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_semantic_tree_query_expert_counterfactual_loss = (
             semantic_tree_query_expert_counterfactual_loss.detach()
         )
+        complementary_fusion = (
+            self.semantic_tree_attention_complementary_fusion
+        )
+        if complementary_fusion is None:
+            self._last_semantic_tree_evidence_sufficiency_loss = None
+            self._last_semantic_tree_evidence_rank_loss = None
+            self._last_semantic_tree_conditional_redundancy_loss = None
+            self._last_semantic_tree_evidence_high_weight = None
+            self._last_semantic_tree_evidence_low_weight = None
+            self._last_semantic_tree_high_evidence = None
+            self._last_semantic_tree_low_evidence = None
+            self._last_semantic_tree_evidence_interaction = None
+            self._last_semantic_tree_evidence_residual_scale = None
+        else:
+            self._last_semantic_tree_evidence_sufficiency_loss = (
+                semantic_tree_evidence_sufficiency_loss.detach()
+            )
+            self._last_semantic_tree_evidence_rank_loss = (
+                semantic_tree_evidence_rank_loss.detach()
+            )
+            self._last_semantic_tree_conditional_redundancy_loss = (
+                semantic_tree_conditional_redundancy_loss.detach()
+            )
+            self._last_semantic_tree_evidence_high_weight = (
+                complementary_fusion.last_high_weight.detach()
+            )
+            self._last_semantic_tree_evidence_low_weight = (
+                complementary_fusion.last_low_weight.detach()
+            )
+            self._last_semantic_tree_high_evidence = (
+                complementary_fusion.last_high_evidence.detach()
+            )
+            self._last_semantic_tree_low_evidence = (
+                complementary_fusion.last_low_evidence.detach()
+            )
+            self._last_semantic_tree_evidence_interaction = (
+                complementary_fusion.last_interaction.detach()
+            )
+            self._last_semantic_tree_evidence_residual_scale = (
+                complementary_fusion.last_effective_residual_scale.detach()
+            )
         self._last_conflict_aux_loss = conflict_aux_loss.detach()
         self._last_codebook_aux_loss = codebook_aux_loss.detach()
         self._last_ot_aux_loss = ot_aux_loss.detach()

@@ -25,6 +25,9 @@ from model.KAGNN_UncertaintySemanticChange import (
     KAGNN_UncertaintySemanticChange,
 )
 from model.collective_revision import CollectiveRevisionEncoder
+from model.semantic_tree_attention_complementary_fusion import (
+    SemanticTreeAttentionComplementaryFusion,
+)
 
 
 def make_args():
@@ -105,6 +108,38 @@ def make_batch():
     )
     return Batch.from_data_list([first, second])
 
+
+class SemanticTreeAttentionComplementaryFusionTest(unittest.TestCase):
+    def test_conditional_redundancy_updates_tree_but_not_change(self):
+        args = make_args()
+        args.semantic_tree_conditional_redundancy_stop_change = True
+        module = SemanticTreeAttentionComplementaryFusion(
+            8,
+            2,
+            args=args,
+        ).train()
+        base_fused = torch.randn(4, 8)
+        change_graph = torch.randn(4, 8, requires_grad=True)
+        value_dense = torch.randn(4, 3, 8, requires_grad=True)
+        attention = torch.softmax(torch.randn(4, 1, 3), dim=-1)
+        valid_mask = torch.ones(4, 3, dtype=torch.bool)
+        target = torch.tensor([0, 0, 1, 1])
+
+        fused = module(
+            base_fused,
+            change_graph,
+            value_dense,
+            attention,
+            valid_mask,
+            target=target,
+        )
+        redundancy = module.last_conditional_redundancy_loss
+        redundancy.backward()
+
+        self.assertTrue(torch.equal(fused, base_fused))
+        self.assertGreater(float(redundancy), 0.0)
+        self.assertIsNotNone(value_dense.grad)
+        self.assertIsNone(change_graph.grad)
 
 class EdgeRelationUncertaintyRouterTest(unittest.TestCase):
     def test_equal_logits_have_maximum_entropy(self):
@@ -512,6 +547,159 @@ class SemanticParityGCNDirectionEncoderTest(unittest.TestCase):
 
 
 class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
+    def test_disabled_attention_complementary_fusion_preserves_parameters(self):
+        legacy_args = make_args()
+        legacy_args.use_trend_graph = False
+        legacy_args.classification_fusion_mode = "change_semantic_tree"
+        explicit_args = make_args()
+        explicit_args.use_trend_graph = False
+        explicit_args.classification_fusion_mode = "change_semantic_tree"
+        explicit_args.use_semantic_tree_attention_complementary_fusion = False
+
+        torch.manual_seed(37)
+        legacy_model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=legacy_args,
+            device=torch.device("cpu"),
+        ).eval()
+        torch.manual_seed(37)
+        explicit_model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=explicit_args,
+            device=torch.device("cpu"),
+        ).eval()
+
+        legacy_state = legacy_model.state_dict()
+        explicit_state = explicit_model.state_dict()
+        self.assertEqual(set(legacy_state), set(explicit_state))
+        for name in legacy_state:
+            self.assertTrue(
+                torch.equal(legacy_state[name], explicit_state[name]),
+                msg=name,
+            )
+        self.assertIsNone(
+            legacy_model.semantic_tree_attention_complementary_fusion
+        )
+
+    def test_attention_complementary_fusion_runs_and_backpropagates(self):
+        args = make_args()
+        args.use_trend_graph = False
+        args.classification_fusion_mode = "change_semantic_tree"
+        args.semantic_tree_query_mode = "learned"
+        args.semantic_tree_depth_dim = 4
+        args.use_semantic_tree_attention_complementary_fusion = True
+        args.semantic_tree_evidence_temperature = 0.5
+        args.semantic_tree_evidence_rank_margin = 0.2
+        args.semantic_tree_evidence_residual_init = 0.0
+        args.semantic_tree_evidence_warmup_epochs = 2
+        args.semantic_tree_conditional_redundancy_stop_change = True
+        args.lambda_semantic_tree_evidence_sufficiency_aux = 0.01
+        args.lambda_semantic_tree_evidence_rank_aux = 0.005
+        args.lambda_semantic_tree_conditional_redundancy_aux = 0.001
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).train()
+        model.set_epoch(1)
+        data = make_batch()
+
+        output, _, _, _ = model(data)
+        loss = model.classification_loss(output, data.y) + model.auxiliary_loss()
+        loss.backward()
+
+        module = model.semantic_tree_attention_complementary_fusion
+        self.assertEqual(tuple(output.shape), (2, 2))
+        self.assertEqual(
+            tuple(model._last_semantic_tree_high_evidence.shape),
+            (2, 8),
+        )
+        self.assertEqual(
+            tuple(model._last_semantic_tree_low_evidence.shape),
+            (2, 8),
+        )
+        self.assertTrue(
+            torch.allclose(
+                model._last_semantic_tree_evidence_high_weight.sum(dim=-1),
+                torch.ones(2),
+                atol=1e-6,
+            )
+        )
+        self.assertTrue(
+            torch.allclose(
+                model._last_semantic_tree_evidence_low_weight.sum(dim=-1),
+                torch.ones(2),
+                atol=1e-6,
+            )
+        )
+        self.assertTrue(
+            torch.isfinite(
+                model._last_semantic_tree_evidence_sufficiency_loss
+            )
+        )
+        self.assertTrue(
+            torch.isfinite(model._last_semantic_tree_evidence_rank_loss)
+        )
+        self.assertTrue(
+            torch.isfinite(
+                model._last_semantic_tree_conditional_redundancy_loss
+            )
+        )
+        self.assertIsNotNone(module.residual_scale.grad)
+        self.assertIsNotNone(module.evidence_classifier.weight.grad)
+
+    def test_attention_complementary_zero_residual_matches_old_logits(self):
+        base_args = make_args()
+        base_args.use_trend_graph = False
+        base_args.classification_fusion_mode = "change_semantic_tree"
+        enabled_args = make_args()
+        enabled_args.use_trend_graph = False
+        enabled_args.classification_fusion_mode = "change_semantic_tree"
+        enabled_args.use_semantic_tree_attention_complementary_fusion = True
+        enabled_args.semantic_tree_evidence_residual_init = 0.0
+        enabled_args.lambda_semantic_tree_evidence_sufficiency_aux = 0.0
+        enabled_args.lambda_semantic_tree_evidence_rank_aux = 0.0
+        enabled_args.lambda_semantic_tree_conditional_redundancy_aux = 0.0
+
+        torch.manual_seed(41)
+        base_model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=base_args,
+            device=torch.device("cpu"),
+        ).eval()
+        torch.manual_seed(41)
+        enabled_model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=enabled_args,
+            device=torch.device("cpu"),
+        ).eval()
+        enabled_state = enabled_model.state_dict()
+        enabled_state.update(base_model.state_dict())
+        enabled_model.load_state_dict(enabled_state)
+        data = make_batch()
+
+        base_output, _, _, _ = base_model(data)
+        enabled_output, _, _, _ = enabled_model(data)
+
+        self.assertTrue(
+            torch.allclose(base_output, enabled_output, atol=1e-7)
+        )
+
     def test_ucst_disabled_preserves_legacy_parameterization(self):
         legacy_args = make_args()
         explicit_args = make_args()

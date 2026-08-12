@@ -92,6 +92,21 @@ semantic_change_gaussian_latent_dim: 128
 semantic_change_gaussian_sample: False
 lambda_semantic_change_bottleneck:  0.00 #修0.001 #0.001
 lambda_semantic_tree_change_mi_aux: 0.01 #修0.01
+
+# Label-sufficient attention complementary fusion (LSACF).  This is opt-in;
+# when enabled, set lambda_semantic_tree_change_mi_aux to 0.0 to avoid also
+# applying the legacy unconditional branch decorrelation objective.
+use_semantic_tree_attention_complementary_fusion: false
+semantic_tree_evidence_temperature: 0.5
+semantic_tree_evidence_rank_margin: 0.2
+semantic_tree_evidence_residual_init: 0.0
+semantic_tree_evidence_warmup_epochs: 5
+semantic_tree_conditional_redundancy_stop_change: true
+semantic_tree_evidence_interaction_hidden_dim: 256
+semantic_tree_evidence_interaction_dropout: 0.3
+lambda_semantic_tree_evidence_sufficiency_aux: 0.01
+lambda_semantic_tree_evidence_rank_aux: 0.005
+lambda_semantic_tree_conditional_redundancy_aux: 0.001
 # True: node_keep-weighted change pooling; False: ordinary graph pooling
 use_node_keep_in_change_pool: False
 
