@@ -41,7 +41,8 @@ global_pool: mean
 base_model: ResGCN_UncertaintySemanticChange
 max_hop: 20
 lamda: 0.0
-#semantic_parity_aggregation: gcn
+# mean (default), gcn, or probabilistic_sgcn (soft-probability SGCN)
+semantic_parity_aggregation: gcn
 semantic_parity_direction: bottom_up #bidirectional #bottom_up
 
 # edge support/deny relation encoder

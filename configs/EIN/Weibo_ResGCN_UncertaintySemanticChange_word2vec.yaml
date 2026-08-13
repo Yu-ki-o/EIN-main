@@ -41,7 +41,9 @@ global_pool: sum
 base_model: ResGCN_UncertaintySemanticChange
 max_hop: 72
 lamda: 0.0
-#semantic_parity_aggregation: gcn
+# mean (default), gcn, or probabilistic_sgcn
+# probabilistic_sgcn uses soft support/deny probabilities in SGCN updates.
+# semantic_parity_aggregation: probabilistic_sgcn
 semantic_parity_direction: bottom_up
 
 # edge support/deny relation encoder

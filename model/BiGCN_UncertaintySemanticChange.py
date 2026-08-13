@@ -501,6 +501,7 @@ class EdgeRelationUncertaintyRouter(nn.Module):
         probabilities,
         uncertainty,
         child_degree_importance=None,
+        soft_stance_route=False,
     ):
         if logits.numel() == 0:
             empty_scalar = uncertainty.new_zeros((0,))
@@ -519,7 +520,11 @@ class EdgeRelationUncertaintyRouter(nn.Module):
         # Two-stage routing:
         #   1. keep_sample decides whether the uncertain edge is retained;
         #   2. stance_route decides which semantic view receives it.
-        route = self.stance_route(logits, probabilities)
+        route = (
+            probabilities
+            if soft_stance_route
+            else self.stance_route(logits, probabilities)
+        )
         support_weight = keep_sample * route[:, 0]
         deny_weight = keep_sample * route[:, 1]
         return keep_sample, support_weight, deny_weight
@@ -529,6 +534,7 @@ class EdgeRelationUncertaintyRouter(nn.Module):
         node_hidden,
         edge_index,
         child_degree_importance=None,
+        soft_stance_route=False,
     ):
         logits, probabilities, uncertainty = self.relation_outputs(
             node_hidden,
@@ -539,6 +545,7 @@ class EdgeRelationUncertaintyRouter(nn.Module):
             probabilities,
             uncertainty,
             child_degree_importance,
+            soft_stance_route=soft_stance_route,
         )
         return (
             logits,
@@ -773,6 +780,172 @@ class SemanticParityGCNDirectionEncoder(nn.Module):
         return parity_edge_index, parity_edge_weight
 
 
+class SemanticParityProbabilisticSGCNDirectionEncoder(nn.Module):
+    """
+    Probability-weighted SGCN propagation for support/deny semantics.
+
+    This is the soft-relation counterpart of the two-channel SGCN update. In
+    the first layer, support and deny probabilities route the input features
+    into their respective channels. Deeper layers preserve a channel across a
+    support edge and exchange channels across a deny edge:
+
+        support <- support-neighbor support + deny-neighbor deny + self
+        deny    <- support-neighbor deny    + deny-neighbor support + self
+
+    A probability-mass mean divides by ``max(1, sum(edge_probability))``.
+    Consequently, binary probabilities recover the original per-relation SGCN
+    mean, while genuinely probabilistic edges can contribute to both channels
+    without sub-unit relation mass being normalized back to full confidence.
+    """
+
+    def __init__(
+        self,
+        input_dim,
+        hidden_dim,
+        num_layers,
+        dropout=0.0,
+        residual=True,
+    ):
+        super().__init__()
+        self.input_dim = int(input_dim)
+        self.hidden_dim = int(hidden_dim)
+        self.num_layers = max(1, int(num_layers))
+        self.dropout = float(dropout)
+        self.residual = bool(residual)
+
+        self.input_projection = nn.Linear(self.input_dim, self.hidden_dim)
+        layer_input_dims = [self.hidden_dim * 2] + [
+            self.hidden_dim * 3
+            for _ in range(self.num_layers - 1)
+        ]
+        self.support_layers = nn.ModuleList(
+            [
+                nn.Linear(layer_input_dim, self.hidden_dim, bias=False)
+                for layer_input_dim in layer_input_dims
+            ]
+        )
+        self.deny_layers = nn.ModuleList(
+            [
+                nn.Linear(layer_input_dim, self.hidden_dim, bias=False)
+                for layer_input_dim in layer_input_dims
+            ]
+        )
+        self.support_norms = nn.ModuleList(
+            [nn.LayerNorm(self.hidden_dim) for _ in range(self.num_layers)]
+        )
+        self.deny_norms = nn.ModuleList(
+            [nn.LayerNorm(self.hidden_dim) for _ in range(self.num_layers)]
+        )
+
+    def _probability_mass_mean(
+        self,
+        node_features,
+        edge_index,
+        edge_probability,
+    ):
+        aggregated = node_features.new_zeros(node_features.size())
+        probability_mass = node_features.new_zeros(
+            node_features.size(0),
+            1,
+        )
+        if edge_index.numel() == 0:
+            return aggregated
+
+        src, dst = edge_index
+        probability = edge_probability.to(
+            device=node_features.device,
+            dtype=node_features.dtype,
+        ).view(-1, 1).clamp_min(0.0)
+        aggregated.index_add_(0, dst, probability * node_features[src])
+        probability_mass.index_add_(0, dst, probability)
+        return aggregated / probability_mass.clamp_min(1.0)
+
+    def _activate(self, update, norm):
+        update = F.relu(norm(update))
+        return F.dropout(
+            update,
+            p=self.dropout,
+            training=self.training,
+        )
+
+    def forward(self, node_features, edge_index, support_weight, deny_weight):
+        initial = self.input_projection(node_features.float())
+
+        support_neighbor = self._probability_mass_mean(
+            initial,
+            edge_index,
+            support_weight,
+        )
+        deny_neighbor = self._probability_mass_mean(
+            initial,
+            edge_index,
+            deny_weight,
+        )
+        support_update = self._activate(
+            self.support_layers[0](
+                torch.cat((support_neighbor, initial), dim=-1)
+            ),
+            self.support_norms[0],
+        )
+        deny_update = self._activate(
+            self.deny_layers[0](torch.cat((deny_neighbor, initial), dim=-1)),
+            self.deny_norms[0],
+        )
+        if self.residual:
+            support = initial + support_update
+            deny = deny_update
+        else:
+            support = support_update
+            deny = deny_update
+
+        for layer_index in range(1, self.num_layers):
+            support_preserve = self._probability_mass_mean(
+                support,
+                edge_index,
+                support_weight,
+            )
+            support_reverse = self._probability_mass_mean(
+                deny,
+                edge_index,
+                deny_weight,
+            )
+            deny_preserve = self._probability_mass_mean(
+                deny,
+                edge_index,
+                support_weight,
+            )
+            deny_reverse = self._probability_mass_mean(
+                support,
+                edge_index,
+                deny_weight,
+            )
+            support_update = self._activate(
+                self.support_layers[layer_index](
+                    torch.cat(
+                        (support_preserve, support_reverse, support),
+                        dim=-1,
+                    )
+                ),
+                self.support_norms[layer_index],
+            )
+            deny_update = self._activate(
+                self.deny_layers[layer_index](
+                    torch.cat(
+                        (deny_preserve, deny_reverse, deny),
+                        dim=-1,
+                    )
+                ),
+                self.deny_norms[layer_index],
+            )
+            if self.residual:
+                support = support + support_update
+                deny = deny + deny_update
+            else:
+                support = support_update
+                deny = deny_update
+        return support, deny
+
+
 class SemanticParityEncoder(nn.Module):
     """
     Support/deny view encoder with optional bidirectional tree propagation.
@@ -795,11 +968,17 @@ class SemanticParityEncoder(nn.Module):
             "average": "mean",
             "simple": "mean",
             "plain_gcn": "gcn",
+            "sgcn": "probabilistic_sgcn",
+            "probability_sgcn": "probabilistic_sgcn",
+            "probabilistic": "probabilistic_sgcn",
         }
         self.aggregation = aggregation_aliases.get(aggregation, aggregation)
         direction_encoder_types = {
             "mean": SemanticParityDirectionEncoder,
             "gcn": SemanticParityGCNDirectionEncoder,
+            "probabilistic_sgcn": (
+                SemanticParityProbabilisticSGCNDirectionEncoder
+            ),
         }
         if self.aggregation not in direction_encoder_types:
             raise ValueError(
@@ -4007,12 +4186,19 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             "average": "mean",
             "simple": "mean",
             "plain_gcn": "gcn",
+            "sgcn": "probabilistic_sgcn",
+            "probability_sgcn": "probabilistic_sgcn",
+            "probabilistic": "probabilistic_sgcn",
         }
         parity_aggregation = parity_aggregation_aliases.get(
             parity_aggregation,
             parity_aggregation,
         )
-        valid_parity_aggregations = {"mean", "gcn"}
+        valid_parity_aggregations = {
+            "mean",
+            "gcn",
+            "probabilistic_sgcn",
+        }
         if parity_aggregation not in valid_parity_aggregations:
             raise ValueError(
                 "semantic_parity_aggregation must be one of {}, got {}".format(
@@ -4021,6 +4207,14 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 )
             )
         self.semantic_parity_aggregation = parity_aggregation
+        if (
+            self.semantic_parity_aggregation == "probabilistic_sgcn"
+            and not self.use_semantic_parity_gnn
+        ):
+            raise ValueError(
+                "semantic_parity_aggregation: probabilistic_sgcn requires "
+                "use_semantic_parity_gnn: true"
+            )
         self.semantic_node_weight_mode = str(
             getattr(args, "semantic_node_weight_mode", "local")
         ).strip().lower()
@@ -5502,6 +5696,10 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 probabilities,
                 edge_uncertainty,
                 child_degree_importance,
+                soft_stance_route=(
+                    self.semantic_parity_aggregation
+                    == "probabilistic_sgcn"
+                ),
             )
 
         #这里现在不使用伯努利采样，默认设置node_keep为1

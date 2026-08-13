@@ -10,6 +10,7 @@ from model.BiGCN_UncertaintySemanticChange import (
     EdgeRelationUncertaintyRouter,
     SemanticParityDirectionEncoder,
     SemanticParityGCNDirectionEncoder,
+    SemanticParityProbabilisticSGCNDirectionEncoder,
     SemanticTreeTransformerBranch,
 )
 from model.ResGCN_UncertaintySemanticChange import (
@@ -546,7 +547,244 @@ class SemanticParityGCNDirectionEncoderTest(unittest.TestCase):
         self.assertTrue(torch.isfinite(deny).all())
 
 
+class SemanticParityProbabilisticSGCNDirectionEncoderTest(unittest.TestCase):
+    def _neighbor_only_encoder(self, num_layers):
+        encoder = SemanticParityProbabilisticSGCNDirectionEncoder(
+            input_dim=2,
+            hidden_dim=2,
+            num_layers=num_layers,
+            dropout=0.0,
+            residual=False,
+        ).eval()
+        with torch.no_grad():
+            encoder.input_projection.weight.copy_(torch.eye(2))
+            encoder.input_projection.bias.zero_()
+            for layer_index, (support_layer, deny_layer) in enumerate(
+                zip(encoder.support_layers, encoder.deny_layers)
+            ):
+                support_layer.weight.zero_()
+                deny_layer.weight.zero_()
+                support_layer.weight[:, :2].copy_(torch.eye(2))
+                deny_layer.weight[:, :2].copy_(torch.eye(2))
+                if layer_index > 0:
+                    support_layer.weight[:, 2:4].copy_(torch.eye(2))
+                    deny_layer.weight[:, 2:4].copy_(torch.eye(2))
+            for norm in (*encoder.support_norms, *encoder.deny_norms):
+                norm.weight.fill_(1.0)
+                norm.bias.zero_()
+        return encoder
+
+    def _root_channels_for_path(self, signs):
+        num_layers = len(signs)
+        encoder = self._neighbor_only_encoder(num_layers)
+        node_features = torch.zeros(num_layers + 1, 2)
+        node_features[-1] = torch.tensor([1.0, -1.0])
+        edge_index = torch.tensor(
+            [
+                list(range(num_layers, 0, -1)),
+                list(range(num_layers - 1, -1, -1)),
+            ],
+            dtype=torch.long,
+        )
+        support_weight = torch.tensor(
+            [1.0 if sign == "S" else 0.0 for sign in signs]
+        )
+        deny_weight = 1.0 - support_weight
+        support_nodes, deny_nodes = encoder(
+            node_features,
+            edge_index,
+            support_weight,
+            deny_weight,
+        )
+        return support_nodes[0].abs().sum(), deny_nodes[0].abs().sum()
+
+    def test_binary_probabilities_recover_sgcn_path_parity(self):
+        cases = [
+            ("S", "support"),
+            ("D", "deny"),
+            ("DD", "support"),
+            ("SSD", "deny"),
+            ("DSD", "support"),
+            ("SDSD", "support"),
+            ("SSSD", "deny"),
+        ]
+        for signs, expected in cases:
+            with self.subTest(signs=signs):
+                support_mass, deny_mass = self._root_channels_for_path(signs)
+                if expected == "support":
+                    self.assertGreater(float(support_mass), 0.0)
+                    self.assertEqual(float(deny_mass), 0.0)
+                else:
+                    self.assertEqual(float(support_mass), 0.0)
+                    self.assertGreater(float(deny_mass), 0.0)
+
+    def test_probability_mass_mean_softly_splits_an_edge(self):
+        encoder = self._neighbor_only_encoder(num_layers=1)
+        node_features = torch.tensor([[2.0, -2.0], [0.0, 0.0]])
+        edge_index = torch.tensor([[0], [1]])
+
+        support_neighbor = encoder._probability_mass_mean(
+            node_features,
+            edge_index,
+            torch.tensor([0.7]),
+        )
+        deny_neighbor = encoder._probability_mass_mean(
+            node_features,
+            edge_index,
+            torch.tensor([0.3]),
+        )
+
+        self.assertTrue(
+            torch.allclose(
+                support_neighbor[1],
+                torch.tensor([1.4, -1.4]),
+                atol=1e-6,
+            )
+        )
+        self.assertTrue(
+            torch.allclose(
+                deny_neighbor[1],
+                torch.tensor([0.6, -0.6]),
+                atol=1e-6,
+            )
+        )
+
+    def test_soft_probabilities_update_both_channels_and_are_differentiable(self):
+        torch.manual_seed(23)
+        encoder = SemanticParityProbabilisticSGCNDirectionEncoder(
+            input_dim=3,
+            hidden_dim=4,
+            num_layers=2,
+            dropout=0.0,
+            residual=True,
+        ).eval()
+        node_features = torch.randn(2, 3)
+        edge_index = torch.tensor([[0], [1]])
+        support_weight = torch.tensor([0.7], requires_grad=True)
+        deny_weight = torch.tensor([0.3], requires_grad=True)
+
+        support_nodes, deny_nodes = encoder(
+            node_features,
+            edge_index,
+            support_weight,
+            deny_weight,
+        )
+        (support_nodes[1].sum() + deny_nodes[1].sum()).backward()
+
+        self.assertGreater(float(support_nodes[1].abs().sum()), 0.0)
+        self.assertGreater(float(deny_nodes[1].abs().sum()), 0.0)
+        self.assertIsNotNone(support_weight.grad)
+        self.assertIsNotNone(deny_weight.grad)
+        self.assertTrue(torch.isfinite(support_weight.grad).all())
+        self.assertTrue(torch.isfinite(deny_weight.grad).all())
+
+    def test_model_selects_probability_sgcn_and_keeps_soft_edge_routes(self):
+        args = make_args()
+        args.semantic_parity_aggregation = "probabilistic_sgcn"
+        args.use_uncertainty_sampling = False
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).eval()
+        model.set_epoch(model.edge_router.warmup_epochs)
+
+        output, unknown, support, deny = model(make_batch())
+
+        self.assertEqual(
+            model.semantic_parity_encoder.aggregation,
+            "probabilistic_sgcn",
+        )
+        self.assertIsInstance(
+            model.semantic_parity_encoder.top_down,
+            SemanticParityProbabilisticSGCNDirectionEncoder,
+        )
+        self.assertTrue(
+            torch.allclose(
+                model._last_support_weight,
+                model._last_edge_probabilities[:, 0],
+                atol=1e-6,
+            )
+        )
+        self.assertTrue(
+            torch.allclose(
+                model._last_deny_weight,
+                model._last_edge_probabilities[:, 1],
+                atol=1e-6,
+            )
+        )
+        self.assertEqual(tuple(output.shape), (2, 2))
+        self.assertTrue(torch.isfinite(unknown).all())
+        self.assertTrue(torch.isfinite(support).all())
+        self.assertTrue(torch.isfinite(deny).all())
+
+    def test_probability_sgcn_requires_semantic_parity_encoder(self):
+        args = make_args()
+        args.semantic_parity_aggregation = "probabilistic_sgcn"
+        args.use_semantic_parity_gnn = False
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "requires use_semantic_parity_gnn",
+        ):
+            BiGCN_UncertaintySemanticChange(
+                in_feats=5,
+                hid_feats=8,
+                out_feats=8,
+                num_classes=2,
+                args=args,
+                device=torch.device("cpu"),
+            )
+
+
 class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
+    def test_omitted_parity_aggregation_is_exactly_explicit_mean(self):
+        default_args = make_args()
+        del default_args.semantic_parity_aggregation
+        explicit_args = make_args()
+
+        torch.manual_seed(101)
+        default_model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=default_args,
+            device=torch.device("cpu"),
+        ).eval()
+        torch.manual_seed(101)
+        explicit_model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=explicit_args,
+            device=torch.device("cpu"),
+        ).eval()
+        batch = make_batch()
+
+        default_output = default_model(batch)
+        explicit_output = explicit_model(batch)
+
+        self.assertEqual(default_model.semantic_parity_aggregation, "mean")
+        self.assertEqual(
+            tuple(default_model.state_dict().keys()),
+            tuple(explicit_model.state_dict().keys()),
+        )
+        for name, default_value in default_model.state_dict().items():
+            self.assertTrue(
+                torch.equal(default_value, explicit_model.state_dict()[name]),
+                msg=name,
+            )
+        for default_value, explicit_value in zip(
+            default_output,
+            explicit_output,
+        ):
+            self.assertTrue(torch.equal(default_value, explicit_value))
+
     def test_cest_disabled_preserves_legacy_parameterization(self):
         legacy_args = make_args()
         legacy_args.use_trend_graph = False
@@ -2597,6 +2835,31 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
 
 
 class ResGCNUncertaintySemanticChangeTest(unittest.TestCase):
+    def test_resgcn_supports_probabilistic_sgcn_semantic_views(self):
+        args = make_args()
+        args.semantic_parity_aggregation = "probabilistic_sgcn"
+        args.use_uncertainty_sampling = False
+        model = ResGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).eval()
+        model.set_epoch(model.edge_router.warmup_epochs)
+
+        output, unknown, support, deny = model(make_batch())
+
+        self.assertIsInstance(
+            model.semantic_parity_encoder.top_down,
+            SemanticParityProbabilisticSGCNDirectionEncoder,
+        )
+        self.assertEqual(tuple(output.shape), (2, 2))
+        self.assertTrue(torch.isfinite(unknown).all())
+        self.assertTrue(torch.isfinite(support).all())
+        self.assertTrue(torch.isfinite(deny).all())
+
     def test_resgcn_forward_uses_single_residual_direction(self):
         model = ResGCN_UncertaintySemanticChange(
             in_feats=5,
