@@ -94,6 +94,17 @@ uncertainty_trend_hidden_dim: 128
 use_trend_graph: False
 
 # final branch fusion
+# cross-scale evidence-state transition (CEST)
+use_cross_scale_evidence_transition: false
+cest_hidden_dim: 128
+cest_use_relation_condition: true
+cest_use_semantic_residual: true
+cest_use_depth_phase: false
+cest_use_uncertainty_weight: false
+cest_attention_scale: 1.0
+cest_residual_gate_init: -2.0
+cest_dropout: 0.3
+
 classification_fusion_mode: change_semantic_tree # alternatives: codebook | codebook_semantic_tree
 classification_fusion_hidden_dim: 256
 classification_class_weights: [1.0, 1.0]

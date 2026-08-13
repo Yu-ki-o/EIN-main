@@ -547,6 +547,123 @@ class SemanticParityGCNDirectionEncoderTest(unittest.TestCase):
 
 
 class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
+    def test_cest_disabled_preserves_legacy_parameterization(self):
+        legacy_args = make_args()
+        legacy_args.use_trend_graph = False
+        legacy_args.classification_fusion_mode = "change_semantic_tree"
+        explicit_args = make_args()
+        explicit_args.use_trend_graph = False
+        explicit_args.classification_fusion_mode = "change_semantic_tree"
+        explicit_args.use_cross_scale_evidence_transition = False
+
+        torch.manual_seed(83)
+        legacy_model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=legacy_args,
+            device=torch.device("cpu"),
+        ).eval()
+        torch.manual_seed(83)
+        explicit_model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=explicit_args,
+            device=torch.device("cpu"),
+        ).eval()
+
+        legacy_state = legacy_model.state_dict()
+        explicit_state = explicit_model.state_dict()
+        self.assertEqual(set(legacy_state), set(explicit_state))
+        for name in legacy_state:
+            self.assertTrue(
+                torch.equal(legacy_state[name], explicit_state[name]),
+                msg=name,
+            )
+        data = make_batch()
+        legacy_output, _, _, _ = legacy_model(data)
+        explicit_output, _, _, _ = explicit_model(data)
+        self.assertTrue(
+            torch.allclose(legacy_output, explicit_output, atol=1e-7)
+        )
+        self.assertIsNone(legacy_model.cross_scale_evidence_transition)
+
+    def test_cest_refines_change_and_tree_with_state_transitions(self):
+        args = make_args()
+        args.use_trend_graph = False
+        args.classification_fusion_mode = "change_semantic_tree"
+        args.use_cross_scale_evidence_transition = True
+        args.cest_hidden_dim = 8
+        args.cest_use_relation_condition = True
+        args.cest_use_semantic_residual = True
+        args.cest_use_depth_phase = False
+        args.cest_use_uncertainty_weight = False
+        args.cest_residual_gate_init = -2.0
+        args.cest_dropout = 0.0
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).train()
+        data = make_batch()
+
+        output, _, _, _ = model(data)
+        F.nll_loss(output, data.y).backward()
+
+        self.assertEqual(tuple(output.shape), (2, 2))
+        self.assertEqual(tuple(model._last_cest_node_states.shape), (5, 4))
+        self.assertTrue(
+            torch.allclose(
+                model._last_cest_node_states.sum(dim=-1),
+                torch.ones(5),
+                atol=1e-6,
+            )
+        )
+        self.assertEqual(
+            tuple(model._last_cest_transition_profile.shape),
+            (2, 1, 2, 4, 4),
+        )
+        self.assertTrue(
+            torch.allclose(
+                model._last_cest_transition_profile.flatten(1).sum(dim=-1),
+                torch.ones(2),
+                atol=1e-6,
+            )
+        )
+        self.assertEqual(tuple(model._last_cest_pattern_graph.shape), (2, 8))
+        self.assertTrue(torch.isfinite(model._last_cest_pattern_graph).all())
+        self.assertIsNotNone(
+            model.cross_scale_evidence_transition.change_score[1].weight.grad
+        )
+        self.assertIsNotNone(
+            model.cross_scale_evidence_transition.tree_score[1].weight.grad
+        )
+
+    def test_cest_requires_both_change_and_semantic_tree_branches(self):
+        args = make_args()
+        args.use_trend_graph = False
+        args.classification_fusion_mode = "change"
+        args.use_cross_scale_evidence_transition = True
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "containing both 'change' and 'semantic_tree'",
+        ):
+            BiGCN_UncertaintySemanticChange(
+                in_feats=5,
+                hid_feats=8,
+                out_feats=8,
+                num_classes=2,
+                args=args,
+                device=torch.device("cpu"),
+            )
+
     def test_disabled_attention_complementary_fusion_preserves_parameters(self):
         legacy_args = make_args()
         legacy_args.use_trend_graph = False

@@ -90,6 +90,18 @@ lambda_repv_feedback_aux: 0.1
 lambda_repv_overlap_aux: 0.01
 lambda_repv_diversity_aux: 0.001
 
+# cross-scale evidence-state transition (CEST)
+# Enable only with a fusion mode containing change and semantic_tree.
+use_cross_scale_evidence_transition: false
+cest_hidden_dim: 64
+cest_use_relation_condition: true
+cest_use_semantic_residual: true
+cest_use_depth_phase: false
+cest_use_uncertainty_weight: false
+cest_attention_scale: 1.0
+cest_residual_gate_init: -2.0
+cest_dropout: 0.1
+
 # final branch fusion
 classification_fusion_mode: original_change # alternatives: codebook | codebook_semantic_tree | ot | ot_semantic_tree
 classification_fusion_hidden_dim: 128

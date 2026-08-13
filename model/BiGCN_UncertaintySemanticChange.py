@@ -17,6 +17,9 @@ from torch_geometric.nn import (
 from torch_geometric.utils import softmax, to_dense_batch
 
 from model.collective_revision import CollectiveRevisionEncoder
+from model.cross_scale_evidence_transition import (
+    CrossScaleEvidenceStateTransition,
+)
 from model.local_stance_ot import LocalStanceOptimalTransportBranch
 from model.reciprocal_evidence_collaboration import (
     ReciprocalEvidenceCollaboration,
@@ -3684,6 +3687,22 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 "classification_fusion_mode containing both 'change' and "
                 "'semantic_tree'"
             )
+        self.use_cross_scale_evidence_transition = bool(
+            getattr(
+                args,
+                "use_cross_scale_evidence_transition",
+                False,
+            )
+        )
+        if self.use_cross_scale_evidence_transition and not {
+            "change",
+            "semantic_tree",
+        }.issubset(self.classification_branch_names):
+            raise ValueError(
+                "use_cross_scale_evidence_transition requires a "
+                "classification_fusion_mode containing both 'change' and "
+                "'semantic_tree'"
+            )
         self.vertical_path_active = (
             self.use_vertical_path_attention
             or "vertical" in self.classification_branch_names
@@ -4086,6 +4105,14 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             if self.use_reciprocal_evidence_collaboration
             else None
         )
+        self.cross_scale_evidence_transition = (
+            CrossScaleEvidenceStateTransition(
+                hid_feats,
+                args=args,
+            )
+            if self.use_cross_scale_evidence_transition
+            else None
+        )
         self.stance_motif_codebook = (
             StanceMotifCodebookBranch(
                 hid_feats,
@@ -4334,6 +4361,15 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_repv_slot_weights = None
         self._last_repv_counterfactual_necessity = None
         self._last_repv_feedback_target = None
+        self._last_cest_pattern_graph = None
+        self._last_cest_node_states = None
+        self._last_cest_node_profile = None
+        self._last_cest_transition_profile = None
+        self._last_cest_change_probability = None
+        self._last_cest_tree_probability = None
+        self._last_cest_semantic_residual = None
+        self._last_cest_change_gate = None
+        self._last_cest_tree_gate = None
 
     def _build_view_backbone(
         self,
@@ -5549,6 +5585,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         semantic_tree_node_uncertainty = None
         repv_proposal_outputs = None
         repv_outputs = None
+        cest_outputs = None
         if self.semantic_tree_transformer is not None:
             if self.semantic_tree_transformer.uncertainty_bias_active:
                 if (
@@ -5615,6 +5652,24 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             semantic_tree_graph = repv_outputs[
                 "refined_tree_graph"
             ]
+        if self.cross_scale_evidence_transition is not None:
+            semantic_tree_branch = self.semantic_tree_transformer
+            cest_outputs = self.cross_scale_evidence_transition(
+                change_nodes,
+                semantic_tree_nodes,
+                semantic_tree_branch.last_attention_probability,
+                semantic_tree_branch.last_valid_mask,
+                data.edge_index,
+                support_weight,
+                deny_weight,
+                data.batch,
+                change_graph,
+                semantic_tree_graph,
+                depth=semantic_tree_depth,
+                edge_uncertainty=edge_uncertainty,
+            )
+            change_graph = cest_outputs["refined_change_graph"]
+            semantic_tree_graph = cest_outputs["refined_tree_graph"]
 
         conflict_graph = None
         conflict_nodes = None
@@ -6447,6 +6502,44 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 if repv_outputs["feedback_target"] is None
                 else repv_outputs["feedback_target"].detach()
             )
+        if cest_outputs is None:
+            self._last_cest_pattern_graph = None
+            self._last_cest_node_states = None
+            self._last_cest_node_profile = None
+            self._last_cest_transition_profile = None
+            self._last_cest_change_probability = None
+            self._last_cest_tree_probability = None
+            self._last_cest_semantic_residual = None
+            self._last_cest_change_gate = None
+            self._last_cest_tree_gate = None
+        else:
+            self._last_cest_pattern_graph = cest_outputs[
+                "pattern_graph"
+            ].detach()
+            self._last_cest_node_states = cest_outputs[
+                "node_states"
+            ].detach()
+            self._last_cest_node_profile = cest_outputs[
+                "node_profile"
+            ].detach()
+            self._last_cest_transition_profile = cest_outputs[
+                "transition_profile"
+            ].detach()
+            self._last_cest_change_probability = cest_outputs[
+                "change_probability"
+            ].detach()
+            self._last_cest_tree_probability = cest_outputs[
+                "tree_probability"
+            ].detach()
+            self._last_cest_semantic_residual = cest_outputs[
+                "semantic_residual"
+            ].detach()
+            self._last_cest_change_gate = cest_outputs[
+                "change_gate"
+            ].detach()
+            self._last_cest_tree_gate = cest_outputs[
+                "tree_gate"
+            ].detach()
         self._last_node_uncertainty = (
             None if node_uncertainty is None else node_uncertainty.detach()
         )
