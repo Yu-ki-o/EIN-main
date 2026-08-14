@@ -339,6 +339,15 @@ class EINTrainer(object):
                 evidence_residual_scale
             )
 
+        for field, name in (
+            ('_last_relation_loss', 'stance_relation_loss'),
+            ('_last_attention_kl', 'stance_attention_kl'),
+            ('_last_kl_weight', 'stance_attention_kl_weight'),
+        ):
+            value = self._tensor_mean(getattr(self.model, field, None))
+            if value is not None:
+                diagnostics[name] = value
+
         return diagnostics
 
     def _accumulate_diagnostics(self, sums, counts):

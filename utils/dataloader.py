@@ -590,6 +590,10 @@ class ResGCNTreeDataset(InMemoryDataset):
             y = torch.LongTensor(y)
             edge_index = torch.LongTensor(edge_index)
             directed_edge_index = edge_index.clone()
+            directed_edge_stance = build_edge_stances(
+                post,
+                directed_edge_index,
+            )
             no_root_edge_index = torch.LongTensor(no_root_edge_index)
             centrality = build_optional_ragcl_centrality(
                 post,
@@ -621,8 +625,8 @@ class ResGCNTreeDataset(InMemoryDataset):
             user_state = user_state.unsqueeze(0) # to (1, n, 2)
             
 
-            one_data = Data(x=x, y=y, edge_index=edge_index, directed_edge_index=directed_edge_index, no_root_edge_index=no_root_edge_index, user_state=user_state, num_hop=num_hop, node_state=node_state, edge_stance=edge_stance, centrality=centrality) if 'label' in post['source'].keys() else \
-                Data(x=x, edge_index=edge_index, directed_edge_index=directed_edge_index, no_root_edge_index=no_root_edge_index, user_state=user_state, num_hop=num_hop, node_state=node_state, edge_stance=edge_stance, centrality=centrality)
+            one_data = Data(x=x, y=y, edge_index=edge_index, directed_edge_index=directed_edge_index, directed_edge_stance=directed_edge_stance, no_root_edge_index=no_root_edge_index, user_state=user_state, num_hop=num_hop, node_state=node_state, edge_stance=edge_stance, centrality=centrality) if 'label' in post['source'].keys() else \
+                Data(x=x, edge_index=edge_index, directed_edge_index=directed_edge_index, directed_edge_stance=directed_edge_stance, no_root_edge_index=no_root_edge_index, user_state=user_state, num_hop=num_hop, node_state=node_state, edge_stance=edge_stance, centrality=centrality)
             one_data = attach_optional_fields(one_data, post, self.args)
             data_list.append(one_data)
 
@@ -683,6 +687,10 @@ class TreeDataset(InMemoryDataset):
             y = torch.LongTensor(y)
             edge_index = torch.LongTensor(edge_index)
             directed_edge_index = edge_index.clone()
+            directed_edge_stance = build_edge_stances(
+                post,
+                directed_edge_index,
+            )
             no_root_edge_index = torch.LongTensor(no_root_edge_index)
             centrality = build_optional_ragcl_centrality(
                 post,
@@ -712,8 +720,8 @@ class TreeDataset(InMemoryDataset):
             user_state = torch.tensor(user_state, dtype=torch.float32)
             user_state = user_state.unsqueeze(0) # to (1, n, 2)
 
-            one_data = Data(x=x, y=y, edge_index=edge_index, directed_edge_index=directed_edge_index, no_root_edge_index=no_root_edge_index, user_state=user_state, num_hop=num_hop, node_state=node_state, edge_stance=edge_stance, centrality=centrality) if 'label' in post['source'].keys() else \
-                Data(x=x, edge_index=edge_index, directed_edge_index=directed_edge_index, no_root_edge_index=no_root_edge_index, user_state=user_state, num_hop=num_hop, node_state=node_state, edge_stance=edge_stance, centrality=centrality)
+            one_data = Data(x=x, y=y, edge_index=edge_index, directed_edge_index=directed_edge_index, directed_edge_stance=directed_edge_stance, no_root_edge_index=no_root_edge_index, user_state=user_state, num_hop=num_hop, node_state=node_state, edge_stance=edge_stance, centrality=centrality) if 'label' in post['source'].keys() else \
+                Data(x=x, edge_index=edge_index, directed_edge_index=directed_edge_index, directed_edge_stance=directed_edge_stance, no_root_edge_index=no_root_edge_index, user_state=user_state, num_hop=num_hop, node_state=node_state, edge_stance=edge_stance, centrality=centrality)
             one_data = attach_optional_fields(one_data, post, self.args)
             data_list.append(one_data)
 

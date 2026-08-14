@@ -23,6 +23,7 @@ from supervisor import (
     EIN_ResGCN_RevisionAwareSemanticChange_supervisor,
     EIN_BiGCN_BackboneOnly_supervisor,
     EIN_ResGCN_BackboneOnly_supervisor,
+    EIN_StanceGuidedGAT_supervisor,
     EIN_GCN_UncertaintySemanticChange_supervisor,
     EIN_GIN_UncertaintySemanticChange_supervisor,
     EIN_KAGNN_UncertaintySemanticChange_supervisor,
@@ -71,6 +72,14 @@ def _summary_model_parts(args):
         return 'BackboneOnly', 'BiGCN'
     if base_model == 'ResGCN_BackboneOnly':
         return 'BackboneOnly', 'ResGCN'
+    if base_model == 'StanceGuidedGAT':
+        backbone = str(
+            getattr(args, 'stance_gat_backbone', 'bigcn')
+        ).strip().lower()
+        return (
+            'StanceGuidedGAT',
+            'BiGCN' if backbone == 'bigcn' else 'ResGCN',
+        )
     if base_model.startswith('RAGCL_'):
         return 'Ragcl', base_model[len('RAGCL_'):]
     if 'StateAuxSameDiff' in base_model:

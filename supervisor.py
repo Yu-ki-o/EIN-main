@@ -21,6 +21,7 @@ from model.ResGCN_RevisionAwareSemanticChange import (
     ResGCN_RevisionAwareSemanticChange,
 )
 from model.DualBackboneOnly import BiGCN_BackboneOnly, ResGCN_BackboneOnly
+from model.EIN_StanceGuidedGAT import StanceGuidedGAT
 from model.GCN_UncertaintySemanticChange import GCN_UncertaintySemanticChange
 from model.GIN_UncertaintySemanticChange import GIN_UncertaintySemanticChange
 from model.KAGNN_UncertaintySemanticChange import KAGNN_UncertaintySemanticChange
@@ -181,6 +182,19 @@ def _graph_dataset_cache_part(args):
     base_model = str(getattr(args, 'base_model', '')).strip()
     if base_model == 'P2T3':
         return 'p2t3-tree'
+    if base_model == 'StanceGuidedGAT':
+        backbone = str(
+            getattr(args, 'stance_gat_backbone', 'bigcn')
+        ).strip().lower()
+        if backbone == 'bigcn':
+            return 'stance-guided-gat-tree-v1'
+        if backbone == 'resgcn':
+            return 'stance-guided-gat-resgcn-tree-v1'
+        raise ValueError(
+            'stance_gat_backbone must be "bigcn" or "resgcn", got {!r}.'.format(
+                backbone
+            )
+        )
     if base_model == 'LIRS_EBGCN':
         backbone = str(
             getattr(args, 'lirs_ebgcn_backbone', 'bigcn')
@@ -268,7 +282,10 @@ def get_dataset_cache_name(args):
             'ragcl-centrality-{}'.format(_requires_ragcl_centrality(args))
         )
 
-    if _graph_dataset_cache_part(args) == 'resgcn-tree':
+    if _graph_dataset_cache_part(args) in {
+        'resgcn-tree',
+        'stance-guided-gat-resgcn-tree-v1',
+    }:
         parts.append(
             'undir-{}'.format(_as_bool(getattr(args, 'undirected', False)))
         )
@@ -449,6 +466,30 @@ def build_strict_ood_paths(args):
 
 
 def load_graph_dataset(args, path, text_encoder):
+    if args.base_model == 'StanceGuidedGAT':
+        backbone = str(
+            getattr(args, 'stance_gat_backbone', 'bigcn')
+        ).strip().lower()
+        if backbone == 'resgcn':
+            return ResGCNTreeDataset(
+                path,
+                args.word_embedding,
+                text_encoder,
+                args.undirected,
+                args=args,
+            )
+        if backbone == 'bigcn':
+            return TreeDataset(
+                path,
+                args.word_embedding,
+                text_encoder,
+                args=args,
+            )
+        raise ValueError(
+            'stance_gat_backbone must be "bigcn" or "resgcn", got {!r}.'.format(
+                backbone
+            )
+        )
     if args.base_model == 'LIRS_EBGCN':
         backbone = str(
             getattr(args, 'lirs_ebgcn_backbone', 'bigcn')
@@ -1180,6 +1221,49 @@ def EIN_ResGCN_BackboneOnly_supervisor(args):
         ResGCN_BackboneOnly,
         'ResGCN_BackboneOnly',
     )
+
+
+def EIN_StanceGuidedGAT_supervisor(args):
+    init_seed(args.seed, need_deepfix=True)
+
+    device = resolve_device(args)
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    print(
+        'Seed {} | Building text encoder on {}'.format(args.seed, device),
+        flush=True,
+    )
+    text_encoder = build_text_encoder(args, device, label_source_path)
+
+    print('Seed {} | Building experiment datasets'.format(args.seed), flush=True)
+    train_dataset, val_dataset, test_dataset = build_experiment_datasets(
+        args,
+        text_encoder,
+    )
+
+    backbone = str(
+        getattr(args, 'stance_gat_backbone', 'bigcn')
+    ).strip().lower()
+    print(
+        'Seed {} | Initializing StanceGuidedGAT ({})'.format(
+            args.seed,
+            backbone,
+        ),
+        flush=True,
+    )
+    base_model = StanceGuidedGAT(
+        args.in_feats,
+        args.hidden_dim,
+        args.num_classes,
+        args,
+        device,
+    ).to(device)
+
+    optimizer = base_model.init_optimizer(args)
+    datasets = [train_dataset, val_dataset, test_dataset]
+    trainer = EINTrainer(datasets, base_model, optimizer, args, device)
+
+    print('Seed {} | Start training'.format(args.seed), flush=True)
+    return trainer.train_process()
 
 
 def EIN_BiGCN_RevisionAwareSemanticChange_supervisor(args):

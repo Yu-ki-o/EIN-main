@@ -1,0 +1,66 @@
+# Relation-teacher-guided GAT with a selectable BiGCN/ResGCN backbone.
+model_name: EIN
+dataset: Pheme
+num_classes: 2
+language: en
+word_embedding: word2vec
+result_name: null
+experiment_mode: id
+ood_source_datasets: []
+ood_val_domain: source
+debug: False
+
+# training
+seed: 0
+device: cuda
+lr: 0.0005
+weight_decay: 0.0001
+patience: 10
+n_epochs: 100
+selection_metric: val_loss
+split: '622'
+
+# text and graph encoder
+batch_size: 128
+hidden_dim: 64
+tokenize_mode: nltk
+k: 10000
+vector_size: 200
+in_feats: 200
+n_layers_conv: 3
+n_layers_feat: 1
+n_layers_fc: 2
+skip_connection: True
+res_branch: BNConvReLU
+dropout: 0.1
+edge_norm: True
+global_pool: sum
+undirected: False
+max_hop: 47
+lamda: 0.0
+
+base_model: StanceGuidedGAT
+# Change only this field to switch the propagation backbone: bigcn or resgcn.
+stance_gat_backbone: bigcn
+
+# GAT branch
+gat_num_layers: 2
+gat_heads: 4
+gat_attention_dropout: 0.1
+gat_negative_slope: 0.2
+stance_gat_fusion_hidden_dim: 128
+
+# LLM-stance edge-relation teacher
+stance_relation_hidden_dim: 64
+stance_relation_dropout: 0.0
+stance_relation_temperature: 1.0
+stance_relation_attention_bias: 1.0
+stance_self_support_prior: 1.0
+stance_relation_class_weights: [1.0, 1.0]
+lambda_edge_relation: 0.1
+
+# Distil the detached relation distribution into raw GAT attention.
+lambda_attention_kl: 0.05
+attention_kl_warmup_epochs: 5
+attention_kl_ramp_epochs: 5
+attention_kl_min_labeled_edges: 1
