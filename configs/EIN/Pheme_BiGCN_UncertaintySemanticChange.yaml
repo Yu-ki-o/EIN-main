@@ -52,6 +52,12 @@ stance_route_temperature: 0.5
 stance_route_hard: True
 lambda_edge_relation_aux: 0.1
 lambda_edge_relation_warmup: 0.5
+# Optional 2-hop ancestor/descendant structural-balance regularizer. It reuses
+# the edge relation predictor and derives targets from existing parent-child
+# stances at training time, so no dataset preprocessing is required.
+use_structural_balance_loss: False
+lambda_structural_balance_aux: 0.05
+structural_balance_warmup_epochs: 5
 lambda_view_mi_aux: 0.01
 
 # mutually exclusive edge relation routing: softmax, ds, or dirichlet

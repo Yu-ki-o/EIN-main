@@ -53,6 +53,11 @@ stance_route_temperature: 0.5
 stance_route_hard: True
 lambda_edge_relation_aux: 0.1 #0.1
 lambda_edge_relation_warmup: 0.5 #0.5
+# Optional 2-hop structural-balance regularizer. Targets are derived online
+# from existing parent-child stance labels; no data preprocessing is required.
+use_structural_balance_loss: False
+lambda_structural_balance_aux: 0.05
+structural_balance_warmup_epochs: 5
 lambda_view_mi_aux: 0.01 #原来是0.0,第二次是0.01
 
 # mutually exclusive edge relation routing: softmax, ds, or dirichlet

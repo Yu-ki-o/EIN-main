@@ -60,6 +60,9 @@ def make_args():
         use_degree_importance=True,
         degree_importance_strength=1.0,
         lambda_edge_relation_aux=0.1,
+        use_structural_balance_loss=False,
+        lambda_structural_balance_aux=0.05,
+        structural_balance_warmup_epochs=5,
         lambda_view_mi_aux=0.0,
         use_semantic_parity_gnn=True,
         semantic_parity_aggregation="mean",
@@ -741,6 +744,182 @@ class SemanticParityProbabilisticSGCNDirectionEncoderTest(unittest.TestCase):
 
 
 class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
+    def test_structural_balance_disabled_preserves_legacy_behavior(self):
+        legacy_args = make_args()
+        del legacy_args.use_structural_balance_loss
+        explicit_args = make_args()
+
+        torch.manual_seed(103)
+        legacy_model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=legacy_args,
+            device=torch.device("cpu"),
+        ).eval()
+        torch.manual_seed(103)
+        explicit_model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=explicit_args,
+            device=torch.device("cpu"),
+        ).eval()
+        data = make_batch()
+
+        legacy_output = legacy_model(data)
+        explicit_output = explicit_model(data)
+
+        self.assertFalse(legacy_model.use_structural_balance_loss)
+        self.assertEqual(
+            tuple(legacy_model.state_dict().keys()),
+            tuple(explicit_model.state_dict().keys()),
+        )
+        for name, legacy_value in legacy_model.state_dict().items():
+            self.assertTrue(
+                torch.equal(legacy_value, explicit_model.state_dict()[name]),
+                msg=name,
+            )
+        for legacy_value, explicit_value in zip(
+            legacy_output,
+            explicit_output,
+        ):
+            self.assertTrue(torch.equal(legacy_value, explicit_value))
+        self.assertTrue(
+            torch.equal(
+                legacy_model.auxiliary_loss(),
+                explicit_model.auxiliary_loss(),
+            )
+        )
+        self.assertEqual(
+            float(legacy_model._last_structural_balance_loss),
+            0.0,
+        )
+        self.assertIsNone(
+            legacy_model._last_structural_balance_pair_index
+        )
+
+    def test_structural_balance_reuses_relation_head_for_two_hop_paths(self):
+        args = make_args()
+        args.use_structural_balance_loss = True
+        args.lambda_structural_balance_aux = 0.2
+        args.structural_balance_warmup_epochs = 0
+        args.lambda_edge_relation_aux = 0.0
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).eval()
+        data = make_batch()
+
+        model(data)
+
+        expected_pair_index = torch.tensor([[0], [2]])
+        expected_target = torch.tensor([1])
+        self.assertTrue(
+            torch.equal(
+                model._last_structural_balance_pair_index,
+                expected_pair_index,
+            )
+        )
+        self.assertTrue(
+            torch.equal(
+                model._last_structural_balance_target,
+                expected_target,
+            )
+        )
+        node_hidden = model.node_projection(data.x.float())
+        node_hidden = model._add_root_context(node_hidden, data)
+        pair_logits, _, _ = model.edge_router.relation_outputs(
+            node_hidden,
+            expected_pair_index,
+        )
+        expected_loss = 0.2 * F.cross_entropy(
+            pair_logits,
+            expected_target,
+        )
+        self.assertTrue(
+            torch.allclose(
+                model._last_structural_balance_loss,
+                expected_loss,
+                atol=1e-7,
+            )
+        )
+        self.assertTrue(
+            torch.allclose(
+                model.auxiliary_loss().detach(),
+                model._last_structural_balance_loss,
+                atol=1e-7,
+            )
+        )
+
+        model.zero_grad()
+        model(data)
+        model.auxiliary_loss().backward()
+        relation_grad = model.edge_router.logit_head.weight.grad
+        self.assertIsNotNone(relation_grad)
+        self.assertGreater(float(relation_grad.abs().sum()), 0.0)
+
+    def test_structural_balance_handles_undirected_edges_and_warmup(self):
+        args = make_args()
+        args.use_structural_balance_loss = True
+        args.lambda_structural_balance_aux = 0.1
+        args.structural_balance_warmup_epochs = 2
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).eval()
+        data = Batch.from_data_list(
+            [
+                Data(
+                    x=torch.randn(3, 5),
+                    edge_index=torch.tensor(
+                        [[0, 1, 1, 2], [1, 2, 0, 1]]
+                    ),
+                    edge_stance=torch.tensor([0, 1, 0, 1]),
+                    y=torch.tensor([1]),
+                    num_hop=torch.tensor([2]),
+                    user_state=torch.zeros(1, 4, 3),
+                )
+            ]
+        )
+
+        model.set_epoch(1)
+        model(data)
+        self.assertEqual(
+            float(model._last_structural_balance_loss),
+            0.0,
+        )
+        self.assertIsNone(model._last_structural_balance_pair_index)
+
+        model.set_epoch(2)
+        model(data)
+        self.assertTrue(
+            torch.equal(
+                model._last_structural_balance_pair_index,
+                torch.tensor([[0], [2]]),
+            )
+        )
+        self.assertTrue(
+            torch.equal(
+                model._last_structural_balance_target,
+                torch.tensor([1]),
+            )
+        )
+        self.assertGreater(
+            float(model._last_structural_balance_loss),
+            0.0,
+        )
+
     def test_omitted_parity_aggregation_is_exactly_explicit_mean(self):
         default_args = make_args()
         del default_args.semantic_parity_aggregation

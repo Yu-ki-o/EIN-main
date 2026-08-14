@@ -3934,6 +3934,26 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 )
             ),
         )
+        # Optional two-hop path supervision reuses the existing relation
+        # predictor. Keeping it disabled preserves the original forward and
+        # optimization behavior, including the model parameterization.
+        self.use_structural_balance_loss = bool(
+            getattr(args, "use_structural_balance_loss", False)
+        )
+        self.lambda_structural_balance = max(
+            0.0,
+            float(
+                getattr(
+                    args,
+                    "lambda_structural_balance_aux",
+                    getattr(args, "lambda_structural_balance", 0.05),
+                )
+            ),
+        )
+        self.structural_balance_warmup_epochs = max(
+            0,
+            int(getattr(args, "structural_balance_warmup_epochs", 5)),
+        )
         self.lambda_view_mi = max(
             0.0,
             float(getattr(args, "lambda_view_mi_aux", 0.0)),
@@ -4411,6 +4431,9 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
 
         self._last_aux_loss = None
         self._last_edge_relation_loss = None
+        self._last_structural_balance_loss = None
+        self._last_structural_balance_pair_index = None
+        self._last_structural_balance_target = None
         self._last_view_mi_loss = None
         self._last_ucst_delta_loss = None
         self._last_semantic_change_bottleneck_loss = None
@@ -4871,11 +4894,11 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         )
         return support_nodes, deny_nodes
 
-    def _edge_relation_loss(self, logits, edge_stance):
+    def _relation_classification_loss(self, logits, relation_labels):
         zero = self.classifier.weight.new_zeros(())
-        if edge_stance is None or logits.numel() == 0:
+        if relation_labels is None or logits.numel() == 0:
             return zero
-        labels = edge_stance.view(-1).long()
+        labels = relation_labels.view(-1).long().to(logits.device)
         if labels.numel() != logits.size(0):
             return zero
         valid = (labels == 0) | (labels == 1)
@@ -4892,11 +4915,6 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             )
         else:
             class_weight = None
-        relation_weight = (
-            self.lambda_edge_relation_warmup
-            if self.edge_router.current_epoch < self.edge_router.warmup_epochs
-            else self.lambda_edge_relation
-        )
         if self.edge_router.use_ds_mass_routing:
             masses, _, _ = self.edge_router.relation_masses(logits[valid])
             pignistic = torch.stack(
@@ -4916,7 +4934,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                     edge_loss
                     + self.lambda_ds_unknown_edge * masses[:, 1].mean()
                 )
-            return relation_weight * edge_loss
+            return edge_loss
         if self.edge_router.use_dirichlet_relation_routing:
             concentration = self.edge_router.dirichlet_concentration(
                 logits[valid]
@@ -4939,12 +4957,119 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 ).sum() / sample_weight.sum().clamp_min(self.view_mi_eps)
             else:
                 edge_loss = edge_kl.mean()
-            return relation_weight * edge_loss
-        return relation_weight * F.cross_entropy(
+            return edge_loss
+        return F.cross_entropy(
             logits[valid],
             valid_labels,
             weight=class_weight,
         )
+
+    def _edge_relation_loss(self, logits, edge_stance):
+        relation_weight = (
+            self.lambda_edge_relation_warmup
+            if self.edge_router.current_epoch < self.edge_router.warmup_epochs
+            else self.lambda_edge_relation
+        )
+        return relation_weight * self._relation_classification_loss(
+            logits,
+            edge_stance,
+        )
+
+    def _two_hop_structural_balance_targets(self, data):
+        edge_index = getattr(data, "edge_index", None)
+        edge_stance = getattr(data, "edge_stance", None)
+        device = data.x.device
+        empty_pair_index = torch.empty(
+            (2, 0),
+            dtype=torch.long,
+            device=device,
+        )
+        empty_target = torch.empty(
+            (0,),
+            dtype=torch.long,
+            device=device,
+        )
+        if edge_index is None or edge_stance is None:
+            return empty_pair_index, empty_target
+        if edge_index.numel() == 0:
+            return empty_pair_index, empty_target
+
+        labels = edge_stance.view(-1).long().to(edge_index.device)
+        if labels.numel() != edge_index.size(1):
+            return empty_pair_index, empty_target
+
+        src, dst = edge_index
+        depth = self._node_depths(data, edge_index)
+        # The depth test retains only parent-to-child edges when edge_index is
+        # undirected, while leaving the normal directed PHEME tree unchanged.
+        downward = (
+            (depth[src] >= 0)
+            & (depth[dst] == depth[src] + 1)
+        )
+        downward_edge_ids = downward.nonzero(as_tuple=False).view(-1)
+        if downward_edge_ids.numel() == 0:
+            return empty_pair_index, empty_target
+
+        incoming_edge_id = torch.full(
+            (data.x.size(0),),
+            -1,
+            dtype=torch.long,
+            device=edge_index.device,
+        )
+        incoming_edge_id[dst[downward_edge_ids]] = downward_edge_ids
+
+        second_edge_ids = downward_edge_ids
+        first_edge_ids = incoming_edge_id[src[second_edge_ids]]
+        has_two_hop_path = first_edge_ids >= 0
+        if not has_two_hop_path.any():
+            return empty_pair_index, empty_target
+
+        second_edge_ids = second_edge_ids[has_two_hop_path]
+        first_edge_ids = first_edge_ids[has_two_hop_path]
+        first_stance = labels[first_edge_ids]
+        second_stance = labels[second_edge_ids]
+        valid_stance = (
+            ((first_stance == 0) | (first_stance == 1))
+            & ((second_stance == 0) | (second_stance == 1))
+        )
+        if not valid_stance.any():
+            return empty_pair_index, empty_target
+
+        first_edge_ids = first_edge_ids[valid_stance]
+        second_edge_ids = second_edge_ids[valid_stance]
+        pair_index = torch.stack(
+            (src[first_edge_ids], dst[second_edge_ids]),
+            dim=0,
+        )
+        # Labels use 0=support and 1=deny, so signed path multiplication is
+        # exactly XOR: equal signs -> support, different signs -> deny.
+        target = torch.bitwise_xor(
+            labels[first_edge_ids],
+            labels[second_edge_ids],
+        )
+        return pair_index, target
+
+    def _structural_balance_regularization(self, data, node_hidden):
+        zero = self.classifier.weight.new_zeros(())
+        if not self.use_structural_balance_loss:
+            return zero, None, None
+        if self.lambda_structural_balance <= 0.0:
+            return zero, None, None
+        if (
+            self.edge_router.current_epoch
+            < self.structural_balance_warmup_epochs
+        ):
+            return zero, None, None
+
+        pair_index, target = self._two_hop_structural_balance_targets(data)
+        if target.numel() == 0:
+            return zero, pair_index, target
+        pair_logits, _, _ = self.edge_router.relation_outputs(
+            node_hidden,
+            pair_index,
+        )
+        loss = self._relation_classification_loss(pair_logits, target)
+        return self.lambda_structural_balance * loss, pair_index, target
 
     def _ucst_delta_regularization(self, reversal_delta):
         zero = self.classifier.weight.new_zeros(())
@@ -5995,6 +6120,11 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             relation_logits,
             getattr(data, "edge_stance", None),
         )
+        (
+            structural_balance_loss,
+            structural_balance_pair_index,
+            structural_balance_target,
+        ) = self._structural_balance_regularization(data, node_hidden)
         ucst_delta_loss = self._ucst_delta_regularization(
             ucst_reversal_delta
         )
@@ -6049,6 +6179,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         )
         self._last_aux_loss = (
             edge_relation_loss
+            + structural_balance_loss
             + ucst_delta_loss
             + view_mi_loss
             + change_bottleneck_loss
@@ -6071,6 +6202,17 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             + repv_aux_loss
         )
         self._last_edge_relation_loss = edge_relation_loss.detach()
+        self._last_structural_balance_loss = structural_balance_loss.detach()
+        self._last_structural_balance_pair_index = (
+            None
+            if structural_balance_pair_index is None
+            else structural_balance_pair_index.detach()
+        )
+        self._last_structural_balance_target = (
+            None
+            if structural_balance_target is None
+            else structural_balance_target.detach()
+        )
         self._last_ucst_delta_loss = ucst_delta_loss.detach()
         self._last_view_mi_loss = view_mi_loss.detach()
         self._last_semantic_change_bottleneck_loss = (
