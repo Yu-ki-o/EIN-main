@@ -4,7 +4,7 @@ dataset: Weibo
 num_classes: 2
 language: ch
 word_embedding: word2vec
-result_name: null
+result_name: stancegat_bigcn
 experiment_mode: id
 ood_source_datasets: []
 ood_val_domain: source
@@ -17,7 +17,7 @@ lr: 0.0005
 weight_decay: 0.00001
 patience: 10
 n_epochs: 100
-selection_metric: val_acc
+selection_metric: val_loss
 split: '622'
 
 # text and graph encoder
