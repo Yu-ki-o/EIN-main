@@ -173,6 +173,52 @@ class RelationTeacherGATLayerTest(unittest.TestCase):
             )
         )
 
+    def test_dual_channel_states_are_independent_layer_inputs(self):
+        layer = DualChannelRelationTeacherGATLayer(
+            hidden_dim=4,
+            heads=2,
+            dropout=0.0,
+            relation_gate_power=1.0,
+        ).eval()
+        support_hidden = torch.randn(4, 4)
+        deny_hidden = torch.randn(4, 4)
+        reply_edge_index = torch.tensor([[1, 2], [0, 0]])
+        relation_probability = torch.tensor(
+            [[0.9, 0.1], [0.2, 0.8]]
+        )
+
+        reference = layer(
+            support_hidden,
+            reply_edge_index,
+            relation_probability,
+            deny_hidden=deny_hidden,
+        )
+        changed_deny = layer(
+            support_hidden,
+            reply_edge_index,
+            relation_probability,
+            deny_hidden=deny_hidden + 10.0,
+        )
+        changed_support = layer(
+            support_hidden + 10.0,
+            reply_edge_index,
+            relation_probability,
+            deny_hidden=deny_hidden,
+        )
+
+        self.assertTrue(
+            torch.allclose(
+                reference["support_nodes"],
+                changed_deny["support_nodes"],
+            )
+        )
+        self.assertTrue(
+            torch.allclose(
+                reference["deny_nodes"],
+                changed_support["deny_nodes"],
+            )
+        )
+
 
 class StanceGuidedGATTest(unittest.TestCase):
     def test_both_backbones_produce_finite_outputs_and_auxiliary_loss(self):
@@ -221,6 +267,7 @@ class StanceGuidedGATTest(unittest.TestCase):
         self.assertEqual(tuple(output.shape), (2, 2))
         self.assertEqual(tuple(model._last_support_nodes.shape), (7, 8))
         self.assertEqual(tuple(model._last_deny_nodes.shape), (7, 8))
+        self.assertFalse(hasattr(model, "dual_channel_fusion"))
         self.assertIsNotNone(
             model.gat_layers[-1].support_attention_linear.weight.grad
         )

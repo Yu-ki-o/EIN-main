@@ -158,11 +158,12 @@ class RelationTeacherGATLayer(nn.Module):
 class DualChannelRelationTeacherGATLayer(nn.Module):
     """Dual attention over a shared child-value space.
 
-    Both channels aggregate the same complete child value vectors.  They differ
-    only in their content-attention parameters and in the per-edge relation
-    probability used as an absolute message gate.  Support includes a real
-    self-loop in the neighbourhood softmax; Deny contains neither a self-loop
-    nor a synthetic null message.
+    Both channels start from the same complete node representation and use the
+    same value/output transformations.  Across deeper layers their states stay
+    parallel and can differ only because of their attention histories and
+    per-edge relation gates; no cross-channel state is fed into the next layer.
+    Support includes a real self-loop in the neighbourhood softmax; Deny
+    contains neither a self-loop nor a synthetic null message.
     """
 
     def __init__(
@@ -239,27 +240,36 @@ class DualChannelRelationTeacherGATLayer(nn.Module):
 
     def forward(
         self,
-        hidden,
+        support_hidden,
         reply_edge_index,
         relation_probability,
         self_support_prior=1.0,
+        deny_hidden=None,
     ):
+        if deny_hidden is None:
+            deny_hidden = support_hidden
+        if deny_hidden.shape != support_hidden.shape:
+            raise ValueError(
+                "support_hidden and deny_hidden must have the same shape"
+            )
         if relation_probability.shape != (reply_edge_index.size(1), 2):
             raise ValueError(
                 "relation_probability must have shape [num_reply_edges, 2]"
             )
-        num_nodes = hidden.size(0)
+        num_nodes = support_hidden.size(0)
         reply_source, reply_target = reply_edge_index
         relation_probability = relation_probability.detach().clamp(1e-8, 1.0)
         support_probability = relation_probability[:, 0]
         deny_probability = relation_probability[:, 1]
-        self_nodes = torch.arange(num_nodes, device=hidden.device)
+        self_nodes = torch.arange(num_nodes, device=support_hidden.device)
         self_edges = torch.stack((self_nodes, self_nodes), dim=0)
 
-        support_attention_hidden = self.support_attention_linear(hidden).view(
+        support_attention_hidden = self.support_attention_linear(
+            support_hidden
+        ).view(
             num_nodes, self.heads, self.head_dim
         )
-        shared_values = self.value_linear(hidden).view(
+        support_values = self.value_linear(support_hidden).view(
             num_nodes, self.heads, self.head_dim
         )
         support_edges = torch.cat((reply_edge_index, self_edges), dim=1)
@@ -269,7 +279,7 @@ class DualChannelRelationTeacherGATLayer(nn.Module):
             self.support_attention_source,
             self.support_attention_target,
         )
-        self_probability = hidden.new_full(
+        self_probability = support_hidden.new_full(
             (num_nodes,), float(self_support_prior)
         ).clamp_min(1e-8)
         support_candidate_probability = torch.cat(
@@ -294,7 +304,7 @@ class DualChannelRelationTeacherGATLayer(nn.Module):
             training=self.training,
         )
         support_messages = (
-            shared_values[support_edges[0]]
+            support_values[support_edges[0]]
             * support_message_attention.unsqueeze(-1)
         )
         support_aggregated = scatter(
@@ -310,7 +320,10 @@ class DualChannelRelationTeacherGATLayer(nn.Module):
             training=self.training,
         )
 
-        deny_attention_hidden = self.deny_attention_linear(hidden).view(
+        deny_attention_hidden = self.deny_attention_linear(deny_hidden).view(
+            num_nodes, self.heads, self.head_dim
+        )
+        deny_values = self.value_linear(deny_hidden).view(
             num_nodes, self.heads, self.head_dim
         )
         deny_reply_logits = self._attention_logits(
@@ -341,7 +354,7 @@ class DualChannelRelationTeacherGATLayer(nn.Module):
             training=self.training,
         )
         deny_messages = (
-            shared_values[reply_source]
+            deny_values[reply_source]
             * deny_message_attention.unsqueeze(-1)
         )
         deny_aggregated = scatter(
@@ -495,16 +508,9 @@ class StanceGuidedGAT(nn.Module):
                     for _ in range(gat_layers)
                 ]
             )
-        self.dual_channel_fusion = None
         self.dual_graph_fusion = None
         if self.use_dual_channel:
             channel_input_dim = self.hidden_dim * 4
-            self.dual_channel_fusion = nn.Sequential(
-                nn.Linear(channel_input_dim, self.hidden_dim),
-                nn.ReLU(),
-                nn.Dropout(self.dropout),
-                nn.LayerNorm(self.hidden_dim),
-            )
             self.dual_graph_fusion = nn.Sequential(
                 nn.Linear(channel_input_dim, self.hidden_dim),
                 nn.ReLU(),
@@ -981,30 +987,41 @@ class StanceGuidedGAT(nn.Module):
                 relation_probability,
             ) = self._dual_relation_teacher(data, relation_hidden)
             num_reply_edges = reply_edge_index.size(1)
-            channel_outputs = None
+            support_hidden = gat_hidden
+            deny_hidden = gat_hidden
+            layer_channel_outputs = []
             for layer in self.gat_layers:
                 channel_outputs = layer(
-                    gat_hidden,
+                    support_hidden,
                     reply_edge_index,
                     relation_probability,
                     self_support_prior=self.self_support_prior,
+                    deny_hidden=deny_hidden,
                 )
-                support_nodes = channel_outputs["support_nodes"]
-                deny_nodes = channel_outputs["deny_nodes"]
-                gat_hidden = self.dual_channel_fusion(
-                    self._dual_interaction(support_nodes, deny_nodes)
-                )
+                support_hidden = channel_outputs["support_nodes"]
+                deny_hidden = channel_outputs["deny_nodes"]
+                layer_channel_outputs.append(channel_outputs)
+            support_nodes = support_hidden
+            deny_nodes = deny_hidden
             support_graph = self.global_pool(support_nodes, data.batch)
             deny_graph = self.global_pool(deny_nodes, data.batch)
             gat_graph = self.dual_graph_fusion(
                 self._dual_interaction(support_graph, deny_graph)
             )
-            attention_kl = self._dual_attention_kl(
-                channel_outputs,
-                reply_labels,
-                num_reply_edges,
-                raw_nodes.size(0),
-            )
+            attention_kl = torch.stack(
+                [
+                    self._dual_attention_kl(
+                        outputs,
+                        reply_labels,
+                        num_reply_edges,
+                        raw_nodes.size(0),
+                    )
+                    for outputs in layer_channel_outputs
+                ]
+            ).mean()
+            # Diagnostics retain the final layer, while the auxiliary KL above
+            # supervises child proportions at every propagation depth.
+            channel_outputs = layer_channel_outputs[-1]
             raw_attention = channel_outputs["support_raw_attention"]
             biased_attention = channel_outputs["support_biased_attention"]
             support_attention = channel_outputs["support_biased_attention"]

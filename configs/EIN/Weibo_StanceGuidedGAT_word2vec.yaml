@@ -44,7 +44,7 @@ base_model: StanceGuidedGAT
 stance_gat_backbone: bigcn
 stance_gat_dual_channel: true
 
-# Dual-channel GAT: shared values, channel attention, and probability gates.
+# Parallel dual-channel GAT: shared transforms, no inter-layer channel mixing.
 gat_num_layers: 2
 gat_heads: 4
 gat_attention_dropout: 0.2
