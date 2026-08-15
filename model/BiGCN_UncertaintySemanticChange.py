@@ -3665,6 +3665,16 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self.use_node_keep_in_change_pool = bool(
             getattr(args, "use_node_keep_in_change_pool", True)
         )
+        self.use_change_uncertainty_pooling = bool(
+            getattr(args, "use_change_uncertainty_pooling", False)
+        )
+        self.change_uncertainty_pool_scale = max(
+            0.0,
+            float(getattr(args, "change_uncertainty_pool_scale", 1.0)),
+        )
+        self.change_uncertainty_pool_detach = bool(
+            getattr(args, "change_uncertainty_pool_detach", True)
+        )
         self.use_conflict_field_bottleneck = bool(
             getattr(args, "use_conflict_field_bottleneck", False)
         )
@@ -4505,6 +4515,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_semantic_tree_exclusive_query_mean = None
         self._last_semantic_tree_exclusive_query_logvar = None
         self._last_change_node_uncertainty = None
+        self._last_change_pool_reliability = None
         self._last_semantic_tree_node_uncertainty = None
         self._last_node_uncertainty = None
         self._last_trend_sequence = None
@@ -5402,6 +5413,22 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         weight_sum = global_add_pool(weight, batch)
         return weighted_sum / weight_sum.clamp_min(1e-6)
 
+    def _change_uncertainty_reliability(self, node_uncertainty):
+        """Convert shared edge-relation uncertainty into pooling reliability."""
+        if node_uncertainty is None:
+            raise RuntimeError(
+                "use_change_uncertainty_pooling requires edge-relation node "
+                "uncertainty, but none was constructed"
+            )
+        uncertainty = node_uncertainty
+        if self.change_uncertainty_pool_detach:
+            uncertainty = uncertainty.detach()
+        uncertainty = uncertainty.clamp_min(0.0)
+        bounded_uncertainty = uncertainty / (1.0 + uncertainty)
+        return torch.exp(
+            -self.change_uncertainty_pool_scale * bounded_uncertainty
+        )
+
     def _build_view_node_weight(self, data, edge_weight):
         node_weight = edge_weight.new_zeros(data.x.size(0))
         roots = self._root_indices(data)
@@ -5782,6 +5809,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         if (
             self.vertical_path_attention is not None
             or semantic_tree_needs_edge_uncertainty
+            or self.use_change_uncertainty_pooling
         ):
             (
                 path_parent,
@@ -5883,6 +5911,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         change_nodes = None
         change_graph = None
         change_node_uncertainty = None
+        change_pool_reliability = None
         if needs_change_nodes:
             change_nodes = self.semantic_change_encoder(
                 support_nodes,
@@ -5893,7 +5922,19 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 deny_node_weight=deny_node_weight,
                 node_keep=node_keep,
             )
-            if self.use_node_keep_in_change_pool:
+            if self.use_change_uncertainty_pooling:
+                change_pool_reliability = (
+                    self._change_uncertainty_reliability(node_uncertainty)
+                )
+                change_pool_weight = change_pool_reliability
+                if self.use_node_keep_in_change_pool:
+                    change_pool_weight = change_pool_weight * node_keep
+                change_graph = self._pool_root_connected_nodes(
+                    change_nodes,
+                    change_pool_weight,
+                    data.batch,
+                )
+            elif self.use_node_keep_in_change_pool:
                 change_graph = self._pool_root_connected_nodes(
                     change_nodes,
                     node_keep,
@@ -6591,6 +6632,11 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             None
             if change_node_uncertainty is None
             else change_node_uncertainty.detach()
+        )
+        self._last_change_pool_reliability = (
+            None
+            if change_pool_reliability is None
+            else change_pool_reliability.detach()
         )
         self._last_semantic_tree_node_uncertainty = (
             None

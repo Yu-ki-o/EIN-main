@@ -179,6 +179,9 @@ use_semantic_tree_change_uncertainty_bias: True
 semantic_tree_uncertainty_source: edge_relation
 semantic_tree_uncertainty_bias_scale: 1.0 #原1.0
 semantic_tree_change_uncertainty_detach: True
+use_change_uncertainty_pooling: True
+change_uncertainty_pool_scale: 1.0
+change_uncertainty_pool_detach: True
 
 # root-relative support/uncertain/deny state, depth size, and growth trend
 uncertainty_trend_hidden_dim: 128

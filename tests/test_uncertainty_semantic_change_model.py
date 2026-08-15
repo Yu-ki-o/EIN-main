@@ -81,6 +81,9 @@ def make_args():
         semantic_tree_uncertainty_source="gaussian_change",
         semantic_tree_uncertainty_bias_scale=1.0,
         semantic_tree_change_uncertainty_detach=True,
+        use_change_uncertainty_pooling=False,
+        change_uncertainty_pool_scale=1.0,
+        change_uncertainty_pool_detach=True,
         semantic_tree_input_mode="support_deny",
         semantic_tree_query_mode="root_learned",
         semantic_tree_num_queries=1,
@@ -2624,6 +2627,63 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
         )
         self.assertIsNotNone(model._last_semantic_tree_uncertainty_bias)
         self.assertTrue(torch.allclose(model._last_keep_sample, torch.ones(3)))
+
+    def test_change_pool_and_semantic_tree_share_edge_uncertainty(self):
+        args = make_args()
+        args.use_trend_graph = False
+        args.use_uncertainty_sampling = False
+        args.use_node_keep_in_change_pool = False
+        args.use_change_uncertainty_pooling = True
+        args.change_uncertainty_pool_scale = 1.0
+        args.use_semantic_tree_transformer = True
+        args.semantic_tree_transformer_heads = 2
+        args.semantic_tree_transformer_layers = 1
+        args.semantic_tree_depth_dim = 4
+        args.classification_fusion_mode = "change_semantic_tree"
+        args.use_semantic_tree_change_uncertainty_bias = True
+        args.semantic_tree_uncertainty_source = "edge_relation"
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).eval()
+        data = make_batch()
+
+        model(data)
+        shared_uncertainty = model._last_node_uncertainty
+        expected_reliability = torch.exp(
+            -shared_uncertainty / (1.0 + shared_uncertainty)
+        )
+        expected_change_graph = model._pool_root_connected_nodes(
+            model._last_change_nodes,
+            expected_reliability,
+            data.batch,
+        )
+
+        self.assertTrue(
+            torch.allclose(
+                model._last_semantic_tree_node_uncertainty,
+                shared_uncertainty,
+                atol=1e-6,
+            )
+        )
+        self.assertTrue(
+            torch.allclose(
+                model._last_change_pool_reliability,
+                expected_reliability,
+                atol=1e-6,
+            )
+        )
+        self.assertTrue(
+            torch.allclose(
+                model._last_change_graph,
+                expected_change_graph,
+                atol=1e-6,
+            )
+        )
 
     def test_forward_does_not_gate_parity_views_with_parent_edge_twice(self):
         args = make_args()
