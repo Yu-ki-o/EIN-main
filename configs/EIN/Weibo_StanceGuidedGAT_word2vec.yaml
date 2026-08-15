@@ -44,7 +44,7 @@ base_model: StanceGuidedGAT
 stance_gat_backbone: bigcn
 stance_gat_dual_channel: true
 
-# Parallel dual-channel GAT: shared transforms, no inter-layer channel mixing.
+# Fixed first-layer masks; final classifier uses pooled Support minus Deny only.
 gat_num_layers: 2
 gat_heads: 4
 gat_attention_dropout: 0.2

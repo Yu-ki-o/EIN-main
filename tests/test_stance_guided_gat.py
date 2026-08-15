@@ -2,6 +2,7 @@ import copy
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import torch
 import yaml
@@ -10,6 +11,7 @@ from torch_geometric.utils import softmax
 
 from model.EIN_StanceGuidedGAT import (
     DualChannelRelationTeacherGATLayer,
+    FixedDualChannelPropagationLayer,
     RelationTeacherGATLayer,
     StanceGuidedGAT,
 )
@@ -259,7 +261,13 @@ class StanceGuidedGATTest(unittest.TestCase):
         ).train()
         batch = make_batch()
 
-        output = model(batch)[0]
+        with patch.object(
+            model,
+            "_dual_attention_kl",
+            wraps=model._dual_attention_kl,
+        ) as kl_mock:
+            output = model(batch)[0]
+        self.assertEqual(kl_mock.call_count, 1)
         loss = model.classification_loss(output, batch.y)
         loss = loss + model.auxiliary_loss()
         loss.backward()
@@ -268,17 +276,33 @@ class StanceGuidedGATTest(unittest.TestCase):
         self.assertEqual(tuple(model._last_support_nodes.shape), (7, 8))
         self.assertEqual(tuple(model._last_deny_nodes.shape), (7, 8))
         self.assertFalse(hasattr(model, "dual_channel_fusion"))
-        self.assertIsNotNone(
-            model.gat_layers[-1].support_attention_linear.weight.grad
+        self.assertIsNone(model.fusion)
+        self.assertIsNone(model.gat_input_encoder)
+        self.assertIsInstance(
+            model.gat_layers[0], DualChannelRelationTeacherGATLayer
+        )
+        self.assertIsInstance(
+            model.gat_layers[-1], FixedDualChannelPropagationLayer
         )
         self.assertIsNotNone(
-            model.gat_layers[-1].deny_attention_linear.weight.grad
+            model.gat_layers[0].support_attention_linear.weight.grad
         )
         self.assertIsNotNone(
-            model.gat_layers[-1].value_linear.weight.grad
+            model.gat_layers[0].deny_attention_linear.weight.grad
         )
+        for layer in model.gat_layers:
+            self.assertIsNotNone(layer.value_linear.weight.grad)
         self.assertIsNotNone(
             model.edge_relation_classifier[-1].weight.grad
+        )
+        expected_output = torch.log_softmax(
+            model.classifier(
+                model._last_support_graph - model._last_deny_graph
+            ),
+            dim=-1,
+        )
+        self.assertTrue(
+            torch.allclose(output.detach(), expected_output, atol=1e-6)
         )
 
     def test_kl_target_is_detached_from_relation_teacher(self):

@@ -8,6 +8,11 @@ then uses the two soft relation probabilities as absolute message gates.
 Support has a competitive self-loop; Deny aggregates only replies and therefore
 has an exact zero representation when a node has no children.
 
+In dual-channel mode, the selected BiGCN/ResGCN supplies the complete initial
+node representations rather than a separately concatenated graph-level view.
+The first layer fixes both attention masks, deeper layers reuse them, and the
+classifier consumes only the pooled signed difference ``g_support - g_deny``.
+
 Across siblings, the non-discretized probabilities form detached relative
 teachers for channel-specific raw attention through a KL-divergence objective.
 Raw LLM stance labels supervise only the edge classifier and are not consumed
@@ -387,6 +392,96 @@ class DualChannelRelationTeacherGATLayer(nn.Module):
         }
 
 
+class FixedDualChannelPropagationLayer(nn.Module):
+    """Propagate parallel channel states with first-layer fixed masks.
+
+    The Support/Deny masks already include their relation-probability gates.
+    This layer only transforms and aggregates values, so deeper propagation
+    cannot silently redefine the sibling proportions supervised by the single
+    first-layer KL objective.
+    """
+
+    def __init__(self, hidden_dim, heads=4, dropout=0.0):
+        super().__init__()
+        hidden_dim = int(hidden_dim)
+        heads = int(heads)
+        if heads < 1 or hidden_dim % heads != 0:
+            raise ValueError(
+                "hidden_dim must be divisible by a positive gat_heads"
+            )
+        self.hidden_dim = hidden_dim
+        self.heads = heads
+        self.head_dim = hidden_dim // heads
+        self.dropout = float(dropout)
+        self.value_linear = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        self.output_linear = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.xavier_uniform_(self.value_linear.weight)
+        nn.init.xavier_uniform_(self.output_linear.weight)
+
+    def _aggregate(self, hidden, edge_index, attention, num_nodes):
+        source, target = edge_index
+        values = self.value_linear(hidden).view(
+            num_nodes, self.heads, self.head_dim
+        )
+        message_attention = F.dropout(
+            attention,
+            p=self.dropout,
+            training=self.training,
+        )
+        messages = values[source] * message_attention.unsqueeze(-1)
+        aggregated = scatter(
+            messages,
+            target,
+            dim=0,
+            dim_size=num_nodes,
+            reduce="sum",
+        ).reshape(num_nodes, self.hidden_dim)
+        return F.dropout(
+            F.elu(self.output_linear(aggregated)),
+            p=self.dropout,
+            training=self.training,
+        )
+
+    def forward(
+        self,
+        support_hidden,
+        deny_hidden,
+        reply_edge_index,
+        support_attention,
+        deny_attention,
+    ):
+        if support_hidden.shape != deny_hidden.shape:
+            raise ValueError(
+                "support_hidden and deny_hidden must have the same shape"
+            )
+        num_nodes = support_hidden.size(0)
+        self_nodes = torch.arange(
+            num_nodes, device=support_hidden.device
+        )
+        self_edges = torch.stack((self_nodes, self_nodes), dim=0)
+        support_edges = torch.cat((reply_edge_index, self_edges), dim=1)
+        if support_attention.shape[0] != support_edges.size(1):
+            raise ValueError("support_attention has an invalid edge dimension")
+        if deny_attention.shape[0] != reply_edge_index.size(1):
+            raise ValueError("deny_attention has an invalid edge dimension")
+        support_nodes = self._aggregate(
+            support_hidden,
+            support_edges,
+            support_attention,
+            num_nodes,
+        )
+        deny_nodes = self._aggregate(
+            deny_hidden,
+            reply_edge_index,
+            deny_attention,
+            num_nodes,
+        )
+        return support_nodes, deny_nodes
+
+
 class StanceGuidedGAT(nn.Module):
     """BiGCN/ResGCN plus a stance-routed dual-channel GAT branch."""
 
@@ -463,11 +558,13 @@ class StanceGuidedGAT(nn.Module):
             nn.Linear(relation_hidden, 2),
         )
 
-        self.gat_input_encoder = nn.Sequential(
-            nn.Linear(self.in_feats, self.hidden_dim),
-            nn.ReLU(),
-            nn.LayerNorm(self.hidden_dim),
-        )
+        self.gat_input_encoder = None
+        if not self.use_dual_channel:
+            self.gat_input_encoder = nn.Sequential(
+                nn.Linear(self.in_feats, self.hidden_dim),
+                nn.ReLU(),
+                nn.LayerNorm(self.hidden_dim),
+            )
         gat_heads = int(getattr(args, "gat_heads", 4))
         gat_layers = max(1, int(getattr(args, "gat_num_layers", 2)))
         gat_dropout = float(
@@ -492,7 +589,14 @@ class StanceGuidedGAT(nn.Module):
                         negative_slope=gat_negative_slope,
                         relation_gate_power=relation_gate_power,
                     )
-                    for _ in range(gat_layers)
+                ]
+                + [
+                    FixedDualChannelPropagationLayer(
+                        self.hidden_dim,
+                        heads=gat_heads,
+                        dropout=gat_dropout,
+                    )
+                    for _ in range(gat_layers - 1)
                 ]
             )
         else:
@@ -508,33 +612,26 @@ class StanceGuidedGAT(nn.Module):
                     for _ in range(gat_layers)
                 ]
             )
-        self.dual_graph_fusion = None
-        if self.use_dual_channel:
-            channel_input_dim = self.hidden_dim * 4
-            self.dual_graph_fusion = nn.Sequential(
-                nn.Linear(channel_input_dim, self.hidden_dim),
+        self.fusion = None
+        if not self.use_dual_channel:
+            fusion_hidden = max(
+                self.hidden_dim,
+                int(
+                    getattr(
+                        args,
+                        "stance_gat_fusion_hidden_dim",
+                        self.hidden_dim * 2,
+                    )
+                ),
+            )
+            self.fusion = nn.Sequential(
+                nn.Linear(self.hidden_dim * 2, fusion_hidden),
+                nn.ReLU(),
+                nn.Dropout(self.dropout),
+                nn.Linear(fusion_hidden, self.hidden_dim),
                 nn.ReLU(),
                 nn.LayerNorm(self.hidden_dim),
             )
-
-        fusion_hidden = max(
-            self.hidden_dim,
-            int(
-                getattr(
-                    args,
-                    "stance_gat_fusion_hidden_dim",
-                    self.hidden_dim * 2,
-                )
-            ),
-        )
-        self.fusion = nn.Sequential(
-            nn.Linear(self.hidden_dim * 2, fusion_hidden),
-            nn.ReLU(),
-            nn.Dropout(self.dropout),
-            nn.Linear(fusion_hidden, self.hidden_dim),
-            nn.ReLU(),
-            nn.LayerNorm(self.hidden_dim),
-        )
         self.classifier = nn.Linear(self.hidden_dim, self.num_classes)
 
         relation_weights = getattr(
@@ -941,13 +1038,6 @@ class StanceGuidedGAT(nn.Module):
         )
         return 0.5 * (support_kl + deny_kl)
 
-    @staticmethod
-    def _dual_interaction(support, deny):
-        return torch.cat(
-            (support, deny, support - deny, support * deny),
-            dim=-1,
-        )
-
     def classification_loss(self, output, target):
         weight = (
             self.classification_class_weights
@@ -971,10 +1061,16 @@ class StanceGuidedGAT(nn.Module):
     def forward(self, data):
         raw_nodes = data.x.float()
         backbone_nodes = self.backbone(data)
-        backbone_graph = self.global_pool(backbone_nodes, data.batch)
+        backbone_graph = None
+        if not self.use_dual_channel:
+            backbone_graph = self.global_pool(backbone_nodes, data.batch)
 
         relation_hidden = self.relation_node_encoder(raw_nodes)
-        gat_hidden = self.gat_input_encoder(raw_nodes)
+        gat_hidden = (
+            backbone_nodes
+            if self.use_dual_channel
+            else self.gat_input_encoder(raw_nodes)
+        )
         support_nodes = None
         deny_nodes = None
         support_attention = None
@@ -987,41 +1083,47 @@ class StanceGuidedGAT(nn.Module):
                 relation_probability,
             ) = self._dual_relation_teacher(data, relation_hidden)
             num_reply_edges = reply_edge_index.size(1)
+            # Both channels keep the same complete initial node semantics.
+            # The first layer learns their masks once; deeper layers reuse
+            # those fixed masks while propagating the two states separately.
             support_hidden = gat_hidden
             deny_hidden = gat_hidden
-            layer_channel_outputs = []
-            for layer in self.gat_layers:
-                channel_outputs = layer(
+            channel_outputs = self.gat_layers[0](
+                support_hidden,
+                reply_edge_index,
+                relation_probability,
+                self_support_prior=self.self_support_prior,
+                deny_hidden=deny_hidden,
+            )
+            support_hidden = channel_outputs["support_nodes"]
+            deny_hidden = channel_outputs["deny_nodes"]
+            fixed_support_attention = channel_outputs[
+                "support_biased_attention"
+            ]
+            fixed_deny_attention = channel_outputs[
+                "deny_biased_attention"
+            ]
+            for layer in self.gat_layers[1:]:
+                support_hidden, deny_hidden = layer(
                     support_hidden,
+                    deny_hidden,
                     reply_edge_index,
-                    relation_probability,
-                    self_support_prior=self.self_support_prior,
-                    deny_hidden=deny_hidden,
+                    fixed_support_attention,
+                    fixed_deny_attention,
                 )
-                support_hidden = channel_outputs["support_nodes"]
-                deny_hidden = channel_outputs["deny_nodes"]
-                layer_channel_outputs.append(channel_outputs)
             support_nodes = support_hidden
             deny_nodes = deny_hidden
             support_graph = self.global_pool(support_nodes, data.batch)
             deny_graph = self.global_pool(deny_nodes, data.batch)
-            gat_graph = self.dual_graph_fusion(
-                self._dual_interaction(support_graph, deny_graph)
+            gat_graph = support_graph - deny_graph
+            # The sibling distributions and their relation teacher are fixed
+            # in the first layer, so the KL is intentionally evaluated once.
+            attention_kl = self._dual_attention_kl(
+                channel_outputs,
+                reply_labels,
+                num_reply_edges,
+                raw_nodes.size(0),
             )
-            attention_kl = torch.stack(
-                [
-                    self._dual_attention_kl(
-                        outputs,
-                        reply_labels,
-                        num_reply_edges,
-                        raw_nodes.size(0),
-                    )
-                    for outputs in layer_channel_outputs
-                ]
-            ).mean()
-            # Diagnostics retain the final layer, while the auxiliary KL above
-            # supervises child proportions at every propagation depth.
-            channel_outputs = layer_channel_outputs[-1]
             raw_attention = channel_outputs["support_raw_attention"]
             biased_attention = channel_outputs["support_biased_attention"]
             support_attention = channel_outputs["support_biased_attention"]
@@ -1058,7 +1160,11 @@ class StanceGuidedGAT(nn.Module):
                 else relation_logits
             )
 
-        fused = self.fusion(torch.cat([backbone_graph, gat_graph], dim=-1))
+        fused = (
+            gat_graph
+            if self.use_dual_channel
+            else self.fusion(torch.cat([backbone_graph, gat_graph], dim=-1))
+        )
         output = F.log_softmax(self.classifier(fused), dim=-1)
 
         relation_loss = self._relation_loss(relation_logits, reply_labels)
