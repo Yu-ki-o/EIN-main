@@ -3688,6 +3688,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             requested_fusion_mode
         ).strip().lower()
         fusion_mode_branches = {
+            "original": ("original",),
             "change": ("change",),
             "codebook": ("codebook",),
             "ot": ("ot",),

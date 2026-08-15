@@ -744,6 +744,35 @@ class SemanticParityProbabilisticSGCNDirectionEncoderTest(unittest.TestCase):
 
 
 class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
+    def test_original_semantic_tree_fusion_uses_two_graph_views(self):
+        args = make_args()
+        args.use_trend_graph = False
+        args.use_semantic_tree_transformer = False
+        args.classification_fusion_mode = "original_semantic_tree"
+        args.semantic_tree_input_mode = "original"
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).eval()
+
+        with torch.no_grad():
+            output, _, _, _ = model(make_batch())
+
+        self.assertEqual(
+            model.classification_branch_names,
+            ("original", "semantic_tree"),
+        )
+        self.assertIsNotNone(model.semantic_tree_transformer)
+        self.assertEqual(model.fusion[0].in_features, 16)
+        self.assertEqual(tuple(output.shape), (2, 2))
+        self.assertIsNotNone(model._last_original_graph)
+        self.assertIsNotNone(model._last_semantic_tree_graph)
+        self.assertIsNone(model._last_change_graph)
+
     def test_structural_balance_disabled_preserves_legacy_behavior(self):
         legacy_args = make_args()
         del legacy_args.use_structural_balance_loss
