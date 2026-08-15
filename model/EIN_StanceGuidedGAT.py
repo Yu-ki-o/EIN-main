@@ -2,15 +2,18 @@
 
 The propagation branch is selectable between the matched BiGCN and ResGCN
 encoders used elsewhere in this repository.  The second branch predicts an
-LLM-supervised support/oppose probability for each reply-to-parent edge.  The
-predicted support probabilities serve two purposes:
+LLM-supervised support/oppose probability for each reply-to-parent edge.  Its
+dual-channel mode learns two attention distributions over a shared value space,
+then uses the two soft relation probabilities as absolute message gates.
+Support has a competitive self-loop; Deny aggregates only replies and therefore
+has an exact zero representation when a node has no children.
 
-1. they bias the attention used for GAT message passing; and
-2. after neighbourhood normalisation, they form a detached soft teacher for
-   the *unbiased* GAT attention through a KL-divergence objective.
+Across siblings, the non-discretized probabilities form detached relative
+teachers for channel-specific raw attention through a KL-divergence objective.
+Raw LLM stance labels supervise only the edge classifier and are not consumed
+by the prediction path at inference time.  The former single-support-channel
+layer is retained behind ``stance_gat_dual_channel: false`` for ablations.
 
-Raw LLM stance labels are only used by auxiliary losses.  Model predictions
-therefore do not require stance labels at inference time.
 """
 
 from __future__ import annotations
@@ -152,8 +155,227 @@ class RelationTeacherGATLayer(nn.Module):
         return output, raw_attention, biased_attention
 
 
+class DualChannelRelationTeacherGATLayer(nn.Module):
+    """Dual attention over a shared child-value space.
+
+    Both channels aggregate the same complete child value vectors.  They differ
+    only in their content-attention parameters and in the per-edge relation
+    probability used as an absolute message gate.  Support includes a real
+    self-loop in the neighbourhood softmax; Deny contains neither a self-loop
+    nor a synthetic null message.
+    """
+
+    def __init__(
+        self,
+        hidden_dim,
+        heads=4,
+        dropout=0.0,
+        negative_slope=0.2,
+        relation_gate_power=1.0,
+    ):
+        super().__init__()
+        hidden_dim = int(hidden_dim)
+        heads = int(heads)
+        if heads < 1 or hidden_dim % heads != 0:
+            raise ValueError(
+                "hidden_dim must be divisible by a positive gat_heads"
+            )
+        self.hidden_dim = hidden_dim
+        self.heads = heads
+        self.head_dim = hidden_dim // heads
+        self.dropout = float(dropout)
+        self.negative_slope = float(negative_slope)
+        self.relation_gate_power = max(0.0, float(relation_gate_power))
+
+        # Channel-specific projections are used only for attention scoring.
+        # Message values and their output transform are deliberately shared so
+        # that Support/Deny semantics differ through weights rather than two
+        # unrelated value spaces.
+        self.support_attention_linear = nn.Linear(
+            hidden_dim, hidden_dim, bias=False
+        )
+        self.deny_attention_linear = nn.Linear(
+            hidden_dim, hidden_dim, bias=False
+        )
+        self.value_linear = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        self.support_attention_source = nn.Parameter(
+            torch.empty(1, heads, self.head_dim)
+        )
+        self.support_attention_target = nn.Parameter(
+            torch.empty(1, heads, self.head_dim)
+        )
+        self.deny_attention_source = nn.Parameter(
+            torch.empty(1, heads, self.head_dim)
+        )
+        self.deny_attention_target = nn.Parameter(
+            torch.empty(1, heads, self.head_dim)
+        )
+        self.output_linear = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.xavier_uniform_(self.support_attention_linear.weight)
+        nn.init.xavier_uniform_(self.deny_attention_linear.weight)
+        nn.init.xavier_uniform_(self.value_linear.weight)
+        nn.init.xavier_uniform_(self.support_attention_source)
+        nn.init.xavier_uniform_(self.support_attention_target)
+        nn.init.xavier_uniform_(self.deny_attention_source)
+        nn.init.xavier_uniform_(self.deny_attention_target)
+        nn.init.xavier_uniform_(self.output_linear.weight)
+
+    def _relation_gate(self, probability):
+        if self.relation_gate_power == 0.0:
+            return torch.ones_like(probability)
+        return probability.pow(self.relation_gate_power)
+
+    def _attention_logits(self, projected, edge_index, source_att, target_att):
+        source, target = edge_index
+        source_score = (projected * source_att).sum(dim=-1)
+        target_score = (projected * target_att).sum(dim=-1)
+        return F.leaky_relu(
+            source_score[source] + target_score[target],
+            negative_slope=self.negative_slope,
+        )
+
+    def forward(
+        self,
+        hidden,
+        reply_edge_index,
+        relation_probability,
+        self_support_prior=1.0,
+    ):
+        if relation_probability.shape != (reply_edge_index.size(1), 2):
+            raise ValueError(
+                "relation_probability must have shape [num_reply_edges, 2]"
+            )
+        num_nodes = hidden.size(0)
+        reply_source, reply_target = reply_edge_index
+        relation_probability = relation_probability.detach().clamp(1e-8, 1.0)
+        support_probability = relation_probability[:, 0]
+        deny_probability = relation_probability[:, 1]
+        self_nodes = torch.arange(num_nodes, device=hidden.device)
+        self_edges = torch.stack((self_nodes, self_nodes), dim=0)
+
+        support_attention_hidden = self.support_attention_linear(hidden).view(
+            num_nodes, self.heads, self.head_dim
+        )
+        shared_values = self.value_linear(hidden).view(
+            num_nodes, self.heads, self.head_dim
+        )
+        support_edges = torch.cat((reply_edge_index, self_edges), dim=1)
+        support_raw_logits = self._attention_logits(
+            support_attention_hidden,
+            support_edges,
+            self.support_attention_source,
+            self.support_attention_target,
+        )
+        self_probability = hidden.new_full(
+            (num_nodes,), float(self_support_prior)
+        ).clamp_min(1e-8)
+        support_candidate_probability = torch.cat(
+            (support_probability, self_probability), dim=0
+        )
+        support_target = support_edges[1]
+        support_raw_attention = softmax(
+            support_raw_logits, support_target, num_nodes=num_nodes
+        )
+        support_relation_gate = self._relation_gate(
+            support_candidate_probability
+        )
+        # The probability is an absolute gate.  Do not renormalise after this
+        # multiplication, otherwise uniformly weak Support evidence would be
+        # amplified back to a unit-mass neighbourhood distribution.
+        support_biased_attention = (
+            support_raw_attention * support_relation_gate.unsqueeze(-1)
+        )
+        support_message_attention = F.dropout(
+            support_biased_attention,
+            p=self.dropout,
+            training=self.training,
+        )
+        support_messages = (
+            shared_values[support_edges[0]]
+            * support_message_attention.unsqueeze(-1)
+        )
+        support_aggregated = scatter(
+            support_messages,
+            support_target,
+            dim=0,
+            dim_size=num_nodes,
+            reduce="sum",
+        ).reshape(num_nodes, self.hidden_dim)
+        support_nodes = F.dropout(
+            F.elu(self.output_linear(support_aggregated)),
+            p=self.dropout,
+            training=self.training,
+        )
+
+        deny_attention_hidden = self.deny_attention_linear(hidden).view(
+            num_nodes, self.heads, self.head_dim
+        )
+        deny_reply_logits = self._attention_logits(
+            deny_attention_hidden,
+            reply_edge_index,
+            self.deny_attention_source,
+            self.deny_attention_target,
+        )
+        deny_prior = deny_probability
+        deny_target = reply_target
+        deny_raw_logits = deny_reply_logits
+        deny_raw_attention = softmax(
+            deny_raw_logits, deny_target, num_nodes=num_nodes
+        )
+        # Deny has no self candidate.  Its GAT attention determines the
+        # relative importance among all children, while the edge classifier's
+        # deny probability is an *absolute* message gate.  Do not renormalise
+        # after applying this gate: otherwise uniformly small deny
+        # probabilities would cancel inside a neighbourhood softmax and still
+        # produce a full-strength deny representation.
+        deny_relation_gate = self._relation_gate(deny_prior)
+        deny_biased_attention = (
+            deny_raw_attention * deny_relation_gate.unsqueeze(-1)
+        )
+        deny_message_attention = F.dropout(
+            deny_biased_attention,
+            p=self.dropout,
+            training=self.training,
+        )
+        deny_messages = (
+            shared_values[reply_source]
+            * deny_message_attention.unsqueeze(-1)
+        )
+        deny_aggregated = scatter(
+            deny_messages,
+            reply_target,
+            dim=0,
+            dim_size=num_nodes,
+            reduce="sum",
+        ).reshape(num_nodes, self.hidden_dim)
+        deny_nodes = F.dropout(
+            F.elu(self.output_linear(deny_aggregated)),
+            p=self.dropout,
+            training=self.training,
+        )
+
+        return {
+            "support_nodes": support_nodes,
+            "deny_nodes": deny_nodes,
+            "support_raw_attention": support_raw_attention,
+            "support_biased_attention": support_biased_attention,
+            "support_relation_gate": support_relation_gate,
+            "support_target": support_target,
+            "support_prior": support_probability,
+            "support_reply_target": reply_target,
+            "deny_raw_attention": deny_raw_attention,
+            "deny_biased_attention": deny_biased_attention,
+            "deny_relation_gate": deny_relation_gate,
+            "deny_target": deny_target,
+            "deny_prior": deny_prior,
+        }
+
+
 class StanceGuidedGAT(nn.Module):
-    """BiGCN/ResGCN plus an LLM-stance relation-teacher GAT branch."""
+    """BiGCN/ResGCN plus a stance-routed dual-channel GAT branch."""
 
     def __init__(
         self,
@@ -171,6 +393,9 @@ class StanceGuidedGAT(nn.Module):
         self.num_classes = int(num_classes)
         self.max_hop = max(1, int(getattr(args, "max_hop", 1)))
         self.dropout = float(getattr(args, "dropout", 0.0))
+        self.use_dual_channel = bool(
+            getattr(args, "stance_gat_dual_channel", False)
+        )
 
         backbone_name = str(
             getattr(args, "stance_gat_backbone", "bigcn")
@@ -241,18 +466,50 @@ class StanceGuidedGAT(nn.Module):
         relation_bias = float(
             getattr(args, "stance_relation_attention_bias", 1.0)
         )
-        self.gat_layers = nn.ModuleList(
-            [
-                RelationTeacherGATLayer(
-                    self.hidden_dim,
-                    heads=gat_heads,
-                    dropout=gat_dropout,
-                    negative_slope=gat_negative_slope,
-                    relation_bias=relation_bias,
-                )
-                for _ in range(gat_layers)
-            ]
+        relation_gate_power = float(
+            getattr(args, "stance_relation_gate_power", 1.0)
         )
+        if self.use_dual_channel:
+            self.gat_layers = nn.ModuleList(
+                [
+                    DualChannelRelationTeacherGATLayer(
+                        self.hidden_dim,
+                        heads=gat_heads,
+                        dropout=gat_dropout,
+                        negative_slope=gat_negative_slope,
+                        relation_gate_power=relation_gate_power,
+                    )
+                    for _ in range(gat_layers)
+                ]
+            )
+        else:
+            self.gat_layers = nn.ModuleList(
+                [
+                    RelationTeacherGATLayer(
+                        self.hidden_dim,
+                        heads=gat_heads,
+                        dropout=gat_dropout,
+                        negative_slope=gat_negative_slope,
+                        relation_bias=relation_bias,
+                    )
+                    for _ in range(gat_layers)
+                ]
+            )
+        self.dual_channel_fusion = None
+        self.dual_graph_fusion = None
+        if self.use_dual_channel:
+            channel_input_dim = self.hidden_dim * 4
+            self.dual_channel_fusion = nn.Sequential(
+                nn.Linear(channel_input_dim, self.hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(self.dropout),
+                nn.LayerNorm(self.hidden_dim),
+            )
+            self.dual_graph_fusion = nn.Sequential(
+                nn.Linear(channel_input_dim, self.hidden_dim),
+                nn.ReLU(),
+                nn.LayerNorm(self.hidden_dim),
+            )
 
         fusion_hidden = max(
             self.hidden_dim,
@@ -356,6 +613,12 @@ class StanceGuidedGAT(nn.Module):
         self._last_relation_probabilities = None
         self._last_raw_attention = None
         self._last_biased_attention = None
+        self._last_support_nodes = None
+        self._last_deny_nodes = None
+        self._last_support_graph = None
+        self._last_deny_graph = None
+        self._last_support_attention = None
+        self._last_deny_attention = None
 
     def init_optimizer(self, args):
         return torch.optim.Adam(
@@ -563,6 +826,122 @@ class StanceGuidedGAT(nn.Module):
             reply_edge_index.size(1),
         )
 
+    def _dual_relation_teacher(self, data, relation_hidden):
+        reply_edge_index, reply_labels = self._reply_to_parent_graph(data)
+        if reply_edge_index.size(1) == 0:
+            relation_logits = relation_hidden.new_zeros((0, 2))
+            relation_probability = relation_hidden.new_zeros((0, 2))
+        else:
+            relation_logits = self.edge_relation_classifier(
+                self._edge_features(relation_hidden, reply_edge_index)
+            )
+            relation_probability = F.softmax(
+                relation_logits / self.relation_temperature,
+                dim=-1,
+            )
+        return (
+            relation_logits,
+            reply_labels,
+            reply_edge_index,
+            relation_probability.detach(),
+        )
+
+    def _child_attention_kl(
+        self,
+        child_attention,
+        child_probability,
+        target,
+        reply_labels,
+        num_nodes,
+    ):
+        """Match child-to-child proportions, not total channel mass.
+
+        ``child_probability`` is class-normalised on each edge.  It is
+        normalised a second time across siblings to form a relative teacher.
+        For Support, ``child_attention`` excludes the self-loop and is
+        conditionally renormalised across children before the KL is computed.
+        """
+        zero = child_attention.new_zeros(())
+        if child_attention.numel() == 0:
+            return zero
+        eps = 1e-8
+        child_probability = child_probability.detach().clamp_min(eps)
+        teacher_mass = scatter(
+            child_probability,
+            target,
+            dim=0,
+            dim_size=num_nodes,
+            reduce="sum",
+        )
+        teacher = child_probability / (
+            teacher_mass[target] + eps
+        )
+
+        student = child_attention.mean(dim=-1).clamp_min(eps)
+        student_mass = scatter(
+            student,
+            target,
+            dim=0,
+            dim_size=num_nodes,
+            reduce="sum",
+        )
+        student = student / (student_mass[target] + eps)
+        edge_kl = teacher * (
+            teacher.clamp_min(eps).log() - student.clamp_min(eps).log()
+        )
+        node_kl = scatter(
+            edge_kl,
+            target,
+            dim=0,
+            dim_size=num_nodes,
+            reduce="sum",
+        )
+        if reply_labels is None:
+            return zero
+        reply_labels = reply_labels.view(-1).long().to(target.device)
+        valid_reply = (reply_labels == 0) | (reply_labels == 1)
+        labeled_count = scatter(
+            valid_reply.to(dtype=student.dtype),
+            target,
+            dim=0,
+            dim_size=num_nodes,
+            reduce="sum",
+        )
+        valid_node = labeled_count >= float(self.kl_min_labeled_edges)
+        if not valid_node.any():
+            return zero
+        return node_kl[valid_node].mean()
+
+    def _dual_attention_kl(
+        self,
+        channel_outputs,
+        reply_labels,
+        num_reply_edges,
+        num_nodes,
+    ):
+        support_kl = self._child_attention_kl(
+            channel_outputs["support_raw_attention"][:num_reply_edges],
+            channel_outputs["support_prior"],
+            channel_outputs["support_reply_target"],
+            reply_labels,
+            num_nodes,
+        )
+        deny_kl = self._child_attention_kl(
+            channel_outputs["deny_raw_attention"],
+            channel_outputs["deny_prior"],
+            channel_outputs["deny_target"],
+            reply_labels,
+            num_nodes,
+        )
+        return 0.5 * (support_kl + deny_kl)
+
+    @staticmethod
+    def _dual_interaction(support, deny):
+        return torch.cat(
+            (support, deny, support - deny, support * deny),
+            dim=-1,
+        )
+
     def classification_loss(self, output, target):
         weight = (
             self.classification_class_weights
@@ -589,37 +968,83 @@ class StanceGuidedGAT(nn.Module):
         backbone_graph = self.global_pool(backbone_nodes, data.batch)
 
         relation_hidden = self.relation_node_encoder(raw_nodes)
-        (
-            relation_logits,
-            reply_labels,
-            gat_edge_index,
-            support_probability,
-            num_reply_edges,
-        ) = self._relation_teacher(data, relation_hidden)
-
         gat_hidden = self.gat_input_encoder(raw_nodes)
-        raw_attention = None
-        biased_attention = None
-        for layer in self.gat_layers:
-            gat_hidden, raw_attention, biased_attention = layer(
-                gat_hidden,
+        support_nodes = None
+        deny_nodes = None
+        support_attention = None
+        deny_attention = None
+        if self.use_dual_channel:
+            (
+                relation_logits,
+                reply_labels,
+                reply_edge_index,
+                relation_probability,
+            ) = self._dual_relation_teacher(data, relation_hidden)
+            num_reply_edges = reply_edge_index.size(1)
+            channel_outputs = None
+            for layer in self.gat_layers:
+                channel_outputs = layer(
+                    gat_hidden,
+                    reply_edge_index,
+                    relation_probability,
+                    self_support_prior=self.self_support_prior,
+                )
+                support_nodes = channel_outputs["support_nodes"]
+                deny_nodes = channel_outputs["deny_nodes"]
+                gat_hidden = self.dual_channel_fusion(
+                    self._dual_interaction(support_nodes, deny_nodes)
+                )
+            support_graph = self.global_pool(support_nodes, data.batch)
+            deny_graph = self.global_pool(deny_nodes, data.batch)
+            gat_graph = self.dual_graph_fusion(
+                self._dual_interaction(support_graph, deny_graph)
+            )
+            attention_kl = self._dual_attention_kl(
+                channel_outputs,
+                reply_labels,
+                num_reply_edges,
+                raw_nodes.size(0),
+            )
+            raw_attention = channel_outputs["support_raw_attention"]
+            biased_attention = channel_outputs["support_biased_attention"]
+            support_attention = channel_outputs["support_biased_attention"]
+            deny_attention = channel_outputs["deny_biased_attention"]
+            cached_relation_probability = relation_probability
+        else:
+            (
+                relation_logits,
+                reply_labels,
                 gat_edge_index,
                 support_probability,
+                num_reply_edges,
+            ) = self._relation_teacher(data, relation_hidden)
+            raw_attention = None
+            biased_attention = None
+            for layer in self.gat_layers:
+                gat_hidden, raw_attention, biased_attention = layer(
+                    gat_hidden,
+                    gat_edge_index,
+                    support_probability,
+                )
+            gat_graph = self.global_pool(gat_hidden, data.batch)
+            attention_kl = self._attention_kl(
+                raw_attention,
+                support_probability,
+                gat_edge_index,
+                reply_labels,
+                num_reply_edges,
+                raw_nodes.size(0),
             )
-        gat_graph = self.global_pool(gat_hidden, data.batch)
+            cached_relation_probability = (
+                F.softmax(relation_logits, dim=-1)
+                if relation_logits.numel() > 0
+                else relation_logits
+            )
 
         fused = self.fusion(torch.cat([backbone_graph, gat_graph], dim=-1))
         output = F.log_softmax(self.classifier(fused), dim=-1)
 
         relation_loss = self._relation_loss(relation_logits, reply_labels)
-        attention_kl = self._attention_kl(
-            raw_attention,
-            support_probability,
-            gat_edge_index,
-            reply_labels,
-            num_reply_edges,
-            raw_nodes.size(0),
-        )
         kl_weight = self.lambda_attention_kl * self._kl_schedule()
         self._last_aux_loss = (
             self.lambda_relation * relation_loss
@@ -628,17 +1053,36 @@ class StanceGuidedGAT(nn.Module):
         self._last_relation_loss = relation_loss.detach()
         self._last_attention_kl = attention_kl.detach()
         self._last_kl_weight = kl_weight
-        self._last_relation_probabilities = (
-            F.softmax(relation_logits, dim=-1).detach()
-            if relation_logits.numel() > 0
-            else relation_logits.detach()
-        )
+        self._last_relation_probabilities = cached_relation_probability.detach()
         self._last_raw_attention = raw_attention.detach()
         self._last_biased_attention = biased_attention.detach()
+        self._last_support_nodes = (
+            None if support_nodes is None else support_nodes.detach()
+        )
+        self._last_deny_nodes = (
+            None if deny_nodes is None else deny_nodes.detach()
+        )
+        self._last_support_graph = (
+            None
+            if support_nodes is None
+            else self.global_pool(support_nodes, data.batch).detach()
+        )
+        self._last_deny_graph = (
+            None
+            if deny_nodes is None
+            else self.global_pool(deny_nodes, data.batch).detach()
+        )
+        self._last_support_attention = (
+            None if support_attention is None else support_attention.detach()
+        )
+        self._last_deny_attention = (
+            None if deny_attention is None else deny_attention.detach()
+        )
         return output, None, None, None
 
     def __repr__(self):
-        return "{}(backbone={!r})".format(
+        return "{}(backbone={!r}, dual_channel={!r})".format(
             self.__class__.__name__,
             self.backbone_name,
+            self.use_dual_channel,
         )

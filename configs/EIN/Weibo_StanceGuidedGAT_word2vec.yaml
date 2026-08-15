@@ -42,8 +42,9 @@ lamda: 0.0
 base_model: StanceGuidedGAT
 # Change only this field to switch the propagation backbone: bigcn or resgcn.
 stance_gat_backbone: bigcn
+stance_gat_dual_channel: true
 
-# GAT branch
+# Dual-channel GAT: shared values, channel attention, and probability gates.
 gat_num_layers: 2
 gat_heads: 4
 gat_attention_dropout: 0.2
@@ -54,13 +55,16 @@ stance_gat_fusion_hidden_dim: 256
 stance_relation_hidden_dim: 128
 stance_relation_dropout: 0.0
 stance_relation_temperature: 1.0
+# Legacy single-channel attention bias (unused when dual_channel is true).
 stance_relation_attention_bias: 1.0
+# p(channel)^power is multiplied into each child message without renormalizing.
+stance_relation_gate_power: 1.0
 stance_self_support_prior: 1.0
 stance_relation_class_weights: [1.0, 1.0]
 lambda_edge_relation: 0.1
 
-# Distil the detached relation distribution into raw GAT attention.
+# KL matches only the relative distribution among siblings; self is excluded.
 lambda_attention_kl: 0.05
 attention_kl_warmup_epochs: 5
 attention_kl_ramp_epochs: 5
-attention_kl_min_labeled_edges: 1
+attention_kl_min_labeled_edges: 2
