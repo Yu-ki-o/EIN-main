@@ -80,6 +80,11 @@ class MLPSemanticChangeEncoder(nn.Module):
         if self.include_sum:
             features.append(support_nodes + deny_nodes)
         return torch.cat(features, dim=-1)
+        # return torch.cat(
+        # [support_nodes, deny_nodes],
+        # dim=-1,
+        #)
+      
 
     def forward(self, support_nodes, deny_nodes, **kwargs):
         features = self.change_features(support_nodes, deny_nodes)
@@ -258,6 +263,10 @@ class GaussianSemanticChangeBottleneck(nn.Module):
         if self.include_sum:
             features.append(support_nodes + deny_nodes)
         return torch.cat(features, dim=-1)
+        # return torch.cat(
+        # [support_nodes, deny_nodes],
+        # dim=-1,
+         #)
 
     def forward(self, support_nodes, deny_nodes, **kwargs):
         features = self.change_features(support_nodes, deny_nodes)

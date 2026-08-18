@@ -7,7 +7,7 @@ word_embedding: word2vec
 e5_model_name: intfloat/multilingual-e5-base
 e5_max_length: 128
 e5_batch_size: 64
-result_name:  test_addorigin_ResGCN_0.5bias #original_zhengli_test_resgcn_nobias #newplus_Resgcn_viewmi0.00_changetreemi0.1_sharemi0.1_exclusivemi0.01_bias0.5 #A_resgcn_mlpmi0.01_sharemi0.00_bias0 # set a name to save logs under experiments/EIN/DRWeibo/<result_name>
+result_name:  test_gaussian_onlytree_nodetachuncertainty_bigcn_nobias #test_ResGCN_0.5bias #original_zhengli_test_resgcn_nobias #newplus_Resgcn_viewmi0.00_changetreemi0.1_sharemi0.1_exclusivemi0.01_bias0.5 #A_resgcn_mlpmi0.01_sharemi0.00_bias0 # set a name to save logs under experiments/EIN/DRWeibo/<result_name>
 experiment_mode: id
 ood_source_datasets: []
 ood_val_domain: source
@@ -96,7 +96,7 @@ semantic_change_hidden_dim: 128
 use_gaussian_semantic_change_bottleneck: True
 semantic_change_gaussian_latent_dim: 128
 semantic_change_gaussian_sample: False
-lambda_semantic_change_bottleneck:  0.00 #修0.001 #0.001
+lambda_semantic_change_bottleneck:  0.001 #修0.001 #0.001
 lambda_semantic_tree_change_mi_aux: 0.01 #修0.01
 
 # Label-sufficient attention complementary fusion (LSACF).  This is opt-in;
@@ -174,11 +174,11 @@ semantic_tree_transformer_dropout: 0.3
 semantic_tree_transformer_max_depth: 20
 semantic_tree_depth_dim: 128
 semantic_tree_transformer_pool: mean
-use_semantic_tree_change_uncertainty_bias: True #修True
-semantic_tree_uncertainty_source: edge_relation
+use_semantic_tree_change_uncertainty_bias: False #修True
+semantic_tree_uncertainty_source: gaussian_change #edge_relation
 semantic_tree_uncertainty_bias_scale:  0.5 #0.5
-semantic_tree_change_uncertainty_detach: True
-use_change_uncertainty_pooling: True
+semantic_tree_change_uncertainty_detach: False #True
+use_change_uncertainty_pooling: False
 change_uncertainty_pool_scale: 0.5
 change_uncertainty_pool_detach: True
 
@@ -224,7 +224,7 @@ cest_residual_gate_init: -2.0
 cest_dropout: 0.3
 
 # final branch fusion
-classification_fusion_mode: original_change_semantic_tree # alternatives: codebook | codebook_semantic_tree | ot | ot_semantic_tree
+classification_fusion_mode: semantic_tree # alternatives: codebook | codebook_semantic_tree | ot | ot_semantic_tree
 classification_fusion_hidden_dim: 256
 classification_class_weights: [1.0, 1.0] #原来是[1.0, 1.0]
 
