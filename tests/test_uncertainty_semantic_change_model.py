@@ -26,6 +26,7 @@ from model.KAGNN_UncertaintySemanticChange import (
     KAGNN_UncertaintySemanticChange,
 )
 from model.collective_revision import CollectiveRevisionEncoder
+from model.conflict_hotspot_field import ConflictHotspotField
 from model.semantic_tree_attention_complementary_fusion import (
     SemanticTreeAttentionComplementaryFusion,
 )
@@ -147,6 +148,46 @@ class SemanticTreeAttentionComplementaryFusionTest(unittest.TestCase):
         self.assertGreater(float(redundancy), 0.0)
         self.assertIsNotNone(value_dense.grad)
         self.assertIsNone(change_graph.grad)
+
+
+class ConflictHotspotFieldTest(unittest.TestCase):
+    def test_diffusion_and_coverage_are_differentiable(self):
+        args = SimpleNamespace(
+            conflict_hotspot_diffusion_steps=2,
+            conflict_hotspot_diffusion_alpha=0.4,
+            conflict_hotspot_diffusion_direction="undirected",
+            conflict_hotspot_use_change_pooling=True,
+            conflict_hotspot_change_pool_scale=1.0,
+            conflict_hotspot_use_semantic_tree_bias=True,
+            conflict_hotspot_semantic_tree_bias_scale=0.5,
+            lambda_conflict_hotspot_coverage_aux=0.1,
+            conflict_hotspot_coverage_temperature=0.5,
+            conflict_hotspot_coverage_detach=True,
+            conflict_hotspot_dropout=0.0,
+        )
+        module = ConflictHotspotField(8, args=args).train()
+        change_nodes = torch.randn(5, 8, requires_grad=True)
+        edge_index = torch.tensor([[0, 1, 3], [1, 2, 4]])
+        batch = torch.tensor([0, 0, 0, 1, 1])
+
+        outputs = module(change_nodes, edge_index, batch)
+        attention = torch.softmax(torch.randn(2, 1, 3), dim=-1)
+        valid = torch.tensor([[True, True, True], [True, True, False]])
+        coverage = module.coverage_loss(
+            outputs["normalized_field"],
+            batch,
+            attention,
+            valid,
+        )
+        loss = outputs["field_intensity"].mean() + coverage
+        loss.backward()
+
+        self.assertEqual(tuple(outputs["field_intensity"].shape), (5,))
+        self.assertTrue((outputs["pool_multiplier"] >= 1.0).all())
+        self.assertTrue(torch.isfinite(coverage))
+        self.assertIsNotNone(change_nodes.grad)
+        self.assertIsNotNone(module.intensity[-1].weight.grad)
+
 
 class EdgeRelationUncertaintyRouterTest(unittest.TestCase):
     def test_equal_logits_have_maximum_entropy(self):
@@ -747,6 +788,71 @@ class SemanticParityProbabilisticSGCNDirectionEncoderTest(unittest.TestCase):
 
 
 class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
+    def test_conflict_hotspot_disabled_preserves_legacy_parameterization(self):
+        legacy_args = make_args()
+        legacy_args.use_trend_graph = False
+        legacy_args.classification_fusion_mode = "change_semantic_tree"
+        explicit_args = make_args()
+        explicit_args.use_trend_graph = False
+        explicit_args.classification_fusion_mode = "change_semantic_tree"
+        explicit_args.use_conflict_hotspot_field = False
+
+        torch.manual_seed(307)
+        legacy_model = BiGCN_UncertaintySemanticChange(
+            5, 8, 8, 2, legacy_args, torch.device("cpu")
+        ).eval()
+        torch.manual_seed(307)
+        explicit_model = BiGCN_UncertaintySemanticChange(
+            5, 8, 8, 2, explicit_args, torch.device("cpu")
+        ).eval()
+
+        data = make_batch()
+        legacy_output = legacy_model(data)
+        explicit_output = explicit_model(data)
+        self.assertEqual(
+            tuple(legacy_model.state_dict().keys()),
+            tuple(explicit_model.state_dict().keys()),
+        )
+        for legacy_value, explicit_value in zip(legacy_output, explicit_output):
+            self.assertTrue(torch.equal(legacy_value, explicit_value))
+        self.assertIsNone(explicit_model.conflict_hotspot_field)
+
+    def test_conflict_hotspot_field_guides_change_and_tree(self):
+        args = make_args()
+        args.use_trend_graph = False
+        args.classification_fusion_mode = "change_semantic_tree"
+        args.semantic_tree_depth_dim = 4
+        args.use_conflict_hotspot_field = True
+        args.conflict_hotspot_diffusion_steps = 2
+        args.conflict_hotspot_diffusion_alpha = 0.35
+        args.conflict_hotspot_use_change_pooling = True
+        args.conflict_hotspot_use_semantic_tree_bias = True
+        args.lambda_conflict_hotspot_coverage_aux = 0.05
+        model = BiGCN_UncertaintySemanticChange(
+            5, 8, 8, 2, args, torch.device("cpu")
+        ).train()
+        data = make_batch()
+
+        output, _, _, _ = model(data)
+        loss = F.nll_loss(output, data.y) + model.auxiliary_loss()
+        loss.backward()
+
+        self.assertEqual(tuple(output.shape), (2, 2))
+        self.assertEqual(
+            tuple(model._last_conflict_hotspot_field.shape),
+            (5,),
+        )
+        self.assertEqual(
+            tuple(model._last_conflict_hotspot_attention_bias.shape),
+            (5,),
+        )
+        self.assertTrue(
+            torch.isfinite(model._last_conflict_hotspot_coverage_loss)
+        )
+        self.assertIsNotNone(
+            model.conflict_hotspot_field.intensity[-1].weight.grad
+        )
+
     def test_original_semantic_tree_fusion_uses_two_graph_views(self):
         args = make_args()
         args.use_trend_graph = False
