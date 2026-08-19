@@ -340,6 +340,32 @@ class EINTrainer(object):
             )
 
         for field, name in (
+            (
+                '_last_semantic_tree_reliability_hinge_loss',
+                'semantic_tree_reliability_hinge_loss',
+            ),
+            (
+                '_last_semantic_tree_reliability_hinge_raw_loss',
+                'semantic_tree_reliability_hinge_raw_loss',
+            ),
+            (
+                '_last_semantic_tree_reliable_ce',
+                'semantic_tree_reliable_ce',
+            ),
+            (
+                '_last_semantic_tree_uncertain_ce',
+                'semantic_tree_uncertain_ce',
+            ),
+            (
+                '_last_semantic_tree_reliability_hinge_active_rate',
+                'semantic_tree_reliability_hinge_active_rate',
+            ),
+        ):
+            value = self._tensor_mean(getattr(self.model, field, None))
+            if value is not None:
+                diagnostics[name] = value
+
+        for field, name in (
             ('_last_relation_loss', 'stance_relation_loss'),
             ('_last_attention_kl', 'stance_attention_kl'),
             ('_last_kl_weight', 'stance_attention_kl_weight'),

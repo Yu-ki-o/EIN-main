@@ -82,6 +82,9 @@ def make_args():
         semantic_tree_uncertainty_source="gaussian_change",
         semantic_tree_uncertainty_bias_scale=1.0,
         semantic_tree_change_uncertainty_detach=True,
+        use_semantic_tree_reliability_hinge_loss=False,
+        semantic_tree_reliability_hinge_margin=0.1,
+        lambda_semantic_tree_reliability_hinge_aux=0.05,
         use_change_uncertainty_pooling=False,
         change_uncertainty_pool_scale=1.0,
         change_uncertainty_pool_detach=True,
@@ -2733,6 +2736,128 @@ class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
         )
         self.assertIsNotNone(model._last_semantic_tree_uncertainty_bias)
         self.assertTrue(torch.allclose(model._last_keep_sample, torch.ones(3)))
+
+    def test_reliability_hinge_requires_semantic_tree_uncertainty_bias(self):
+        args = make_args()
+        args.use_trend_graph = False
+        args.classification_fusion_mode = "change_semantic_tree"
+        args.use_semantic_tree_reliability_hinge_loss = True
+        args.use_semantic_tree_change_uncertainty_bias = False
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "requires use_semantic_tree_change_uncertainty_bias",
+        ):
+            BiGCN_UncertaintySemanticChange(
+                in_feats=5,
+                hid_feats=8,
+                out_feats=8,
+                num_classes=2,
+                args=args,
+                device=torch.device("cpu"),
+            )
+
+    def test_restricted_reliability_hinge_enters_auxiliary_loss(self):
+        args = make_args()
+        args.use_trend_graph = False
+        args.use_uncertainty_sampling = False
+        args.use_semantic_tree_transformer = True
+        args.semantic_tree_transformer_heads = 2
+        args.semantic_tree_transformer_layers = 1
+        args.semantic_tree_depth_dim = 4
+        args.classification_fusion_mode = "change_semantic_tree"
+        args.use_semantic_tree_change_uncertainty_bias = True
+        args.semantic_tree_uncertainty_source = "edge_relation"
+        args.semantic_tree_change_uncertainty_detach = True
+        args.use_semantic_tree_reliability_hinge_loss = True
+        # A large margin deterministically activates every graph that contains
+        # both reliable and uncertain evidence in this smoke test.
+        args.semantic_tree_reliability_hinge_margin = 10.0
+        args.lambda_semantic_tree_reliability_hinge_aux = 0.2
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).train()
+
+        output, _, _, _ = model(make_batch())
+        hinge_loss = model._last_semantic_tree_reliability_hinge_loss
+        self.assertEqual(tuple(output.shape), (2, 2))
+        self.assertTrue(torch.isfinite(hinge_loss))
+        self.assertGreater(float(hinge_loss), 0.0)
+        self.assertAlmostEqual(
+            float(model._last_semantic_tree_reliability_hinge_active_rate),
+            1.0,
+            places=6,
+        )
+        self.assertEqual(
+            tuple(model._last_semantic_tree_reliable_evidence.shape),
+            (2, 8),
+        )
+        self.assertEqual(
+            tuple(model._last_semantic_tree_uncertain_evidence.shape),
+            (2, 8),
+        )
+
+        model.auxiliary_loss().backward()
+        self.assertIsNotNone(
+            model.semantic_tree_reliability_classifier.weight.grad
+        )
+        self.assertIsNotNone(
+            model.semantic_tree_transformer.value_projection[1].weight.grad
+        )
+
+    def test_restricted_reliability_hinge_stops_after_margin_is_met(self):
+        args = make_args()
+        args.use_trend_graph = False
+        args.classification_fusion_mode = "change_semantic_tree"
+        args.use_semantic_tree_change_uncertainty_bias = True
+        args.semantic_tree_uncertainty_source = "edge_relation"
+        args.use_semantic_tree_reliability_hinge_loss = True
+        args.semantic_tree_reliability_hinge_margin = 0.1
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).train()
+
+        branch = model.semantic_tree_transformer
+        branch.graph_output = torch.nn.Identity()
+        branch.last_attention_probability = torch.tensor(
+            [[[0.5, 0.5]]],
+            dtype=torch.float32,
+        )
+        branch.last_value = torch.zeros(1, 2, 8)
+        branch.last_value[0, 0, 0] = 10.0
+        branch.last_value[0, 1, 1] = 10.0
+        branch.last_valid_mask = torch.ones(1, 2, dtype=torch.bool)
+        branch.last_change_uncertainty = torch.tensor([[0.0, 1.0e6]])
+        with torch.no_grad():
+            classifier = model.semantic_tree_reliability_classifier
+            classifier.weight.zero_()
+            classifier.bias.zero_()
+            classifier.weight[0, 0] = 1.0
+            classifier.weight[1, 1] = 1.0
+
+        outputs = model._semantic_tree_reliability_hinge_loss(
+            torch.tensor([0])
+        )
+        self.assertLess(
+            float(
+                outputs["reliable_ce"]
+                + args.semantic_tree_reliability_hinge_margin
+            ),
+            float(outputs["uncertain_ce"]),
+        )
+        self.assertEqual(float(outputs["active_rate"]), 0.0)
+        self.assertEqual(float(outputs["raw_loss"]), 0.0)
+        self.assertEqual(float(outputs["loss"]), 0.0)
 
     def test_change_pool_and_semantic_tree_share_edge_uncertainty(self):
         args = make_args()

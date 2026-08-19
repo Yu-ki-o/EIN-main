@@ -3930,9 +3930,59 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             self.use_semantic_tree_transformer
             or "semantic_tree" in self.classification_branch_names
         )
-        self.use_conflict_hotspot_field = bool(
-            getattr(args, "use_conflict_hotspot_field", False)
+        # Optional self-limiting reliability supervision for Semantic-tree.
+        # It is deliberately opt-in: when disabled, no auxiliary classifier is
+        # instantiated and the legacy parameter initialization / RNG path is
+        # preserved exactly.
+        self.use_semantic_tree_reliability_hinge_loss = bool(
+            getattr(
+                args,
+                "use_semantic_tree_reliability_hinge_loss",
+                False,
+            )
         )
+        self.semantic_tree_reliability_hinge_margin = max(
+            0.0,
+            float(
+                getattr(
+                    args,
+                    "semantic_tree_reliability_hinge_margin",
+                    0.1,
+                )
+            ),
+        )
+        self.lambda_semantic_tree_reliability_hinge = max(
+            0.0,
+            float(
+                getattr(
+                    args,
+                    "lambda_semantic_tree_reliability_hinge_aux",
+                    0.05,
+                )
+            ),
+        )
+        if (
+            self.use_semantic_tree_reliability_hinge_loss
+            and "semantic_tree" not in self.classification_branch_names
+        ):
+            raise ValueError(
+                "use_semantic_tree_reliability_hinge_loss requires a "
+                "classification_fusion_mode containing 'semantic_tree'"
+            )
+        if (
+            self.use_semantic_tree_reliability_hinge_loss
+            and not bool(
+                getattr(
+                    args,
+                    "use_semantic_tree_change_uncertainty_bias",
+                    False,
+                )
+            )
+        ):
+            raise ValueError(
+                "use_semantic_tree_reliability_hinge_loss requires "
+                "use_semantic_tree_change_uncertainty_bias: true"
+            )
         self.conflict_field_active = (
             self.use_conflict_field_bottleneck
             or "conflict" in self.classification_branch_names
@@ -4453,6 +4503,11 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             nn.LayerNorm(hid_feats),
         )
         self.classifier = nn.Linear(hid_feats, num_classes)
+        self.semantic_tree_reliability_classifier = (
+            nn.Linear(hid_feats, num_classes)
+            if self.use_semantic_tree_reliability_hinge_loss
+            else None
+        )
         self.branch_classifiers = nn.ModuleDict()
         if self.classification_head_mode == "branch_sum":
             for branch_name in self.classification_branch_names:
@@ -4579,6 +4634,13 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_change_node_uncertainty = None
         self._last_change_pool_reliability = None
         self._last_semantic_tree_node_uncertainty = None
+        self._last_semantic_tree_reliability_hinge_loss = None
+        self._last_semantic_tree_reliability_hinge_raw_loss = None
+        self._last_semantic_tree_reliable_ce = None
+        self._last_semantic_tree_uncertain_ce = None
+        self._last_semantic_tree_reliability_hinge_active_rate = None
+        self._last_semantic_tree_reliable_evidence = None
+        self._last_semantic_tree_uncertain_evidence = None
         self._last_node_uncertainty = None
         self._last_trend_sequence = None
         self._last_node_state_sequence = None
@@ -5261,6 +5323,156 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 (semantic_tree * change).sum(dim=-1).pow(2).mean()
             )
         return self.lambda_semantic_tree_change_mi * mi_proxy
+
+    def _semantic_tree_reliability_hinge_loss(self, target):
+        """Compute a self-limiting reliable-evidence auxiliary loss.
+
+        Reliable and uncertain graph evidence are pooled from the existing
+        Semantic-tree attention/value tensors using ``1-u`` and ``u``.  The
+        uncertain branch is only a detached reference.  Consequently the loss
+        can be reduced only by improving reliable evidence, not by deliberately
+        degrading uncertain evidence::
+
+            CE_R * 1[CE_R + margin > stop_gradient(CE_U)]
+        """
+        zero = self.classifier.weight.new_zeros(())
+        outputs = {
+            "loss": zero,
+            "raw_loss": zero,
+            "reliable_ce": zero,
+            "uncertain_ce": zero,
+            "active_rate": zero,
+            "reliable_evidence": None,
+            "uncertain_evidence": None,
+        }
+        if not self.use_semantic_tree_reliability_hinge_loss:
+            return outputs
+        if not self.training:
+            return outputs
+        if target is None:
+            raise RuntimeError(
+                "Semantic-tree reliability hinge loss requires graph labels"
+            )
+
+        branch = self.semantic_tree_transformer
+        classifier = self.semantic_tree_reliability_classifier
+        if branch is None or classifier is None:
+            raise RuntimeError(
+                "Semantic-tree reliability hinge loss was enabled without "
+                "its Semantic-tree branch or auxiliary classifier"
+            )
+        attention = branch.last_attention_probability
+        value = branch.last_value
+        valid_mask = branch.last_valid_mask
+        uncertainty = branch.last_change_uncertainty
+        if (
+            attention is None
+            or value is None
+            or valid_mask is None
+            or uncertainty is None
+        ):
+            raise RuntimeError(
+                "Semantic-tree reliability hinge loss requires attention, "
+                "value, valid-mask, and node uncertainty tensors. Check "
+                "semantic_tree_uncertainty_source and ensure the selected "
+                "uncertainty estimator is active."
+            )
+
+        if branch.detach_change_uncertainty:
+            uncertainty = uncertainty.detach()
+        uncertainty = uncertainty.to(dtype=value.dtype).clamp_min(0.0)
+        # Use the same bounded transform as the Semantic-tree attention bias.
+        uncertainty = uncertainty / (1.0 + uncertainty)
+        uncertainty = uncertainty.masked_fill(~valid_mask, 0.0)
+
+        # Pre-dropout attention is normalized and stable. Multiple queries vote
+        # by averaging their node distributions.
+        node_attention = attention.mean(dim=1)
+        node_attention = node_attention.masked_fill(~valid_mask, 0.0)
+        node_attention = node_attention / node_attention.sum(
+            dim=-1,
+            keepdim=True,
+        ).clamp_min(1e-8)
+
+        reliable_weight = node_attention * (1.0 - uncertainty)
+        uncertain_weight = node_attention * uncertainty
+        reliable_mass = reliable_weight.sum(dim=-1, keepdim=True)
+        uncertain_mass = uncertain_weight.sum(dim=-1, keepdim=True)
+        valid_graph = (
+            (reliable_mass.squeeze(-1) > 1e-8)
+            & (uncertain_mass.squeeze(-1) > 1e-8)
+        )
+
+        reliable_evidence = torch.sum(
+            value * reliable_weight.unsqueeze(-1),
+            dim=1,
+        ) / reliable_mass.clamp_min(1e-8)
+        uncertain_evidence = torch.sum(
+            value * uncertain_weight.unsqueeze(-1),
+            dim=1,
+        ) / uncertain_mass.clamp_min(1e-8)
+        reliable_evidence = branch.graph_output(reliable_evidence)
+        # The uncertain view defines only a fixed reference threshold. Keeping
+        # its projection outside autograd avoids retaining an unused graph and
+        # rules out gradients through every part of the reference path.
+        with torch.no_grad():
+            uncertain_evidence = branch.graph_output(uncertain_evidence)
+
+        target = target.view(-1).long().to(device=value.device)
+        if target.numel() != reliable_evidence.size(0):
+            raise ValueError(
+                "Semantic-tree reliability hinge target size {} does not "
+                "match graph batch size {}".format(
+                    target.numel(),
+                    reliable_evidence.size(0),
+                )
+            )
+
+        reliable_logits = classifier(reliable_evidence)
+        reliable_ce = F.cross_entropy(
+            reliable_logits,
+            target,
+            reduction="none",
+        )
+        # CE_U is a stop-gradient reference line. This prevents the standard
+        # ranking-hinge shortcut of satisfying the margin by making U worse.
+        with torch.no_grad():
+            uncertain_logits = classifier(uncertain_evidence)
+            uncertain_ce = F.cross_entropy(
+                uncertain_logits,
+                target,
+                reduction="none",
+            )
+            active = valid_graph & (
+                reliable_ce.detach()
+                + self.semantic_tree_reliability_hinge_margin
+                > uncertain_ce
+            )
+
+        raw_loss = (reliable_ce * active.to(reliable_ce.dtype)).mean()
+        loss = self.lambda_semantic_tree_reliability_hinge * raw_loss
+        valid_count = valid_graph.to(reliable_ce.dtype).sum().clamp_min(1.0)
+        outputs.update(
+            {
+                "loss": loss,
+                "raw_loss": raw_loss,
+                "reliable_ce": (
+                    (reliable_ce.detach() * valid_graph.to(reliable_ce.dtype))
+                    .sum()
+                    / valid_count
+                ),
+                "uncertain_ce": (
+                    (uncertain_ce * valid_graph.to(uncertain_ce.dtype)).sum()
+                    / valid_count
+                ),
+                "active_rate": (
+                    active.to(reliable_ce.dtype).sum() / valid_count
+                ),
+                "reliable_evidence": reliable_evidence,
+                "uncertain_evidence": uncertain_evidence,
+            }
+        )
+        return outputs
 
     def _semantic_tree_query_auxiliary_losses(self):
         zero = self.classifier.weight.new_zeros(())
@@ -6312,6 +6524,14 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             semantic_tree_evidence_rank_loss,
             semantic_tree_conditional_redundancy_loss,
         ) = self._semantic_tree_attention_complementary_auxiliary_losses()
+        semantic_tree_reliability_hinge_outputs = (
+            self._semantic_tree_reliability_hinge_loss(
+                getattr(data, "y", None)
+            )
+        )
+        semantic_tree_reliability_hinge_loss = (
+            semantic_tree_reliability_hinge_outputs["loss"]
+        )
         conflict_aux_loss = (
             relation_logits.new_zeros(())
             if conflict_outputs is None
@@ -6351,6 +6571,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             + semantic_tree_evidence_sufficiency_loss
             + semantic_tree_evidence_rank_loss
             + semantic_tree_conditional_redundancy_loss
+            + semantic_tree_reliability_hinge_loss
             + conflict_aux_loss
             + codebook_aux_loss
             + ot_aux_loss
@@ -6403,6 +6624,44 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         )
         self._last_semantic_tree_query_expert_counterfactual_loss = (
             semantic_tree_query_expert_counterfactual_loss.detach()
+        )
+        if self.use_semantic_tree_reliability_hinge_loss:
+            self._last_semantic_tree_reliability_hinge_loss = (
+                semantic_tree_reliability_hinge_loss.detach()
+            )
+            self._last_semantic_tree_reliability_hinge_raw_loss = (
+                semantic_tree_reliability_hinge_outputs["raw_loss"].detach()
+            )
+            self._last_semantic_tree_reliable_ce = (
+                semantic_tree_reliability_hinge_outputs["reliable_ce"].detach()
+            )
+            self._last_semantic_tree_uncertain_ce = (
+                semantic_tree_reliability_hinge_outputs["uncertain_ce"].detach()
+            )
+            self._last_semantic_tree_reliability_hinge_active_rate = (
+                semantic_tree_reliability_hinge_outputs["active_rate"].detach()
+            )
+        else:
+            self._last_semantic_tree_reliability_hinge_loss = None
+            self._last_semantic_tree_reliability_hinge_raw_loss = None
+            self._last_semantic_tree_reliable_ce = None
+            self._last_semantic_tree_uncertain_ce = None
+            self._last_semantic_tree_reliability_hinge_active_rate = None
+        reliable_evidence = semantic_tree_reliability_hinge_outputs[
+            "reliable_evidence"
+        ]
+        uncertain_evidence = semantic_tree_reliability_hinge_outputs[
+            "uncertain_evidence"
+        ]
+        self._last_semantic_tree_reliable_evidence = (
+            None
+            if reliable_evidence is None
+            else reliable_evidence.detach()
+        )
+        self._last_semantic_tree_uncertain_evidence = (
+            None
+            if uncertain_evidence is None
+            else uncertain_evidence.detach()
         )
         complementary_fusion = (
             self.semantic_tree_attention_complementary_fusion

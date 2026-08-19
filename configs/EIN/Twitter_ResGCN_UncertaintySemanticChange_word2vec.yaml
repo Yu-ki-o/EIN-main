@@ -157,20 +157,11 @@ use_semantic_tree_change_uncertainty_bias: true
 semantic_tree_uncertainty_source: edge_relation
 semantic_tree_uncertainty_bias_scale: 1.0
 semantic_tree_change_uncertainty_detach: true
-
-# Conflict Hotspot Field (opt-in; false preserves the original model exactly)
-use_conflict_hotspot_field: false
-conflict_hotspot_diffusion_steps: 2
-conflict_hotspot_diffusion_alpha: 0.35
-conflict_hotspot_diffusion_direction: undirected
-conflict_hotspot_use_change_pooling: true
-conflict_hotspot_change_pool_scale: 1.0
-conflict_hotspot_use_semantic_tree_bias: true
-conflict_hotspot_semantic_tree_bias_scale: 1.0
-conflict_hotspot_dropout: 0.0
-lambda_conflict_hotspot_coverage_aux: 0.0
-conflict_hotspot_coverage_temperature: 0.5
-conflict_hotspot_coverage_detach: true
+# Self-limiting reliable-vs-uncertain evidence supervision. When enabled,
+# Semantic-tree uncertainty bias must also be enabled above.
+use_semantic_tree_reliability_hinge_loss: false
+semantic_tree_reliability_hinge_margin: 0.1
+lambda_semantic_tree_reliability_hinge_aux: 0.05
 uncertainty_trend_hidden_dim: 64
 use_trend_graph: false
 # cross-scale evidence-state transition (CEST)
