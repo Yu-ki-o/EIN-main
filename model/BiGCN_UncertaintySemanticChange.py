@@ -17,7 +17,6 @@ from torch_geometric.nn import (
 from torch_geometric.utils import softmax, to_dense_batch
 
 from model.collective_revision import CollectiveRevisionEncoder
-from model.conflict_hotspot_field import ConflictHotspotField
 from model.cross_scale_evidence_transition import (
     CrossScaleEvidenceStateTransition,
 )
@@ -4387,29 +4386,6 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             if self.semantic_tree_active
             else None
         )
-        self.conflict_hotspot_field = (
-            ConflictHotspotField(hid_feats, args=args)
-            if self.use_conflict_hotspot_field
-            else None
-        )
-        if self.conflict_hotspot_field is not None:
-            hotspot_needs_tree = (
-                self.conflict_hotspot_field.use_semantic_tree_bias
-                or self.conflict_hotspot_field.lambda_coverage > 0.0
-            )
-            if hotspot_needs_tree and self.semantic_tree_transformer is None:
-                raise ValueError(
-                    "Conflict Hotspot semantic-tree bias/coverage requires a "
-                    "Semantic-tree branch"
-                )
-            if (
-                not self.conflict_hotspot_field.use_change_pooling
-                and not hotspot_needs_tree
-            ):
-                raise ValueError(
-                    "Conflict Hotspot Field is enabled but all consumers are "
-                    "disabled"
-                )
         if self.use_ucst and self.semantic_parity_encoder is None:
             raise ValueError(
                 "use_ucst requires use_semantic_parity_gnn: true because "
@@ -4610,13 +4586,6 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_semantic_tree_attention_probability = None
         self._last_semantic_tree_query = None
         self._last_semantic_tree_uncertainty_bias = None
-        self._last_conflict_hotspot_local_intensity = None
-        self._last_conflict_hotspot_field = None
-        self._last_conflict_hotspot_normalized = None
-        self._last_conflict_hotspot_pool_multiplier = None
-        self._last_conflict_hotspot_attention_bias = None
-        self._last_conflict_hotspot_distribution = None
-        self._last_conflict_hotspot_coverage_loss = None
         self._last_semantic_tree_shared_attention = None
         self._last_semantic_tree_exclusive_attention = None
         self._last_semantic_tree_query_fusion_weights = None
@@ -6170,7 +6139,6 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         needs_change_nodes = (
             "change" in self.classification_branch_names
             or conflict_needs_change
-            or self.conflict_hotspot_field is not None
             or (
                 self.semantic_tree_transformer is not None
                 and (
@@ -6187,7 +6155,6 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         change_graph = None
         change_node_uncertainty = None
         change_pool_reliability = None
-        conflict_hotspot_outputs = None
         if needs_change_nodes:
             change_nodes = self.semantic_change_encoder(
                 support_nodes,
@@ -6219,32 +6186,6 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             else:
                 change_graph = self.global_pool(change_nodes, data.batch)
             change_node_uncertainty = self._change_node_uncertainty()
-            if self.conflict_hotspot_field is not None:
-                conflict_hotspot_outputs = self.conflict_hotspot_field(
-                    change_nodes,
-                    data.edge_index,
-                    data.batch,
-                )
-                if self.conflict_hotspot_field.use_change_pooling:
-                    if self.use_change_uncertainty_pooling:
-                        hotspot_pool_weight = change_pool_reliability
-                        if self.use_node_keep_in_change_pool:
-                            hotspot_pool_weight = hotspot_pool_weight * node_keep
-                    elif self.use_node_keep_in_change_pool:
-                        hotspot_pool_weight = node_keep
-                    else:
-                        hotspot_pool_weight = change_nodes.new_ones(
-                            change_nodes.size(0)
-                        )
-                    hotspot_pool_weight = (
-                        hotspot_pool_weight
-                        * conflict_hotspot_outputs["pool_multiplier"]
-                    )
-                    change_graph = self._pool_root_connected_nodes(
-                        change_nodes,
-                        hotspot_pool_weight,
-                        data.batch,
-                    )
 
         semantic_tree_graph = None
         semantic_tree_nodes = None
@@ -6271,13 +6212,6 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 else self._node_depths(data, data.edge_index)
             )
             semantic_tree_extra_kwargs = {}
-            if (
-                conflict_hotspot_outputs is not None
-                and self.conflict_hotspot_field.use_semantic_tree_bias
-            ):
-                semantic_tree_extra_kwargs["node_attention_bias"] = (
-                    conflict_hotspot_outputs["attention_bias"]
-                )
             if self.reciprocal_evidence_collaboration is not None:
                 root_nodes = original_nodes[self._root_indices(data)]
                 repv_proposal_outputs = (
@@ -6312,21 +6246,6 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                 target=getattr(data, "y", None),
                 **semantic_tree_extra_kwargs,
             )
-
-        conflict_hotspot_coverage_loss = node_hidden.new_zeros(())
-        if (
-            self.conflict_hotspot_field is not None
-            and self.conflict_hotspot_field.lambda_coverage > 0.0
-        ):
-            conflict_hotspot_coverage_loss = (
-                self.conflict_hotspot_field.coverage_loss(
-                    conflict_hotspot_outputs["normalized_field"],
-                    data.batch,
-                    self.semantic_tree_transformer.last_attention_probability,
-                    self.semantic_tree_transformer.last_valid_mask,
-                )
-            )
-
         base_change_graph = change_graph
         base_semantic_tree_graph = semantic_tree_graph
         if self.reciprocal_evidence_collaboration is not None:
@@ -6576,7 +6495,6 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             + codebook_aux_loss
             + ot_aux_loss
             + repv_aux_loss
-            + conflict_hotspot_coverage_loss
         )
         self._last_edge_relation_loss = edge_relation_loss.detach()
         self._last_structural_balance_loss = structural_balance_loss.detach()
@@ -6708,11 +6626,6 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_codebook_aux_loss = codebook_aux_loss.detach()
         self._last_ot_aux_loss = ot_aux_loss.detach()
         self._last_repv_aux_loss = repv_aux_loss.detach()
-        self._last_conflict_hotspot_coverage_loss = (
-            None
-            if self.conflict_hotspot_field is None
-            else conflict_hotspot_coverage_loss.detach()
-        )
         self._last_global_ds_masses = (
             None
             if global_ds_masses is None
@@ -6784,39 +6697,6 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         )
         self._last_change_graph = (
             None if change_graph is None else change_graph.detach()
-        )
-        self._last_conflict_hotspot_local_intensity = (
-            None
-            if conflict_hotspot_outputs is None
-            else conflict_hotspot_outputs["local_intensity"].detach()
-        )
-        self._last_conflict_hotspot_field = (
-            None
-            if conflict_hotspot_outputs is None
-            else conflict_hotspot_outputs["field_intensity"].detach()
-        )
-        self._last_conflict_hotspot_normalized = (
-            None
-            if conflict_hotspot_outputs is None
-            else conflict_hotspot_outputs["normalized_field"].detach()
-        )
-        self._last_conflict_hotspot_pool_multiplier = (
-            None
-            if conflict_hotspot_outputs is None
-            else conflict_hotspot_outputs["pool_multiplier"].detach()
-        )
-        self._last_conflict_hotspot_attention_bias = (
-            None
-            if conflict_hotspot_outputs is None
-            else conflict_hotspot_outputs["attention_bias"].detach()
-        )
-        self._last_conflict_hotspot_distribution = (
-            None
-            if (
-                self.conflict_hotspot_field is None
-                or self.conflict_hotspot_field.last_hotspot_distribution is None
-            )
-            else self.conflict_hotspot_field.last_hotspot_distribution.detach()
         )
         self._last_vertical_nodes = (
             None if vertical_nodes is None else vertical_nodes.detach()
