@@ -80,6 +80,17 @@ semantic_change_gaussian_sample: false
 lambda_semantic_change_bottleneck: 0.001
 lambda_semantic_tree_change_mi_aux: 0.01
 
+# Multi-hop trajectory prototypes for the Change branch. Layer indices denote
+# parity propagation depth, not wall-clock time. False keeps legacy behavior.
+use_trajectory_prototype_change: false
+trajectory_prototype_num: 4
+trajectory_prototype_dim: 64
+trajectory_prototype_temperature: 0.5
+trajectory_prototype_dropout: 0.1
+trajectory_prototype_residual_gate_init: -2.0
+lambda_trajectory_prototype_diversity_aux: 0.001
+lambda_trajectory_prototype_balance_aux: 0.001
+
 # Label-sufficient attention complementary fusion (LSACF).  This is opt-in;
 # when enabled, set lambda_semantic_tree_change_mi_aux to 0.0 to avoid also
 # applying the legacy unconditional branch decorrelation objective.

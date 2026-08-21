@@ -60,6 +60,15 @@ degree_importance_strength: 1.0
 # replaceable node-level semantic change encoder
 semantic_change_encoder: mlp
 semantic_change_hidden_dim: 128
+# Optional multi-hop trajectory prototypes for the Change branch.
+use_trajectory_prototype_change: false
+trajectory_prototype_num: 4
+trajectory_prototype_dim: 64
+trajectory_prototype_temperature: 0.5
+trajectory_prototype_dropout: 0.1
+trajectory_prototype_residual_gate_init: -2.0
+lambda_trajectory_prototype_diversity_aux: 0.001
+lambda_trajectory_prototype_balance_aux: 0.001
 use_node_keep_in_change_pool: False
 
 # root-path vertical attention with edge-router uncertainty bias

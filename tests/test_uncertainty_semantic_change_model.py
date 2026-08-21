@@ -29,6 +29,9 @@ from model.collective_revision import CollectiveRevisionEncoder
 from model.semantic_tree_attention_complementary_fusion import (
     SemanticTreeAttentionComplementaryFusion,
 )
+from model.trajectory_prototype import (
+    TrajectoryPrototypeChangeEnhancer,
+)
 
 
 def make_args():
@@ -76,6 +79,14 @@ def make_args():
         semantic_change_gaussian_min_logvar=-8.0,
         semantic_change_gaussian_max_logvar=4.0,
         lambda_semantic_change_bottleneck=0.0,
+        use_trajectory_prototype_change=False,
+        trajectory_prototype_num=4,
+        trajectory_prototype_dim=8,
+        trajectory_prototype_temperature=0.5,
+        trajectory_prototype_dropout=0.0,
+        trajectory_prototype_residual_gate_init=-2.0,
+        lambda_trajectory_prototype_diversity_aux=0.001,
+        lambda_trajectory_prototype_balance_aux=0.001,
         lambda_semantic_tree_change_mi_aux=0.0,
         use_semantic_tree_change_uncertainty_bias=False,
         semantic_tree_uncertainty_source="gaussian_change",
@@ -750,7 +761,142 @@ class SemanticParityProbabilisticSGCNDirectionEncoderTest(unittest.TestCase):
             )
 
 
+class TrajectoryPrototypeChangeEnhancerTest(unittest.TestCase):
+    def test_stage_aware_prototypes_have_valid_assignments_and_gradients(self):
+        args = make_args()
+        args.trajectory_prototype_num = 4
+        args.trajectory_prototype_dim = 6
+        args.lambda_trajectory_prototype_diversity_aux = 0.01
+        args.lambda_trajectory_prototype_balance_aux = 0.01
+        module = TrajectoryPrototypeChangeEnhancer(
+            hidden_dim=8,
+            num_layers=3,
+            args=args,
+        ).train()
+        support_layers = [
+            torch.randn(5, 8, requires_grad=True) for _ in range(3)
+        ]
+        deny_layers = [
+            torch.randn(5, 8, requires_grad=True) for _ in range(3)
+        ]
+
+        support, deny, outputs = module(
+            support_layers,
+            deny_layers,
+        )
+        loss = support.pow(2).mean() + deny.pow(2).mean()
+        loss = loss + outputs["aux_loss"]
+        loss.backward()
+
+        self.assertEqual(tuple(support.shape), (5, 8))
+        self.assertEqual(tuple(deny.shape), (5, 8))
+        self.assertEqual(tuple(outputs["interactions"].shape), (5, 3, 6))
+        self.assertEqual(tuple(outputs["transitions"].shape), (5, 2, 6))
+        self.assertEqual(tuple(outputs["assignment"].shape), (5, 4))
+        self.assertEqual(tuple(module.prototypes.shape), (4, 2, 6))
+        self.assertTrue(
+            torch.allclose(
+                outputs["assignment"].sum(dim=-1),
+                torch.ones(5),
+                atol=1e-6,
+            )
+        )
+        self.assertIsNotNone(module.prototypes.grad)
+        self.assertTrue(torch.isfinite(module.prototypes.grad).all())
+
+
 class BiGCNUncertaintySemanticChangeTest(unittest.TestCase):
+    def test_trajectory_prototype_disabled_preserves_legacy_parameters(self):
+        legacy_args = make_args()
+        del legacy_args.use_trajectory_prototype_change
+        legacy_args.use_trend_graph = False
+        legacy_args.classification_fusion_mode = "change_semantic_tree"
+        explicit_args = make_args()
+        explicit_args.use_trajectory_prototype_change = False
+        explicit_args.use_trend_graph = False
+        explicit_args.classification_fusion_mode = "change_semantic_tree"
+
+        torch.manual_seed(41)
+        legacy_model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=legacy_args,
+            device=torch.device("cpu"),
+        ).eval()
+        torch.manual_seed(41)
+        explicit_model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=explicit_args,
+            device=torch.device("cpu"),
+        ).eval()
+
+        legacy_state = legacy_model.state_dict()
+        explicit_state = explicit_model.state_dict()
+        self.assertEqual(set(legacy_state), set(explicit_state))
+        for name in legacy_state:
+            self.assertTrue(
+                torch.equal(legacy_state[name], explicit_state[name]),
+                msg=name,
+            )
+        self.assertIsNone(legacy_model.trajectory_prototype_change)
+
+    def test_trajectory_prototype_integrates_with_change_branch(self):
+        args = make_args()
+        args.n_layers_conv = 3
+        args.use_trend_graph = False
+        args.classification_fusion_mode = "change_semantic_tree"
+        args.use_trajectory_prototype_change = True
+        args.trajectory_prototype_num = 4
+        args.trajectory_prototype_dim = 6
+        args.lambda_trajectory_prototype_diversity_aux = 0.01
+        args.lambda_trajectory_prototype_balance_aux = 0.01
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).train()
+        data = make_batch()
+
+        output, _, _, _ = model(data)
+        loss = F.nll_loss(output, data.y) + model.auxiliary_loss()
+        loss.backward()
+
+        self.assertEqual(tuple(output.shape), (2, 2))
+        self.assertEqual(
+            len(model.semantic_parity_encoder.last_support_layers),
+            3,
+        )
+        self.assertEqual(
+            tuple(model._last_trajectory_prototype_interactions.shape),
+            (5, 3, 6),
+        )
+        self.assertEqual(
+            tuple(model._last_trajectory_prototype_transitions.shape),
+            (5, 2, 6),
+        )
+        self.assertEqual(
+            tuple(model._last_trajectory_prototype_assignment.shape),
+            (5, 4),
+        )
+        self.assertTrue(
+            torch.allclose(
+                model._last_trajectory_prototype_assignment.sum(dim=-1),
+                torch.ones(5),
+                atol=1e-6,
+            )
+        )
+        self.assertIsNotNone(
+            model.trajectory_prototype_change.prototypes.grad
+        )
+
     def test_original_semantic_tree_fusion_uses_two_graph_views(self):
         args = make_args()
         args.use_trend_graph = False

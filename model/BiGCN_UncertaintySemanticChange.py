@@ -32,6 +32,9 @@ from model.semantic_tree_query_experts import (
     LowRankSemanticTreeQueryExperts,
 )
 from model.stance_motif_codebook import StanceMotifCodebookBranch
+from model.trajectory_prototype import (
+    TrajectoryPrototypeChangeEnhancer,
+)
 
 
 class EdgeRelationUncertaintyRouter(nn.Module):
@@ -595,10 +598,14 @@ class SemanticParityDirectionEncoder(nn.Module):
         self.norms = nn.ModuleList(
             [nn.LayerNorm(self.hidden_dim) for _ in range(self.num_layers)]
         )
+        self.last_support_layers = None
+        self.last_deny_layers = None
 
     def forward(self, node_features, edge_index, support_weight, deny_weight):
         same = self.input_projection(node_features.float())
         diff = same.new_zeros(same.size())
+        support_layers = []
+        deny_layers = []
 
         for layer, norm in zip(self.layers, self.norms):
             same_aggr, diff_aggr = self._aggregate_parity(
@@ -626,6 +633,10 @@ class SemanticParityDirectionEncoder(nn.Module):
             else:
                 same = same_update
                 diff = diff_update
+            support_layers.append(same)
+            deny_layers.append(diff)
+        self.last_support_layers = tuple(support_layers)
+        self.last_deny_layers = tuple(deny_layers)
         return same, diff
 
     def _aggregate_parity(
@@ -700,10 +711,14 @@ class SemanticParityGCNDirectionEncoder(nn.Module):
         self.norms = nn.ModuleList(
             [nn.LayerNorm(self.hidden_dim) for _ in range(self.num_layers)]
         )
+        self.last_support_layers = None
+        self.last_deny_layers = None
 
     def forward(self, node_features, edge_index, support_weight, deny_weight):
         same = self.input_projection(node_features.float())
         diff = same.new_zeros(same.size())
+        support_layers = []
+        deny_layers = []
         parity_edge_index, parity_edge_weight = self._lift_parity_graph(
             edge_index,
             support_weight,
@@ -739,6 +754,10 @@ class SemanticParityGCNDirectionEncoder(nn.Module):
             else:
                 same = same_update
                 diff = diff_update
+            support_layers.append(same)
+            deny_layers.append(diff)
+        self.last_support_layers = tuple(support_layers)
+        self.last_deny_layers = tuple(deny_layers)
         return same, diff
 
     def _lift_parity_graph(
@@ -836,6 +855,8 @@ class SemanticParityProbabilisticSGCNDirectionEncoder(nn.Module):
         self.deny_norms = nn.ModuleList(
             [nn.LayerNorm(self.hidden_dim) for _ in range(self.num_layers)]
         )
+        self.last_support_layers = None
+        self.last_deny_layers = None
 
     def _probability_mass_mean(
         self,
@@ -897,6 +918,8 @@ class SemanticParityProbabilisticSGCNDirectionEncoder(nn.Module):
         else:
             support = support_update
             deny = deny_update
+        support_layers = [support]
+        deny_layers = [deny]
 
         for layer_index in range(1, self.num_layers):
             support_preserve = self._probability_mass_mean(
@@ -943,6 +966,10 @@ class SemanticParityProbabilisticSGCNDirectionEncoder(nn.Module):
             else:
                 support = support_update
                 deny = deny_update
+            support_layers.append(support)
+            deny_layers.append(deny)
+        self.last_support_layers = tuple(support_layers)
+        self.last_deny_layers = tuple(deny_layers)
         return support, deny
 
 
@@ -960,9 +987,11 @@ class SemanticParityEncoder(nn.Module):
         bidirectional=False,
         residual=True,
         aggregation="mean",
+        capture_layers=False,
     ):
         super().__init__()
         self.bidirectional = bool(bidirectional)
+        self.capture_layers = bool(capture_layers)
         aggregation = str(aggregation).strip().lower()
         aggregation_aliases = {
             "average": "mean",
@@ -1011,6 +1040,8 @@ class SemanticParityEncoder(nn.Module):
         else:
             self.bottom_up = None
             self.direction_fusion = None
+        self.last_support_layers = None
+        self.last_deny_layers = None
 
     def forward(self, node_features, edge_index, support_weight, deny_weight):
         same_td, diff_td = self.top_down(
@@ -1020,6 +1051,8 @@ class SemanticParityEncoder(nn.Module):
             deny_weight,
         )
         if not self.bidirectional:
+            self.last_support_layers = self.top_down.last_support_layers
+            self.last_deny_layers = self.top_down.last_deny_layers
             return same_td, diff_td
 
         reverse_edge_index = torch.stack(
@@ -1034,6 +1067,37 @@ class SemanticParityEncoder(nn.Module):
         )
         same = self.direction_fusion(torch.cat((same_td, same_bu), dim=-1))
         diff = self.direction_fusion(torch.cat((diff_td, diff_bu), dim=-1))
+        if not self.capture_layers:
+            self.last_support_layers = (same,)
+            self.last_deny_layers = (diff,)
+            return same, diff
+        support_layers = []
+        deny_layers = []
+        last_index = len(self.top_down.last_support_layers) - 1
+        for index, (support_td, support_bu, deny_td, deny_bu) in enumerate(
+            zip(
+                self.top_down.last_support_layers,
+                self.bottom_up.last_support_layers,
+                self.top_down.last_deny_layers,
+                self.bottom_up.last_deny_layers,
+            )
+        ):
+            if index == last_index:
+                support_layers.append(same)
+                deny_layers.append(diff)
+            else:
+                support_layers.append(
+                    self.direction_fusion(
+                        torch.cat((support_td, support_bu), dim=-1)
+                    )
+                )
+                deny_layers.append(
+                    self.direction_fusion(
+                        torch.cat((deny_td, deny_bu), dim=-1)
+                    )
+                )
+        self.last_support_layers = tuple(support_layers)
+        self.last_deny_layers = tuple(deny_layers)
         return same, diff
 
 
@@ -3889,6 +3953,20 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self.classification_branch_names = fusion_mode_branches[
             self.classification_fusion_mode
         ]
+        # Optional multi-hop trajectory prototype enhancement for the Change
+        # branch.  The switch is read here but parameters are instantiated only
+        # when enabled, preserving legacy checkpoints and RNG initialization.
+        self.use_trajectory_prototype_change = bool(
+            getattr(args, "use_trajectory_prototype_change", False)
+        )
+        if (
+            self.use_trajectory_prototype_change
+            and "change" not in self.classification_branch_names
+        ):
+            raise ValueError(
+                "use_trajectory_prototype_change requires a "
+                "classification_fusion_mode containing 'change'"
+            )
         self.use_reciprocal_evidence_collaboration = bool(
             getattr(
                 args,
@@ -4352,10 +4430,23 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
                     getattr(args, "semantic_parity_residual", True)
                 ),
                 aggregation=self.semantic_parity_aggregation,
+                capture_layers=self.use_trajectory_prototype_change,
             )
             if self.use_semantic_parity_gnn
             else None
         )
+        if (
+            self.use_trajectory_prototype_change
+            and self.semantic_parity_encoder is None
+        ):
+            raise ValueError(
+                "use_trajectory_prototype_change requires "
+                "use_semantic_parity_gnn: true"
+            )
+        if self.use_trajectory_prototype_change and parity_layers < 2:
+            raise ValueError(
+                "use_trajectory_prototype_change requires n_layers_conv >= 2"
+            )
 
         change_name = getattr(args, "semantic_change_encoder", "mlp")
         change_hidden = int(
@@ -4368,6 +4459,15 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             hidden_dim=change_hidden,
             dropout=self.dropout,
             args=args,
+        )
+        self.trajectory_prototype_change = (
+            TrajectoryPrototypeChangeEnhancer(
+                hid_feats,
+                parity_layers,
+                args=args,
+            )
+            if self.use_trajectory_prototype_change
+            else None
         )
         self.vertical_path_attention = (
             RootPathUncertaintyAttention(
@@ -4602,6 +4702,18 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         self._last_semantic_tree_exclusive_query_logvar = None
         self._last_change_node_uncertainty = None
         self._last_change_pool_reliability = None
+        self._last_trajectory_prototype_aux_loss = None
+        self._last_trajectory_prototype_diversity_loss = None
+        self._last_trajectory_prototype_balance_loss = None
+        self._last_trajectory_prototype_interactions = None
+        self._last_trajectory_prototype_transitions = None
+        self._last_trajectory_prototypes = None
+        self._last_trajectory_prototype_assignment = None
+        self._last_trajectory_prototype_stage_similarity = None
+        self._last_trajectory_prototype_similarity = None
+        self._last_trajectory_prototype_stage_attention = None
+        self._last_trajectory_prototype_summary = None
+        self._last_trajectory_prototype_residual_gate = None
         self._last_semantic_tree_node_uncertainty = None
         self._last_semantic_tree_reliability_hinge_loss = None
         self._last_semantic_tree_reliability_hinge_raw_loss = None
@@ -6155,10 +6267,32 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         change_graph = None
         change_node_uncertainty = None
         change_pool_reliability = None
+        trajectory_prototype_outputs = None
         if needs_change_nodes:
+            change_support_nodes = support_nodes
+            change_deny_nodes = deny_nodes
+            if self.trajectory_prototype_change is not None:
+                support_layers = (
+                    self.semantic_parity_encoder.last_support_layers
+                )
+                deny_layers = self.semantic_parity_encoder.last_deny_layers
+                if support_layers is None or deny_layers is None:
+                    raise RuntimeError(
+                        "semantic parity layer states are unavailable for "
+                        "trajectory prototype change modeling"
+                    )
+                (
+                    change_support_nodes,
+                    change_deny_nodes,
+                    trajectory_prototype_outputs,
+                ) = self.trajectory_prototype_change(
+                    support_layers,
+                    deny_layers,
+                    node_weight=node_keep,
+                )
             change_nodes = self.semantic_change_encoder(
-                support_nodes,
-                deny_nodes,
+                change_support_nodes,
+                change_deny_nodes,
                 batch=data.batch,
                 edge_index=data.edge_index,
                 support_node_weight=support_node_weight,
@@ -6471,6 +6605,11 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             if repv_outputs is None
             else repv_outputs["aux_loss"]
         )
+        trajectory_prototype_aux_loss = (
+            relation_logits.new_zeros(())
+            if trajectory_prototype_outputs is None
+            else trajectory_prototype_outputs["aux_loss"]
+        )
         self._last_aux_loss = (
             edge_relation_loss
             + structural_balance_loss
@@ -6495,6 +6634,7 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             + codebook_aux_loss
             + ot_aux_loss
             + repv_aux_loss
+            + trajectory_prototype_aux_loss
         )
         self._last_edge_relation_loss = edge_relation_loss.detach()
         self._last_structural_balance_loss = structural_balance_loss.detach()
@@ -6929,6 +7069,56 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             if change_pool_reliability is None
             else change_pool_reliability.detach()
         )
+        if trajectory_prototype_outputs is None:
+            self._last_trajectory_prototype_aux_loss = None
+            self._last_trajectory_prototype_diversity_loss = None
+            self._last_trajectory_prototype_balance_loss = None
+            self._last_trajectory_prototype_interactions = None
+            self._last_trajectory_prototype_transitions = None
+            self._last_trajectory_prototypes = None
+            self._last_trajectory_prototype_assignment = None
+            self._last_trajectory_prototype_stage_similarity = None
+            self._last_trajectory_prototype_similarity = None
+            self._last_trajectory_prototype_stage_attention = None
+            self._last_trajectory_prototype_summary = None
+            self._last_trajectory_prototype_residual_gate = None
+        else:
+            self._last_trajectory_prototype_aux_loss = (
+                trajectory_prototype_outputs["aux_loss"].detach()
+            )
+            self._last_trajectory_prototype_diversity_loss = (
+                trajectory_prototype_outputs["diversity_loss"].detach()
+            )
+            self._last_trajectory_prototype_balance_loss = (
+                trajectory_prototype_outputs["balance_loss"].detach()
+            )
+            self._last_trajectory_prototype_interactions = (
+                trajectory_prototype_outputs["interactions"].detach()
+            )
+            self._last_trajectory_prototype_transitions = (
+                trajectory_prototype_outputs["transitions"].detach()
+            )
+            self._last_trajectory_prototypes = (
+                self.trajectory_prototype_change.prototypes.detach()
+            )
+            self._last_trajectory_prototype_assignment = (
+                trajectory_prototype_outputs["assignment"].detach()
+            )
+            self._last_trajectory_prototype_stage_similarity = (
+                trajectory_prototype_outputs["stage_similarity"].detach()
+            )
+            self._last_trajectory_prototype_similarity = (
+                trajectory_prototype_outputs["similarity"].detach()
+            )
+            self._last_trajectory_prototype_stage_attention = (
+                trajectory_prototype_outputs["stage_attention"].detach()
+            )
+            self._last_trajectory_prototype_summary = (
+                trajectory_prototype_outputs["prototype_summary"].detach()
+            )
+            self._last_trajectory_prototype_residual_gate = (
+                trajectory_prototype_outputs["residual_gate"].detach()
+            )
         self._last_semantic_tree_node_uncertainty = (
             None
             if semantic_tree_node_uncertainty is None
