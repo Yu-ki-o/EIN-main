@@ -341,6 +341,22 @@ class EINTrainer(object):
 
         for field, name in (
             (
+                '_last_dual_channel_supcon_loss',
+                'dual_channel_supcon_loss',
+            ),
+            ('_last_support_supcon_loss', 'support_supcon_loss'),
+            ('_last_deny_supcon_loss', 'deny_supcon_loss'),
+            (
+                '_last_dual_channel_supcon_valid_anchor_rate',
+                'dual_channel_supcon_valid_anchor_rate',
+            ),
+        ):
+            value = self._tensor_mean(getattr(self.model, field, None))
+            if value is not None:
+                diagnostics[name] = value
+
+        for field, name in (
+            (
                 '_last_semantic_tree_reliability_hinge_loss',
                 'semantic_tree_reliability_hinge_loss',
             ),

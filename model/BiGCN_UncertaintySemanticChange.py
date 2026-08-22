@@ -4128,6 +4128,63 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             0.0,
             float(getattr(args, "lambda_view_mi_aux", 0.0)),
         )
+        # Optional channel-wise supervised contrastive learning. Support and
+        # deny representations are contrasted only inside their own semantic
+        # channel; cross-channel pairs are deliberately never constructed.
+        self.use_dual_channel_supcon = bool(
+            getattr(args, "use_dual_channel_supcon", False)
+        )
+        self.lambda_dual_channel_supcon = max(
+            0.0,
+            float(getattr(args, "lambda_dual_channel_supcon_aux", 0.05)),
+        )
+        self.dual_channel_supcon_temperature = float(
+            getattr(args, "dual_channel_supcon_temperature", 0.2)
+        )
+        if self.dual_channel_supcon_temperature <= 0.0:
+            raise ValueError("dual_channel_supcon_temperature must be positive")
+        self.dual_channel_supcon_dim = max(
+            1,
+            int(getattr(args, "dual_channel_supcon_dim", hid_feats)),
+        )
+        self.dual_channel_supcon_dropout = min(
+            1.0,
+            max(
+                0.0,
+                float(
+                    getattr(
+                        args,
+                        "dual_channel_supcon_dropout",
+                        self.dropout,
+                    )
+                ),
+            ),
+        )
+        support_contrast_weight = max(
+            0.0,
+            float(getattr(args, "dual_channel_supcon_support_weight", 0.5)),
+        )
+        deny_contrast_weight = max(
+            0.0,
+            float(getattr(args, "dual_channel_supcon_deny_weight", 0.5)),
+        )
+        contrast_weight_sum = support_contrast_weight + deny_contrast_weight
+        if self.use_dual_channel_supcon and contrast_weight_sum <= 0.0:
+            raise ValueError(
+                "at least one dual-channel SupCon channel weight must be "
+                "positive"
+            )
+        contrast_weight_sum = max(contrast_weight_sum, 1e-12)
+        self.dual_channel_supcon_support_weight = (
+            support_contrast_weight / contrast_weight_sum
+        )
+        self.dual_channel_supcon_deny_weight = (
+            deny_contrast_weight / contrast_weight_sum
+        )
+        self.dual_channel_supcon_active = (
+            self.use_dual_channel_supcon
+            and self.lambda_dual_channel_supcon > 0.0
+        )
         self.lambda_ds_unknown_edge = max(
             0.0,
             float(getattr(args, "lambda_ds_unknown_edge_aux", 0.0)),
@@ -4626,12 +4683,38 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         else:
             self.semantic_tree_attention_complementary_fusion = None
 
+        # Instantiate auxiliary-only projectors after every main-path module so
+        # enabling SupCon does not perturb their random initialization order.
+        if self.dual_channel_supcon_active:
+            def build_channel_projector():
+                return nn.Sequential(
+                    nn.Linear(hid_feats, self.dual_channel_supcon_dim),
+                    nn.ReLU(),
+                    nn.Dropout(self.dual_channel_supcon_dropout),
+                    nn.Linear(
+                        self.dual_channel_supcon_dim,
+                        self.dual_channel_supcon_dim,
+                    ),
+                )
+
+            self.support_supcon_projector = build_channel_projector()
+            self.deny_supcon_projector = build_channel_projector()
+        else:
+            self.support_supcon_projector = None
+            self.deny_supcon_projector = None
+
         self._last_aux_loss = None
         self._last_edge_relation_loss = None
         self._last_structural_balance_loss = None
         self._last_structural_balance_pair_index = None
         self._last_structural_balance_target = None
         self._last_view_mi_loss = None
+        self._last_dual_channel_supcon_loss = None
+        self._last_support_supcon_loss = None
+        self._last_deny_supcon_loss = None
+        self._last_dual_channel_supcon_valid_anchor_rate = None
+        self._last_support_supcon_projection = None
+        self._last_deny_supcon_projection = None
         self._last_ucst_delta_loss = None
         self._last_semantic_change_bottleneck_loss = None
         self._last_semantic_tree_change_mi_loss = None
@@ -5339,6 +5422,134 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             )
             mi_proxy = (support * deny).sum(dim=-1).pow(2).mean()
         return self.lambda_view_mi * mi_proxy
+
+    def _channel_supervised_contrastive_loss(self, projection, target):
+        """Supervised contrastive loss for one semantic channel.
+
+        An anchor is valid only when the current batch contains both another
+        sample of its class and a sample of a different class. Invalid anchors
+        are skipped instead of producing NaNs or a misleading zero-positive
+        objective.
+        """
+        zero = projection.sum() * 0.0
+        if projection.ndim != 2:
+            raise ValueError(
+                "channel SupCon projection must be rank 2, got shape {}".format(
+                    tuple(projection.shape)
+                )
+            )
+        target = target.view(-1).long().to(device=projection.device)
+        if target.numel() != projection.size(0):
+            raise ValueError(
+                "channel SupCon target size {} does not match batch size {}"
+                .format(target.numel(), projection.size(0))
+            )
+        if projection.size(0) < 2:
+            return zero, projection.new_zeros(())
+
+        normalized = F.normalize(
+            projection.float(),
+            p=2,
+            dim=-1,
+            eps=self.view_mi_eps,
+        )
+        logits = normalized.matmul(normalized.t())
+        logits = logits / self.dual_channel_supcon_temperature
+
+        batch_size = projection.size(0)
+        nonself_mask = ~torch.eye(
+            batch_size,
+            dtype=torch.bool,
+            device=projection.device,
+        )
+        same_class = target.unsqueeze(0).eq(target.unsqueeze(1))
+        positive_mask = same_class & nonself_mask
+        negative_mask = (~same_class) & nonself_mask
+        positive_count = positive_mask.sum(dim=1)
+        valid_anchor = (positive_count > 0) & negative_mask.any(dim=1)
+        valid_anchor_rate = valid_anchor.to(dtype=normalized.dtype).mean()
+        if not bool(valid_anchor.any()):
+            return zero, valid_anchor_rate
+
+        # Subtracting a detached row maximum keeps the exponentials stable and
+        # leaves the softmax probabilities unchanged.
+        logits = logits - logits.max(dim=1, keepdim=True).values.detach()
+        exp_logits = torch.exp(logits) * nonself_mask.to(logits.dtype)
+        log_probability = logits - torch.log(
+            exp_logits.sum(dim=1, keepdim=True).clamp_min(self.view_mi_eps)
+        )
+        mean_positive_log_probability = (
+            (log_probability * positive_mask.to(logits.dtype)).sum(dim=1)
+            / positive_count.clamp_min(1).to(logits.dtype)
+        )
+        loss = -mean_positive_log_probability[valid_anchor].mean()
+        return loss, valid_anchor_rate
+
+    def _dual_channel_supervised_contrastive_loss(
+        self,
+        support_graph,
+        deny_graph,
+        target,
+    ):
+        zero = support_graph.sum() * 0.0
+        outputs = {
+            "loss": zero,
+            "support_loss": zero,
+            "deny_loss": zero,
+            "valid_anchor_rate": zero,
+            "support_projection": None,
+            "deny_projection": None,
+        }
+        if not self.dual_channel_supcon_active or not self.training:
+            return outputs
+        if target is None:
+            raise RuntimeError(
+                "dual-channel supervised contrastive learning requires graph "
+                "labels"
+            )
+        if support_graph.size(0) != deny_graph.size(0):
+            raise ValueError(
+                "support and deny graph batches must have the same size"
+            )
+
+        support_projection = F.normalize(
+            self.support_supcon_projector(support_graph),
+            p=2,
+            dim=-1,
+            eps=self.view_mi_eps,
+        )
+        deny_projection = F.normalize(
+            self.deny_supcon_projector(deny_graph),
+            p=2,
+            dim=-1,
+            eps=self.view_mi_eps,
+        )
+        support_loss, support_valid_rate = (
+            self._channel_supervised_contrastive_loss(
+                support_projection,
+                target,
+            )
+        )
+        deny_loss, deny_valid_rate = self._channel_supervised_contrastive_loss(
+            deny_projection,
+            target,
+        )
+        raw_loss = (
+            self.dual_channel_supcon_support_weight * support_loss
+            + self.dual_channel_supcon_deny_weight * deny_loss
+        )
+        outputs.update(
+            {
+                "loss": self.lambda_dual_channel_supcon * raw_loss,
+                "support_loss": support_loss,
+                "deny_loss": deny_loss,
+                "valid_anchor_rate": 0.5
+                * (support_valid_rate + deny_valid_rate),
+                "support_projection": support_projection,
+                "deny_projection": deny_projection,
+            }
+        )
+        return outputs
 
     def _semantic_change_bottleneck_loss(self):
         zero = self.classifier.weight.new_zeros(())
@@ -6536,6 +6747,15 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             global_ds_branch_masses = None
             global_ds_conflict = None
 
+        # Keep the auxiliary projector/dropout after the complete inference
+        # path so it cannot change stochastic masks used by the main branches.
+        dual_channel_supcon_outputs = (
+            self._dual_channel_supervised_contrastive_loss(
+                support_graph,
+                deny_graph,
+                getattr(data, "y", None),
+            )
+        )
         edge_relation_loss = self._edge_relation_loss(
             relation_logits,
             getattr(data, "edge_stance", None),
@@ -6610,11 +6830,13 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             if trajectory_prototype_outputs is None
             else trajectory_prototype_outputs["aux_loss"]
         )
+        dual_channel_supcon_loss = dual_channel_supcon_outputs["loss"]
         self._last_aux_loss = (
             edge_relation_loss
             + structural_balance_loss
             + ucst_delta_loss
             + view_mi_loss
+            + dual_channel_supcon_loss
             + change_bottleneck_loss
             + semantic_tree_change_mi_loss
             + semantic_tree_query_kl_loss
@@ -6650,6 +6872,38 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
         )
         self._last_ucst_delta_loss = ucst_delta_loss.detach()
         self._last_view_mi_loss = view_mi_loss.detach()
+        if self.dual_channel_supcon_active and self.training:
+            self._last_dual_channel_supcon_loss = (
+                dual_channel_supcon_loss.detach()
+            )
+            self._last_support_supcon_loss = dual_channel_supcon_outputs[
+                "support_loss"
+            ].detach()
+            self._last_deny_supcon_loss = dual_channel_supcon_outputs[
+                "deny_loss"
+            ].detach()
+            self._last_dual_channel_supcon_valid_anchor_rate = (
+                dual_channel_supcon_outputs["valid_anchor_rate"].detach()
+            )
+            support_projection = dual_channel_supcon_outputs[
+                "support_projection"
+            ]
+            deny_projection = dual_channel_supcon_outputs["deny_projection"]
+            self._last_support_supcon_projection = (
+                None
+                if support_projection is None
+                else support_projection.detach()
+            )
+            self._last_deny_supcon_projection = (
+                None if deny_projection is None else deny_projection.detach()
+            )
+        else:
+            self._last_dual_channel_supcon_loss = None
+            self._last_support_supcon_loss = None
+            self._last_deny_supcon_loss = None
+            self._last_dual_channel_supcon_valid_anchor_rate = None
+            self._last_support_supcon_projection = None
+            self._last_deny_supcon_projection = None
         self._last_semantic_change_bottleneck_loss = (
             change_bottleneck_loss.detach()
         )

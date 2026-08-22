@@ -58,7 +58,17 @@ lambda_edge_relation_warmup: 0.5 #0.5
 use_structural_balance_loss: False
 lambda_structural_balance_aux: 0.05
 structural_balance_warmup_epochs: 5
-lambda_view_mi_aux: 0.01 #原来是0.0,第二次是0.01
+lambda_view_mi_aux: 0.0
+
+# Channel-wise supervised contrastive learning. Support and deny are optimized
+# in separate projection spaces; only graph labels define positive pairs.
+use_dual_channel_supcon: True
+lambda_dual_channel_supcon_aux: 0.05
+dual_channel_supcon_dim: 64
+dual_channel_supcon_temperature: 0.2
+dual_channel_supcon_dropout: 0.1
+dual_channel_supcon_support_weight: 0.5
+dual_channel_supcon_deny_weight: 0.5
 
 # mutually exclusive edge relation routing: softmax, ds, or dirichlet
 edge_relation_distribution: softmax
@@ -102,7 +112,7 @@ lambda_semantic_tree_change_mi_aux: 0.01 #原0.01
 
 # Multi-hop trajectory prototypes for the Change branch. Layer indices denote
 # parity propagation depth, not wall-clock time. False keeps legacy behavior.
-use_trajectory_prototype_change: True
+use_trajectory_prototype_change: False
 trajectory_prototype_num: 4
 trajectory_prototype_dim: 64
 trajectory_prototype_temperature: 0.5
