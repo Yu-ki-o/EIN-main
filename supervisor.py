@@ -1,5 +1,7 @@
 import torch
 from utils.tools import get_obj_from_str
+import copy
+import hashlib
 import os
 import re
 from utils.word2vec import *
@@ -552,6 +554,45 @@ def load_graph_dataset(args, path, text_encoder):
     raise ValueError('Unsupported base_model: {}'.format(args.base_model))
 
 
+def replace_early_test_dataset(args, text_encoder, datasets):
+    early_test_root = getattr(args, 'early_test_root', None)
+    if early_test_root is None or not str(early_test_root).strip():
+        return datasets
+
+    early_test_root = os.path.abspath(os.path.expanduser(str(early_test_root).strip()))
+    raw_dir = os.path.join(early_test_root, 'raw')
+    if not os.path.isdir(raw_dir):
+        raise FileNotFoundError(
+            'Early-detection test root must contain a raw directory: {}'.format(
+                early_test_root
+            )
+        )
+    if not any(name.endswith('.json') for name in os.listdir(raw_dir)):
+        raise FileNotFoundError(
+            'No JSON test samples found in {}'.format(raw_dir)
+        )
+
+    train_dataset, val_dataset, _ = datasets
+    early_args = copy.copy(args)
+    cache_signature = hashlib.sha1(
+        get_dataset_cache_name(args).encode('utf-8')
+    ).hexdigest()[:16]
+    early_args.processed_file_name = 'data_early_{}.pt'.format(cache_signature)
+    print(
+        'Seed {} | Replacing full test set with early test set: {} | cache {}'.format(
+            args.seed,
+            early_test_root,
+            early_args.processed_file_name,
+        ),
+        flush=True,
+    )
+    return (
+        train_dataset,
+        val_dataset,
+        load_graph_dataset(early_args, early_test_root, text_encoder),
+    )
+
+
 def build_experiment_datasets(args, text_encoder):
     experiment_mode = getattr(args, 'experiment_mode', 'id')
     if experiment_mode == 'id':
@@ -562,14 +603,19 @@ def build_experiment_datasets(args, text_encoder):
             label_dataset_path,
         )
         if cached_datasets is not None:
-            return cached_datasets
+            return replace_early_test_dataset(
+                args,
+                text_encoder,
+                cached_datasets,
+            )
 
         train_path, val_path, test_path = build_id_paths(args)
-        return (
+        datasets = (
             load_graph_dataset(args, train_path, text_encoder),
             load_graph_dataset(args, val_path, text_encoder),
             load_graph_dataset(args, test_path, text_encoder)
         )
+        return replace_early_test_dataset(args, text_encoder, datasets)
 
     if experiment_mode != 'strict_ood':
         raise ValueError('Unsupported experiment_mode: {}'.format(experiment_mode))
@@ -584,14 +630,19 @@ def build_experiment_datasets(args, text_encoder):
         target_dataset_path,
     )
     if cached_datasets is not None:
-        return cached_datasets
+        return replace_early_test_dataset(
+            args,
+            text_encoder,
+            cached_datasets,
+        )
 
     train_path, val_path, test_path = build_strict_ood_paths(args)
-    return (
+    datasets = (
         load_graph_dataset(args, train_path, text_encoder),
         load_graph_dataset(args, val_path, text_encoder),
         load_graph_dataset(args, test_path, text_encoder)
     )
+    return replace_early_test_dataset(args, text_encoder, datasets)
 
 
 def EIN_ResGCN_supervisor(args):

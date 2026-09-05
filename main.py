@@ -211,6 +211,15 @@ def summarize_results(results, args):
     summary_dir = os.path.join('experiments', args.model_name, args.dataset)
     if result_name:
         summary_dir = os.path.join(summary_dir, result_name)
+    if getattr(args, 'eval_only', False):
+        early_test_root = str(getattr(args, 'early_test_root', '')).rstrip('/\\')
+        cutoff_name = os.path.basename(early_test_root) or 'test'
+        summary_dir = os.path.join(
+            summary_dir,
+            'early_detection',
+            cutoff_name,
+            'seed_{}'.format(getattr(args, 'seed', 'run')),
+        )
     os.makedirs(summary_dir, exist_ok=True)
     summary_filename = (
         'summary_{}.txt'.format(_selection_metric_part(args))
@@ -238,6 +247,27 @@ if __name__ == '__main__':
         type=str,
         help='override config device, e.g. cuda:0, cuda:1, 0, 1, or cpu',
     )
+    parser.add_argument(
+        '--eval_only',
+        action='store_true',
+        help='skip training and evaluate one saved checkpoint',
+    )
+    parser.add_argument(
+        '--checkpoint_path',
+        default=None,
+        help='model state_dict used by --eval_only',
+    )
+    parser.add_argument(
+        '--early_test_root',
+        default=None,
+        help='timestamp-truncated test root containing raw/, e.g. .../3h',
+    )
+    parser.add_argument(
+        '--seed',
+        default=None,
+        type=int,
+        help='run only this seed; --eval_only requires one explicit seed',
+    )
     cli_args = parser.parse_args()
 
     print(f'Starting experiment with configurations in {cli_args.config_filename}...')
@@ -248,9 +278,41 @@ if __name__ == '__main__':
     )
     if cli_args.device is not None:
         configs['device'] = normalize_device_arg(cli_args.device)
+    if cli_args.eval_only:
+        if cli_args.seed is None:
+            parser.error('--eval_only requires --seed')
+        if cli_args.checkpoint_path is None:
+            parser.error('--eval_only requires --checkpoint_path')
+        if cli_args.early_test_root is None:
+            parser.error('--eval_only requires --early_test_root')
+        configs['eval_only'] = True
+        configs['checkpoint_path'] = cli_args.checkpoint_path
+        configs['early_test_root'] = cli_args.early_test_root
     
     args = argparse.Namespace(**configs)
     args.config_filename = cli_args.config_filename
+
+    eval_only_unsupported = {
+        'RAGCL_ResGCN',
+        'RAGCL_BiGCN',
+        'Plain_ResGCN',
+        'Plain_BiGCN',
+        'NEGT',
+        'EBGCN',
+        'EBGCN_ResGCN',
+        'LIRS_EBGCN',
+        'EBGCN_ResGCN_StateAuxSameDiff',
+        'EBGCN_BiGCN_StateAuxSameDiff',
+        'SEEGraphMAE',
+        'LIRS',
+        'TCSR',
+    }
+    if cli_args.eval_only and args.base_model in eval_only_unsupported:
+        parser.error(
+            '--eval_only is not yet implemented for the dedicated {} trainer'.format(
+                args.base_model
+            )
+        )
 
     if cli_args.device is not None:
         print('Command line device override: {}'.format(args.device))
@@ -260,7 +322,8 @@ if __name__ == '__main__':
 
     #对应上该main文件开头从supervisor中import的对应模型的监督器
     supervisor = globals()['EIN_' + args.base_model + '_supervisor']
-    for i in range(5):
+    seeds = [cli_args.seed] if cli_args.seed is not None else range(5)
+    for i in seeds:
         args.seed = i
         result = supervisor(args)
         if result is not None:
