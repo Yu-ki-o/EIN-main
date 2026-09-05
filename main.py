@@ -303,7 +303,6 @@ if __name__ == '__main__':
         'LIRS_EBGCN',
         'EBGCN_ResGCN_StateAuxSameDiff',
         'EBGCN_BiGCN_StateAuxSameDiff',
-        'SEEGraphMAE',
         'LIRS',
         'TCSR',
     }

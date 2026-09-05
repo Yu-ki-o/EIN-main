@@ -55,6 +55,14 @@ class SEEGraphMAETrainer(object):
         self.train_per_epoch = len(self.train_loader)
 
         args.log_dir = get_log_dir(args)
+        if self._as_bool(getattr(args, "eval_only", False)):
+            early_test_root = str(getattr(args, "early_test_root", "")).rstrip("/\\")
+            cutoff_name = os.path.basename(early_test_root) or "test"
+            args.log_dir = os.path.join(
+                args.log_dir,
+                "early_detection",
+                cutoff_name,
+            )
         if not os.path.isdir(args.log_dir):
             os.makedirs(args.log_dir, exist_ok=True)
         self.logger = get_logger(args.log_dir, name=args.log_dir, debug=args.debug)
@@ -69,6 +77,14 @@ class SEEGraphMAETrainer(object):
                 self.device.type == "cuda",
             )
         )
+
+    @staticmethod
+    def _as_bool(value):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+        return bool(value)
 
     def _loader_kwargs(self):
         num_workers = max(0, int(getattr(self.args, "num_workers", 0)))
@@ -379,7 +395,41 @@ class SEEGraphMAETrainer(object):
             )
         return metrics
 
+    def load_evaluation_checkpoint(self):
+        checkpoint_path = getattr(self.args, "checkpoint_path", None)
+        if checkpoint_path is None or not str(checkpoint_path).strip():
+            raise ValueError("--checkpoint_path is required with --eval_only")
+        checkpoint_path = os.path.abspath(
+            os.path.expanduser(str(checkpoint_path).strip())
+        )
+        if not os.path.isfile(checkpoint_path):
+            raise FileNotFoundError(
+                "Evaluation checkpoint not found: {}".format(checkpoint_path)
+            )
+
+        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        if isinstance(checkpoint, dict):
+            for key in ("state_dict", "model_state_dict", "model"):
+                nested = checkpoint.get(key)
+                if isinstance(nested, dict):
+                    checkpoint = nested
+                    break
+        if not isinstance(checkpoint, dict):
+            raise TypeError(
+                "Checkpoint must be a state_dict or contain state_dict/model_state_dict; "
+                "got {}".format(type(checkpoint).__name__)
+            )
+
+        self.model.load_state_dict(checkpoint, strict=True)
+        self.logger.info(
+            "Loaded evaluation checkpoint: {}".format(checkpoint_path)
+        )
+
     def train_process(self):
+        if self._as_bool(getattr(self.args, "eval_only", False)):
+            self.load_evaluation_checkpoint()
+            return self.test()
+
         start_time = time.time()
         selection_metric = self.get_selection_metric()
         selection_mode = SELECTION_METRIC_MODES[selection_metric]
