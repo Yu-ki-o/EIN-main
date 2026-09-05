@@ -336,10 +336,67 @@ def cutoff_name(cutoff):
     return "{}h".format(str(value).replace(".", "p"))
 
 
+def minute_cutoff_name(cutoff_minutes):
+    value = float(cutoff_minutes)
+    if value.is_integer():
+        return "{}m".format(int(value))
+    return "{}m".format(str(value).replace(".", "p"))
+
+
+def _build_cutoff_specs(cutoffs, cutoffs_minutes):
+    specs = []
+    for value in cutoffs:
+        hours = float(value)
+        if not math.isfinite(hours) or hours < 0:
+            raise ValueError("hour cutoffs must be finite and non-negative")
+        specs.append(
+            {
+                "hours": hours,
+                "label": cutoff_name(hours),
+                "unit": "hours",
+                "value": hours,
+            }
+        )
+    for value in cutoffs_minutes:
+        minutes = float(value)
+        if not math.isfinite(minutes) or minutes < 0:
+            raise ValueError("minute cutoffs must be finite and non-negative")
+        specs.append(
+            {
+                "hours": minutes / 60.0,
+                "label": minute_cutoff_name(minutes),
+                "unit": "minutes",
+                "value": minutes,
+            }
+        )
+
+    seen = []
+    for spec in specs:
+        duplicate = next(
+            (
+                previous
+                for previous in seen
+                if math.isclose(
+                    previous["hours"], spec["hours"], rel_tol=0.0, abs_tol=1e-12
+                )
+            ),
+            None,
+        )
+        if duplicate is not None:
+            raise ValueError(
+                "duplicate cutoff duration: {} and {}".format(
+                    duplicate["label"], spec["label"]
+                )
+            )
+        seen.append(spec)
+    return specs
+
+
 def build_cutoff_datasets(
     input_dir,
     output_root,
     cutoffs=DEFAULT_CUTOFFS,
+    cutoffs_minutes=(),
     source_time_field=None,
     comment_time_field=None,
     numeric_unit="auto",
@@ -353,12 +410,13 @@ def build_cutoff_datasets(
     if not files:
         raise FileNotFoundError("no JSON files found in {}".format(input_dir))
 
-    cutoff_values = [float(value) for value in cutoffs]
-    if len(set(cutoff_values)) != len(cutoff_values):
-        raise ValueError("cutoffs must be unique")
+    cutoff_specs = _build_cutoff_specs(cutoffs, cutoffs_minutes)
+    if not cutoff_specs:
+        raise ValueError("at least one hour or minute cutoff is required")
     output_dirs = {}
-    for cutoff in cutoff_values:
-        raw_dir = output_root / cutoff_name(cutoff) / "raw"
+    for spec in cutoff_specs:
+        label = spec["label"]
+        raw_dir = output_root / label / "raw"
         cutoff_dir = raw_dir.parent
         if cutoff_dir.exists():
             if not overwrite:
@@ -369,17 +427,24 @@ def build_cutoff_datasets(
                 )
             shutil.rmtree(cutoff_dir)
         raw_dir.mkdir(parents=True)
-        output_dirs[cutoff] = raw_dir
+        output_dirs[label] = raw_dir
 
     summaries = {
-        cutoff: {"events": 0, "original_comments": 0, "retained_comments": 0,
-                 "dropped_orphans": 0, "retention_ratios": []}
-        for cutoff in cutoff_values
+        spec["label"]: {
+            "events": 0,
+            "original_comments": 0,
+            "retained_comments": 0,
+            "dropped_orphans": 0,
+            "retention_ratios": [],
+        }
+        for spec in cutoff_specs
     }
     for path in files:
         with path.open("r", encoding="utf-8") as file_obj:
             post = json.load(file_obj)
-        for cutoff in cutoff_values:
+        for spec in cutoff_specs:
+            cutoff = spec["hours"]
+            label = spec["label"]
             try:
                 truncated, stats = truncate_post(
                     post,
@@ -392,11 +457,14 @@ def build_cutoff_datasets(
                 )
             except Exception as exc:
                 raise type(exc)("{}: {}".format(path, exc)) from exc
-            destination = output_dirs[cutoff] / path.name
+            truncated["early_detection"]["cutoff_label"] = label
+            if spec["unit"] == "minutes":
+                truncated["early_detection"]["cutoff_minutes"] = spec["value"]
+            destination = output_dirs[label] / path.name
             with destination.open("w", encoding="utf-8") as file_obj:
                 json.dump(truncated, file_obj, indent=2, ensure_ascii=False)
 
-            summary = summaries[cutoff]
+            summary = summaries[label]
             original = stats["original_comment_count"]
             retained = stats["retained_comment_count"]
             summary["events"] += 1
@@ -408,11 +476,12 @@ def build_cutoff_datasets(
             )
 
     report = {"input_dir": str(input_dir.resolve()), "cutoffs": {}}
-    for cutoff in cutoff_values:
-        summary = summaries[cutoff]
+    for spec in cutoff_specs:
+        label = spec["label"]
+        summary = summaries[label]
         ratios = summary.pop("retention_ratios")
         summary["mean_event_retention_ratio"] = mean(ratios)
-        report["cutoffs"][cutoff_name(cutoff)] = summary
+        report["cutoffs"][label] = summary
     report_path = output_root / "summary.json"
     with report_path.open("w", encoding="utf-8") as file_obj:
         json.dump(report, file_obj, indent=2, ensure_ascii=False)
@@ -426,7 +495,18 @@ def parse_args():
     parser.add_argument("--input-dir", required=True, help="existing full test/raw")
     parser.add_argument("--output-root", required=True)
     parser.add_argument(
-        "--cutoffs", nargs="+", type=float, default=list(DEFAULT_CUTOFFS)
+        "--cutoffs",
+        nargs="+",
+        type=float,
+        default=None,
+        help="hour cutoffs; defaults to 0 1 3 6 12 24 when no cutoffs are given",
+    )
+    parser.add_argument(
+        "--cutoffs-minutes",
+        nargs="+",
+        type=float,
+        default=None,
+        help="minute cutoffs, e.g. 10 20 30",
     )
     parser.add_argument("--source-time-field")
     parser.add_argument("--comment-time-field")
@@ -450,10 +530,15 @@ def parse_args():
 
 def main():
     args = parse_args()
+    if args.cutoffs is None and args.cutoffs_minutes is None:
+        hour_cutoffs = DEFAULT_CUTOFFS
+    else:
+        hour_cutoffs = args.cutoffs or ()
     report = build_cutoff_datasets(
         args.input_dir,
         args.output_root,
-        cutoffs=args.cutoffs,
+        cutoffs=hour_cutoffs,
+        cutoffs_minutes=args.cutoffs_minutes or (),
         source_time_field=args.source_time_field,
         comment_time_field=args.comment_time_field,
         numeric_unit=args.numeric_unit,

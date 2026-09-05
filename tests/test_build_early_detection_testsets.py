@@ -122,6 +122,37 @@ class TruncatePostTests(unittest.TestCase):
             self.assertEqual(report["cutoffs"]["0h"]["events"], 1)
             self.assertEqual(report["cutoffs"]["3h"]["retained_comments"], 2)
 
+    def test_builds_minute_cutoffs_with_minute_directory_names(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "test" / "raw"
+            input_dir.mkdir(parents=True)
+            post = _post()
+            post["comment"][1]["created_at"] = "2024-01-01T00:10:00+00:00"
+            post["comment"][2]["created_at"] = "2024-01-01T00:20:00+00:00"
+            with (input_dir / "event-1.json").open("w", encoding="utf-8") as file_obj:
+                json.dump(post, file_obj)
+
+            report = build_cutoff_datasets(
+                input_dir,
+                root / "early",
+                cutoffs=[],
+                cutoffs_minutes=[10, 20, 30],
+            )
+
+            self.assertTrue((root / "early" / "10m" / "raw").is_dir())
+            self.assertTrue((root / "early" / "20m" / "raw").is_dir())
+            self.assertEqual(report["cutoffs"]["10m"]["retained_comments"], 1)
+            self.assertEqual(report["cutoffs"]["20m"]["retained_comments"], 2)
+
+            with (root / "early" / "10m" / "raw" / "event-1.json").open(
+                "r", encoding="utf-8"
+            ) as file_obj:
+                ten_minute_post = json.load(file_obj)
+            self.assertEqual(
+                ten_minute_post["early_detection"]["cutoff_minutes"], 10.0
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
