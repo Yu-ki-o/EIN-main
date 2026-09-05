@@ -603,6 +603,7 @@ class SemanticParityDirectionEncoder(nn.Module):
 
     def forward(self, node_features, edge_index, support_weight, deny_weight):
         same = self.input_projection(node_features.float())
+        #diff = same.clone()
         diff = same.new_zeros(same.size())
         support_layers = []
         deny_layers = []
@@ -657,8 +658,8 @@ class SemanticParityDirectionEncoder(nn.Module):
         support = support_weight.to(dtype=same.dtype).view(-1, 1)
         deny = deny_weight.to(dtype=same.dtype).view(-1, 1)
 
-        same_msg = support * same[src] + deny * diff[src]
-        diff_msg = support * diff[src] + deny * same[src]
+        same_msg = support * same[src] + deny * diff[src]  #same_msg = support * same[src] s
+        diff_msg = support * diff[src] + deny * same[src] #diff_msg = deny * diff[src] 
         edge_mass = (support + deny).clamp_min(0.0)
 
         same_out.index_add_(0, dst, same_msg)
@@ -4899,10 +4900,11 @@ class BiGCN_UncertaintySemanticChange(nn.Module):
             raise ValueError(
                 "unsupported backbone_type: {}".format(self.backbone_type)
             )
-        self.bigcn_num_layers = max(
-            2,
-            int(getattr(args, "n_layers_conv", 2)),
-        )
+        # self.bigcn_num_layers = max(
+        #     2,
+        #     int(getattr(args, "n_layers_conv", 2)),
+        # )
+        self.bigcn_num_layers = 3
         self.td_conv1 = GCNConv(in_feats, hid_feats)
         self.td_conv2 = GCNConv(hid_feats + in_feats, out_feats)
         self.bu_conv1 = GCNConv(in_feats, hid_feats)
