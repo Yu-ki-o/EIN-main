@@ -293,10 +293,6 @@ if __name__ == '__main__':
     args.config_filename = cli_args.config_filename
 
     eval_only_unsupported = {
-        'RAGCL_ResGCN',
-        'RAGCL_BiGCN',
-        'Plain_ResGCN',
-        'Plain_BiGCN',
         'NEGT',
         'EBGCN',
         'EBGCN_ResGCN',
