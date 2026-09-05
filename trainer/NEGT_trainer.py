@@ -246,6 +246,22 @@ class NEGTTrainer(object):
             checkpoint = remapped
             self.logger.info('Remapped legacy NEGT checkpoint parameter names.')
 
+        model_state = self.model.state_dict()
+        missing_keys = set(model_state) - set(checkpoint)
+        legacy_unused_norm_keys = {
+            key
+            for key in model_state
+            if key.startswith('Atten_transformer1.norm1_local.')
+            or key.startswith('Atten_transformer2.norm1_local.')
+        }
+        if missing_keys and missing_keys.issubset(legacy_unused_norm_keys):
+            for key in missing_keys:
+                checkpoint[key] = model_state[key]
+            self.logger.info(
+                'Initialized {} unused legacy NEGT norm1_local entries; '
+                'these modules are not used by forward().'.format(len(missing_keys))
+            )
+
         self.model.load_state_dict(checkpoint, strict=True)
         self.logger.info(
             'Loaded evaluation checkpoint: {}'.format(checkpoint_path)
