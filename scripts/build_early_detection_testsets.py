@@ -35,6 +35,8 @@ DEFAULT_TIME_FIELDS = (
 )
 WEIBO_TIME_FORMATS = (
     "%a %b %d %H:%M:%S %z %Y",
+    "%y-%m-%d %H:%M",
+    "%Y-%m-%d %H:%M",
     "%Y-%m-%d %H:%M:%S%z",
     "%Y-%m-%d %H:%M:%S",
     "%Y/%m/%d %H:%M:%S",

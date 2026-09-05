@@ -56,6 +56,11 @@ def _post():
 
 
 class TimestampParsingTests(unittest.TestCase):
+    def test_parses_drweibo_two_digit_year_datetime(self):
+        first = parse_time_seconds("13-7-14 23:28")
+        second = parse_time_seconds("13-7-15 00:28")
+        self.assertEqual(second - first, 3600)
+
     def test_parses_weibo_datetime(self):
         first = parse_time_seconds("Mon Jan 01 08:00:00 +0800 2024")
         second = parse_time_seconds("Mon Jan 01 09:00:00 +0800 2024")
