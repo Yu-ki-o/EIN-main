@@ -32,6 +32,7 @@ from model.KAGNN import KAGNN
 from model.LIRS import LIRSGIN
 from model.NEGT import NEGT
 from model.EBGCN import EBGCN, EBGCNResGCN
+from model.kpg import KPG, KPGTrainer
 from model.LIRS_EBGCN import LIRSEBGCN
 from model.EBGCN_ResGCN_StateAuxSameDiff import (
     EBGCNResGCNStateAuxSameDiff,
@@ -221,6 +222,7 @@ def _graph_dataset_cache_part(args):
         'P2T3',
         'LIRS',
         'EBGCN',
+        'KPG',
         'EBGCN_BiGCN_StateAuxSameDiff',
     }:
         return 'tree'
@@ -544,6 +546,7 @@ def load_graph_dataset(args, path, text_encoder):
         'P2T3',
         'LIRS',
         'EBGCN',
+        'KPG',
         'EBGCN_BiGCN_StateAuxSameDiff',
     ]:
         return TreeDataset(path, args.word_embedding, text_encoder, args=args)
@@ -823,6 +826,17 @@ def EIN_NEGT_supervisor(args):
     trainer = NEGTTrainer(datasets, base_model, optimizer, args, device)
 
     print('Seed {} | Start training'.format(args.seed), flush=True)
+    return trainer.train_process()
+
+
+def EIN_KPG_supervisor(args):
+    init_seed(args.seed, need_deepfix=True)
+    device = resolve_device(args)
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    text_encoder = build_text_encoder(args, device, label_source_path)
+    datasets = build_experiment_datasets(args, text_encoder)
+    model = KPG(args.in_feats, args.hidden_dim, args.num_classes, args, device).to(device)
+    trainer = KPGTrainer(datasets, model, model.init_optimizer(args), args, device)
     return trainer.train_process()
 
 

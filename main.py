@@ -37,6 +37,7 @@ from supervisor import (
     EIN_Plain_ResGCN_supervisor,
     EIN_NEGT_supervisor,
     EIN_EBGCN_supervisor,
+    EIN_KPG_supervisor,
     EIN_EBGCN_ResGCN_supervisor,
     EIN_LIRS_EBGCN_supervisor,
     EIN_EBGCN_ResGCN_StateAuxSameDiff_supervisor,
@@ -90,6 +91,8 @@ def _summary_model_parts(args):
         return 'NEGT', None
     if base_model == 'EBGCN':
         return 'EBGCN', None
+    if base_model == 'KPG':
+        return 'KPG', None
     if base_model == 'EBGCN_ResGCN':
         return 'EBGCN', 'ResGCN'
     if base_model == 'LIRS_EBGCN':
@@ -238,6 +241,8 @@ if __name__ == '__main__':
         type=str,
         help='override config device, e.g. cuda:0, cuda:1, 0, 1, or cpu',
     )
+    parser.add_argument('--seed', default=None, type=int,
+                        help='run one seed instead of the default five-seed experiment')
     cli_args = parser.parse_args()
 
     print(f'Starting experiment with configurations in {cli_args.config_filename}...')
@@ -260,7 +265,10 @@ if __name__ == '__main__':
 
     #对应上该main文件开头从supervisor中import的对应模型的监督器
     supervisor = globals()['EIN_' + args.base_model + '_supervisor']
-    for i in range(5):
+    if args.base_model == 'KPG' and getattr(args, 'kpg_test_only', False) and cli_args.seed is None:
+        parser.error('KPG checkpoint testing requires --seed matching its original training split.')
+    seeds = [cli_args.seed] if cli_args.seed is not None else range(5)
+    for i in seeds:
         args.seed = i
         result = supervisor(args)
         if result is not None:
