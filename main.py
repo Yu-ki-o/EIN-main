@@ -262,6 +262,12 @@ if __name__ == '__main__':
     )
     parser.add_argument('--seed', default=None, type=int,
                         help='run one seed instead of the default five-seed experiment')
+    parser.add_argument('--eval_only', action='store_true',
+                        help='evaluate an existing checkpoint without training')
+    parser.add_argument('--checkpoint_path', default=None, type=str,
+                        help='checkpoint to load for --eval_only')
+    parser.add_argument('--early_test_root', default=None, type=str,
+                        help='early-detection test directory containing raw/ JSON files')
     cli_args = parser.parse_args()
 
     print(f'Starting experiment with configurations in {cli_args.config_filename}...')
@@ -287,6 +293,7 @@ if __name__ == '__main__':
     args.config_filename = cli_args.config_filename
 
     eval_only_unsupported = {
+        'KPG',
         'EBGCN',
         'EBGCN_ResGCN',
         'LIRS_EBGCN',
