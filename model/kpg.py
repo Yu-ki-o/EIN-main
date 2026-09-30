@@ -26,6 +26,31 @@ from torch_geometric.data import Batch, Data
 from torch_geometric.nn import GCNConv, global_mean_pool
 
 
+@torch.no_grad()
+def _sample_with_replacement(weights, num_samples, generator=None):
+    """Keep strict determinism without CUDA multinomial's multi-draw cumsum.
+
+    In strict mode, compute the inverse CDF on CPU. Uniform draws still use
+    the original device/generator, preserving the per-event random stream.
+    Single draws retain PyTorch's original sampling path.
+    """
+    if num_samples <= 1 or not torch.are_deterministic_algorithms_enabled():
+        return torch.multinomial(weights, num_samples, replacement=True,
+                                 generator=generator)
+    probabilities = weights.detach().to(device='cpu', dtype=torch.float64)
+    if probabilities.ndim != 1 or not bool(torch.isfinite(probabilities).all()) or bool((probabilities < 0).any()):
+        raise ValueError('KPG sampling requires finite nonnegative 1-D weights.')
+    cumulative = probabilities.cumsum(0)
+    if cumulative.numel() == 0 or not bool(cumulative[-1] > 0):
+        raise ValueError('KPG sampling requires a positive total weight.')
+    cumulative = cumulative / cumulative[-1]
+    uniform = torch.rand(num_samples, device=weights.device,
+                         dtype=torch.float64, generator=generator).cpu()
+    # right=True skips zero-mass bins, including when a uniform draw is zero.
+    indices = torch.searchsorted(cumulative, uniform, right=True)
+    return indices.to(device=weights.device)
+
+
 class CVAE(nn.Module):
     """Continuous-feature counterpart of the author's context/root CVAE."""
 
@@ -265,7 +290,7 @@ class KPG(nn.Module):
         else:
             weights[0] = 1
         n = self.candidate_threshold + 1 - (state.x.size(0) - len(state.selected))
-        contexts = torch.multinomial(weights, n, replacement=True, generator=generator)
+        contexts = _sample_with_replacement(weights, n, generator=generator)
         generated = self.response_generator.generate(
             state.x[contexts], state.x[0].expand(n, -1), generator)
         return _TreeState(torch.cat((state.x, generated), 0),
