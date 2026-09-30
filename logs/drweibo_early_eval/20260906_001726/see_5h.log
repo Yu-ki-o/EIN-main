@@ -1,0 +1,42 @@
+/public/wc/.conda/envs/ein/lib/python3.12/site-packages/jieba/_compat.py:18: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+运行到这
+Starting experiment with configurations in /public/wc/EIN-main/configs/EIN/DRWeibo_SEEGraphMAE_word2vec.yaml...
+Command line device override: cuda:0
+Seed 0 | Building text encoder on cuda:0
+total words: 46529
+Seed 0 | Building experiment datasets
+Seed 0 | Reusing processed dataset cache: dataset/DRWeibo/dataset_cache/mode-id__graph-resgcn-tree__emb-word2vec__lang-ch__hop-20__centrality-PageRank__undir-False__tok-jieba__vec-200/split_622_k10000/seed_0
+Seed 0 | Replacing full test set with early test set: /public/wc/EIN-main/dataset/DRWeibo/early_detection/resgcn/seed_0/5h | cache data_early_93ae6eed79d50e1d.pt
+Seed 0 | Initializing SEEGraphMAE
+2026-09-06 00:28:52: Experiment log path in: /public/wc/EIN-main/experiments/EIN/DRWeibo/see_graphmae_directed_valloss_word2vec_manifest_timetest/seed_0/early_detection/5h
+2026-09-06 00:28:52: Experiment configs are: Namespace(model_name='EIN', dataset='DRWeibo', num_classes=2, language='ch', word_embedding='word2vec', e5_model_name='intfloat/multilingual-e5-base', e5_max_length=128, e5_batch_size=64, result_name='see_graphmae_directed_valloss_word2vec_manifest_timetest', experiment_mode='id', ood_source_datasets=[], ood_val_domain='source', debug=False, seed=0, device='cuda:0', lr=0.0005, weight_decay=0.0001, patience=10, n_epochs=100, selection_metric='val_loss', split='622', num_workers=0, base_model='SEEGraphMAE', batch_size=128, hidden_dim=128, in_feats=200, tokenize_mode='jieba', k=10000, vector_size=200, undirected=False, dropout=0.3, global_pool='mean', max_hop=20, lamda=0.0, classification_class_weights=[1.0, 1.0], see_mask_ratio=0.25, see_mlp_layers=2, see_decoder_layers=2, see_dropout=0.0, see_alpha_rec=0.1, see_alpha_uni=0.5, see_uniformity_t=2.0, see_global_pool='mean', see_ttt_enabled=True, see_log_plain_test_before_ttt=True, see_ttt_epochs=3, see_ttt_lr=0.0005, see_ttt_weight_decay=0.0, see_ttt_batch_size=16, see_ttt_reset_each_batch=True, see_use_subgraph_regularizer=True, see_alpha_sub=0.5, see_subgraph_sparsity=0.1, see_subgraph_mask_steps=10, see_subgraph_mask_lr=0.1, see_subgraph_mask_init=2.0, eval_only=True, checkpoint_path='/public/wc/EIN-main/experiments/EIN/DRWeibo/see_graphmae_directed_valloss_word2vec_manifest/seed_0/best_model.pth.m', early_test_root='/public/wc/EIN-main/dataset/DRWeibo/early_detection/resgcn/seed_0/5h', config_filename='/public/wc/EIN-main/configs/EIN/DRWeibo_SEEGraphMAE_word2vec.yaml', log_dir='/public/wc/EIN-main/experiments/EIN/DRWeibo/see_graphmae_directed_valloss_word2vec_manifest_timetest/seed_0/early_detection/5h')
+2026-09-06 00:28:52: Runtime device: cuda:0 | pin_memory: True | non_blocking transfer: True
+Creat Log File in:  /public/wc/EIN-main/experiments/EIN/DRWeibo/see_graphmae_directed_valloss_word2vec_manifest_timetest/seed_0/early_detection/5h/run.log
+Seed 0 | Start training
+2026-09-06 00:28:52: Loaded evaluation checkpoint: /public/wc/EIN-main/experiments/EIN/DRWeibo/see_graphmae_directed_valloss_word2vec_manifest/seed_0/best_model.pth.m
+2026-09-06 00:28:54: Test without TTT Acc: 0.8314 | AUC: 0.8297 | F1 0.8176
+2026-09-06 00:29:37: Test Acc: 0.8023 | AUC: 0.8013 | F1 0.7905
+Experiment setting:
+Target dataset: DRWeibo
+Mode: id
+OOD source datasets: []
+Validation domain: source
+Checkpoint selection metric: val_loss
+
+Seed results:
+Seed 0: Acc 0.8023 | AUC 0.8013 | F1 0.7905
+
+Average results over 1 runs:
+ACC: 80.23+/-0.00 (%)
+AUC: 80.13+/-0.00 (%)
+F1: 79.05+/-0.00 (%)
+
+Test without TTT seed results:
+Seed 0: Acc 0.8314 | AUC 0.8297 | F1 0.8176
+
+Average Test without TTT results over 1 runs:
+ACC: 83.14+/-0.00 (%)
+AUC: 82.97+/-0.00 (%)
+F1: 81.76+/-0.00 (%)
+Summary saved to: experiments/EIN/DRWeibo/see_graphmae_directed_valloss_word2vec_manifest_timetest/early_detection/5h/seed_0/summary_val_loss.txt

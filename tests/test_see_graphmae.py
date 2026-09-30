@@ -1,4 +1,7 @@
+import logging
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 
 import torch
@@ -65,6 +68,30 @@ class MiniSEEGraphMAETrainer(SEEGraphMAETrainer):
 
 
 class SEEGraphMAETest(unittest.TestCase):
+    def test_load_evaluation_checkpoint_restores_state_dict(self):
+        trainer = MiniSEEGraphMAETrainer()
+        trainer.model = torch.nn.Linear(3, 2)
+        trainer.device = torch.device("cpu")
+        trainer.logger = logging.getLogger("see-graphmae-eval-test")
+        expected = {
+            key: value.detach().clone()
+            for key, value in trainer.model.state_dict().items()
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            checkpoint_path = Path(temp_dir) / "best_model.pth.m"
+            torch.save(expected, checkpoint_path)
+            trainer.args = SimpleNamespace(checkpoint_path=str(checkpoint_path))
+            with torch.no_grad():
+                for parameter in trainer.model.parameters():
+                    parameter.zero_()
+
+            trainer.load_evaluation_checkpoint()
+
+        actual = trainer.model.state_dict()
+        for key in expected:
+            self.assertTrue(torch.equal(actual[key], expected[key]))
+
     def test_forward_and_self_supervised_loss_are_differentiable(self):
         model = SEEGraphMAE(
             in_feats=5,

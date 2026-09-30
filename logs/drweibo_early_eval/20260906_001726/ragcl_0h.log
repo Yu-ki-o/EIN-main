@@ -1,0 +1,38 @@
+/public/wc/.conda/envs/ein/lib/python3.12/site-packages/jieba/_compat.py:18: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+运行到这
+Starting experiment with configurations in /public/wc/EIN-main/configs/EIN/DRWeibo_RAGCL_ResGCN_word2vec.yaml...
+Command line device override: cuda:0
+Seed 0 | Building text encoder on cuda:0
+total words: 46529
+Seed 0 | Building experiment datasets
+Seed 0 | Reusing processed dataset cache: dataset/DRWeibo/dataset_cache/mode-id__graph-resgcn-tree__emb-word2vec__lang-ch__hop-20__centrality-PageRank__ragcl-centrality-True__undir-False__tok-jieba__vec-200/split_622_k10000/seed_0
+Seed 0 | Replacing full test set with early test set: /public/wc/EIN-main/dataset/DRWeibo/early_detection/resgcn/seed_0/0h | cache data_early_bc1a973c9a46417f.pt
+Processing...
+Building prefix dict from the default dictionary ...
+Loading model from cache /tmp/jieba.cache
+Loading model cost 1.217 seconds.
+Prefix dict has been built successfully.
+Done!
+Seed 0 | Initializing RAGCL ResGCN
+2026-09-06 00:39:26: Experiment log path in: /public/wc/EIN-main/experiments/EIN/DRWeibo/RAGCL_resgcn_directed_valloss_layer3_manifest_timetest/seed_0/early_detection/0h
+2026-09-06 00:39:26: Experiment configs are: Namespace(model_name='EIN', dataset='DRWeibo', num_classes=2, language='ch', word_embedding='word2vec', e5_model_name='intfloat/multilingual-e5-base', e5_max_length=128, e5_batch_size=64, result_name='RAGCL_resgcn_directed_valloss_layer3_manifest_timetest', experiment_mode='id', ood_source_datasets=[], ood_val_domain='source', debug=False, seed=0, device='cuda:0', lr=0.0005, weight_decay=0.0001, patience=10, n_epochs=100, selection_metric='val_loss', split='622', batch_size=128, hidden_dim=128, TDdroprate=0.2, BUdroprate=0.2, tokenize_mode='jieba', k=10000, vector_size=200, in_feats=200, n_layers_conv=3, aug1='DropEdge,mean,0.2,0.7', aug2='NodeDrop,0.2,0.7', n_layers_feat=1, n_layers_fc=2, skip_connection=True, res_branch='BNConvReLU', dropout=0.3, edge_norm=True, global_pool='sum', undirected=False, base_model='RAGCL_ResGCN', max_hop=20, use_unsup_loss=True, ragcl_lamda=0.001, centrality='PageRank', eval_only=True, checkpoint_path='/public/wc/EIN-main/experiments/EIN/DRWeibo/ragcl_resgcn_directed_valloss_layer3_manifest/seed_0/best_model.pth.m', early_test_root='/public/wc/EIN-main/dataset/DRWeibo/early_detection/resgcn/seed_0/0h', config_filename='/public/wc/EIN-main/configs/EIN/DRWeibo_RAGCL_ResGCN_word2vec.yaml', log_dir='/public/wc/EIN-main/experiments/EIN/DRWeibo/RAGCL_resgcn_directed_valloss_layer3_manifest_timetest/seed_0/early_detection/0h')
+Creat Log File in:  /public/wc/EIN-main/experiments/EIN/DRWeibo/RAGCL_resgcn_directed_valloss_layer3_manifest_timetest/seed_0/early_detection/0h/run.log
+Seed 0 | Start training
+2026-09-06 00:39:26: Loaded evaluation checkpoint: /public/wc/EIN-main/experiments/EIN/DRWeibo/ragcl_resgcn_directed_valloss_layer3_manifest/seed_0/best_model.pth.m
+2026-09-06 00:39:29: Test Acc: 0.5955 | AUC: 0.5796 | F1 0.2993
+Experiment setting:
+Target dataset: DRWeibo
+Mode: id
+OOD source datasets: []
+Validation domain: source
+Checkpoint selection metric: val_loss
+
+Seed results:
+Seed 0: Acc 0.5955 | AUC 0.5796 | F1 0.2993
+
+Average results over 1 runs:
+ACC: 59.55+/-0.00 (%)
+AUC: 57.96+/-0.00 (%)
+F1: 29.93+/-0.00 (%)
+Summary saved to: experiments/EIN/DRWeibo/RAGCL_resgcn_directed_valloss_layer3_manifest_timetest/early_detection/0h/seed_0/summary_val_loss.txt

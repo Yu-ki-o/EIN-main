@@ -31,9 +31,11 @@ from supervisor import (
     EIN_P2T3_supervisor,
     EIN_SEEGraphMAE_supervisor,
     EIN_KAGNN_supervisor,
+    EIN_SHPA_supervisor,
     EIN_RAGCL_BiGCN_supervisor,
     EIN_RAGCL_ResGCN_supervisor,
     EIN_Plain_BiGCN_supervisor,
+    EIN_Plain_GCN_supervisor,
     EIN_Plain_ResGCN_supervisor,
     EIN_NEGT_supervisor,
     EIN_EBGCN_supervisor,
@@ -66,6 +68,14 @@ def _selection_metric_part(args):
 
 def _summary_model_parts(args):
     base_model = str(getattr(args, 'base_model', 'unknown')).strip()
+    if base_model == 'SHPA':
+        backbone = str(getattr(args, 'shpa_backbone', 'gcn')).strip().lower()
+        backbone_names = {
+            'gcn': 'GCN',
+            'resgcn': 'ResGCN',
+            'bigcn': 'BiGCN',
+        }
+        return 'SHPA', backbone_names.get(backbone, backbone)
 
     if base_model.startswith('Plain_'):
         return 'Base', base_model[len('Plain_'):]
@@ -214,6 +224,15 @@ def summarize_results(results, args):
     summary_dir = os.path.join('experiments', args.model_name, args.dataset)
     if result_name:
         summary_dir = os.path.join(summary_dir, result_name)
+    if getattr(args, 'eval_only', False):
+        early_test_root = str(getattr(args, 'early_test_root', '')).rstrip('/\\')
+        cutoff_name = os.path.basename(early_test_root) or 'test'
+        summary_dir = os.path.join(
+            summary_dir,
+            'early_detection',
+            cutoff_name,
+            'seed_{}'.format(getattr(args, 'seed', 'run')),
+        )
     os.makedirs(summary_dir, exist_ok=True)
     summary_filename = (
         'summary_{}.txt'.format(_selection_metric_part(args))
@@ -253,9 +272,35 @@ if __name__ == '__main__':
     )
     if cli_args.device is not None:
         configs['device'] = normalize_device_arg(cli_args.device)
+    if cli_args.eval_only:
+        if cli_args.seed is None:
+            parser.error('--eval_only requires --seed')
+        if cli_args.checkpoint_path is None:
+            parser.error('--eval_only requires --checkpoint_path')
+        if cli_args.early_test_root is None:
+            parser.error('--eval_only requires --early_test_root')
+        configs['eval_only'] = True
+        configs['checkpoint_path'] = cli_args.checkpoint_path
+        configs['early_test_root'] = cli_args.early_test_root
     
     args = argparse.Namespace(**configs)
     args.config_filename = cli_args.config_filename
+
+    eval_only_unsupported = {
+        'EBGCN',
+        'EBGCN_ResGCN',
+        'LIRS_EBGCN',
+        'EBGCN_ResGCN_StateAuxSameDiff',
+        'EBGCN_BiGCN_StateAuxSameDiff',
+        'LIRS',
+        'TCSR',
+    }
+    if cli_args.eval_only and args.base_model in eval_only_unsupported:
+        parser.error(
+            '--eval_only is not yet implemented for the dedicated {} trainer'.format(
+                args.base_model
+            )
+        )
 
     if cli_args.device is not None:
         print('Command line device override: {}'.format(args.device))

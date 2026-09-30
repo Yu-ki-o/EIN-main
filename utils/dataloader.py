@@ -555,7 +555,7 @@ class ResGCNTreeDataset(InMemoryDataset):
 
     @property
     def processed_file_names(self):
-        return ['data.pt']
+        return [getattr(self.args, 'processed_file_name', 'data.pt')]
 
     def download(self):
         pass
@@ -652,7 +652,7 @@ class TreeDataset(InMemoryDataset):
 
     @property
     def processed_file_names(self):
-        return ['data.pt']
+        return [getattr(self.args, 'processed_file_name', 'data.pt')]
 
     def download(self):
         pass

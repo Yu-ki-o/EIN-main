@@ -52,7 +52,8 @@ class ResGCN_UncertaintySemanticChange(
         self.bns_conv = nn.ModuleList()
         self.convs = nn.ModuleList()
         edge_norm = bool(getattr(args, "edge_norm", True))
-        for _ in range(max(1, int(getattr(args, "n_layers_conv", 3)))):
+        # for _ in range(max(1, int(getattr(args, "n_layers_conv", 3)))):
+        for _ in range(3):
             self.bns_conv.append(BatchNorm1d(hid_feats))
             self.convs.append(
                 GCNConv(

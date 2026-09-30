@@ -67,6 +67,13 @@ def make_args():
         lambda_structural_balance_aux=0.05,
         structural_balance_warmup_epochs=5,
         lambda_view_mi_aux=0.0,
+        use_dual_channel_supcon=False,
+        lambda_dual_channel_supcon_aux=0.05,
+        dual_channel_supcon_dim=8,
+        dual_channel_supcon_temperature=0.2,
+        dual_channel_supcon_dropout=0.0,
+        dual_channel_supcon_support_weight=0.5,
+        dual_channel_supcon_deny_weight=0.5,
         use_semantic_parity_gnn=True,
         semantic_parity_aggregation="mean",
         semantic_parity_residual=True,
@@ -128,6 +135,109 @@ def make_batch():
         user_state=torch.zeros(1, 4, 3),
     )
     return Batch.from_data_list([first, second])
+
+
+def make_contrastive_batch():
+    samples = make_batch().to_data_list()
+    return Batch.from_data_list(
+        [
+            samples[0].clone(),
+            samples[0].clone(),
+            samples[1].clone(),
+            samples[1].clone(),
+        ]
+    )
+
+
+class DualChannelSupervisedContrastiveTest(unittest.TestCase):
+    def test_enabled_loss_updates_both_channel_projectors(self):
+        torch.manual_seed(101)
+        args = make_args()
+        args.use_dual_channel_supcon = True
+        args.lambda_dual_channel_supcon_aux = 0.05
+        args.lambda_edge_relation_aux = 0.0
+        args.use_uncertainty_sampling = False
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).train()
+
+        model(make_contrastive_batch())
+        model.auxiliary_loss().backward()
+
+        self.assertGreater(float(model._last_dual_channel_supcon_loss), 0.0)
+        self.assertGreater(float(model._last_support_supcon_loss), 0.0)
+        self.assertGreater(float(model._last_deny_supcon_loss), 0.0)
+        self.assertEqual(
+            float(model._last_dual_channel_supcon_valid_anchor_rate),
+            1.0,
+        )
+        self.assertEqual(
+            tuple(model._last_support_supcon_projection.shape),
+            (4, 8),
+        )
+        self.assertEqual(
+            tuple(model._last_deny_supcon_projection.shape),
+            (4, 8),
+        )
+        self.assertTrue(
+            torch.allclose(
+                model._last_support_supcon_projection.norm(dim=-1),
+                torch.ones(4),
+                atol=1e-6,
+            )
+        )
+        self.assertIsNotNone(model.support_supcon_projector[0].weight.grad)
+        self.assertIsNotNone(model.deny_supcon_projector[0].weight.grad)
+        self.assertGreater(
+            float(model.support_supcon_projector[0].weight.grad.abs().sum()),
+            0.0,
+        )
+        self.assertGreater(
+            float(model.deny_supcon_projector[0].weight.grad.abs().sum()),
+            0.0,
+        )
+
+    def test_anchors_without_positive_samples_are_safely_skipped(self):
+        args = make_args()
+        args.use_dual_channel_supcon = True
+        args.lambda_dual_channel_supcon_aux = 0.05
+        args.use_uncertainty_sampling = False
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=args,
+            device=torch.device("cpu"),
+        ).train()
+
+        model(make_batch())
+
+        self.assertEqual(float(model._last_dual_channel_supcon_loss), 0.0)
+        self.assertEqual(float(model._last_support_supcon_loss), 0.0)
+        self.assertEqual(float(model._last_deny_supcon_loss), 0.0)
+        self.assertEqual(
+            float(model._last_dual_channel_supcon_valid_anchor_rate),
+            0.0,
+        )
+
+    def test_disabled_mode_does_not_allocate_projection_heads(self):
+        model = BiGCN_UncertaintySemanticChange(
+            in_feats=5,
+            hid_feats=8,
+            out_feats=8,
+            num_classes=2,
+            args=make_args(),
+            device=torch.device("cpu"),
+        )
+
+        self.assertIsNone(model.support_supcon_projector)
+        self.assertIsNone(model.deny_supcon_projector)
 
 
 class SemanticTreeAttentionComplementaryFusionTest(unittest.TestCase):

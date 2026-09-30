@@ -1,0 +1,38 @@
+# SHPA: paper Sections 2.2--2.4; reuse existing ResGCN graph/Word2Vec caches.
+model_name: EIN
+base_model: SHPA
+dataset: Weibo
+num_classes: 2
+language: ch
+word_embedding: word2vec
+tokenize_mode: jieba
+vector_size: 200
+in_feats: 200
+result_name: shpa_weibo_layer3_resgcn
+experiment_mode: id
+debug: false
+seed: 0
+device: cuda
+split: '622'
+k: 10000
+max_hop: 72
+# Keep the cache's original setting. SHPA symmetrizes each stance graph itself.
+undirected: false
+reuse_dataset_cache: true
+rebuild_dataset_cache: false
+num_workers: 0
+
+batch_size: 128
+hidden_dim: 128
+lr: 0.0005
+n_epochs: 100
+patience: 10
+selection_metric: val_loss
+# The paper does not specify dropout or weight decay; both are disabled.
+dropout: 0.0
+weight_decay: 0.0
+# Relation-channel encoder: gcn, resgcn, or bigcn.
+shpa_backbone: resgcn
+shpa_num_layers: 3
+shpa_temperature: 0.2
+shpa_lambda_contrastive: 0.5
