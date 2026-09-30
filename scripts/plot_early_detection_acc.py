@@ -47,7 +47,7 @@ MARKERS = {
     "SEE": "D",
     "Our Model": "*",
 }
-DISPLAY_NAMES = {"Our Model": "Ours"}
+DISPLAY_NAMES = {"Our Model": "Ours","SEE": "GARD"}
 PANEL_LABELS = {
     "DRWeibo": "(a) DRWeibo",
     "PHEME": "(b) PHEME",

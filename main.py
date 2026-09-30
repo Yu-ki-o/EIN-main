@@ -31,9 +31,11 @@ from supervisor import (
     EIN_P2T3_supervisor,
     EIN_SEEGraphMAE_supervisor,
     EIN_KAGNN_supervisor,
+    EIN_SHPA_supervisor,
     EIN_RAGCL_BiGCN_supervisor,
     EIN_RAGCL_ResGCN_supervisor,
     EIN_Plain_BiGCN_supervisor,
+    EIN_Plain_GCN_supervisor,
     EIN_Plain_ResGCN_supervisor,
     EIN_NEGT_supervisor,
     EIN_EBGCN_supervisor,
@@ -65,6 +67,14 @@ def _selection_metric_part(args):
 
 def _summary_model_parts(args):
     base_model = str(getattr(args, 'base_model', 'unknown')).strip()
+    if base_model == 'SHPA':
+        backbone = str(getattr(args, 'shpa_backbone', 'gcn')).strip().lower()
+        backbone_names = {
+            'gcn': 'GCN',
+            'resgcn': 'ResGCN',
+            'bigcn': 'BiGCN',
+        }
+        return 'SHPA', backbone_names.get(backbone, backbone)
 
     if base_model.startswith('Plain_'):
         return 'Base', base_model[len('Plain_'):]

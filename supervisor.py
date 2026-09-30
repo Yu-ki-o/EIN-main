@@ -31,6 +31,7 @@ from model.DepthAwareGraphTransformer import DepthAwareGraphTransformer
 from model.P2T3 import P2T3
 from model.SEEGraphMAE import SEEGraphMAE
 from model.KAGNN import KAGNN
+from model.SHPA import SHPA
 from model.LIRS import LIRSGIN
 from model.NEGT import NEGT
 from model.EBGCN import EBGCN, EBGCNResGCN
@@ -42,6 +43,7 @@ from model.EBGCN_BiGCN_StateAuxSameDiff import (
     EBGCNBiGCNStateAuxSameDiff,
 )
 from model.RAGCL_baselines import RAGCLBiGCN, RAGCLResGCN
+from model.GCN import GCN
 from trainer.EIN_trainer import EINTrainer
 from trainer.LIRS_trainer import LIRSTrainer
 from trainer.NEGT_trainer import NEGTTrainer
@@ -182,6 +184,9 @@ def _safe_cache_part(value):
 
 def _graph_dataset_cache_part(args):
     base_model = str(getattr(args, 'base_model', '')).strip()
+    if base_model == 'SHPA':
+        # Same serialized features, edges and stance labels as previous GCN runs.
+        return 'resgcn-tree'
     if base_model == 'P2T3':
         return 'p2t3-tree'
     if base_model == 'StanceGuidedGAT':
@@ -248,6 +253,7 @@ def _graph_dataset_cache_part(args):
         'RAGCL_BiGCN',
         'Plain_ResGCN',
         'Plain_BiGCN',
+        'Plain_GCN',
     }:
         return 'resgcn-tree'
     return base_model or 'unknown'
@@ -468,6 +474,10 @@ def build_strict_ood_paths(args):
 
 
 def load_graph_dataset(args, path, text_encoder):
+    if args.base_model == 'SHPA':
+        return ResGCNTreeDataset(
+            path, args.word_embedding, text_encoder, args.undirected, args=args,
+        )
     if args.base_model == 'StanceGuidedGAT':
         backbone = str(
             getattr(args, 'stance_gat_backbone', 'bigcn')
@@ -549,7 +559,7 @@ def load_graph_dataset(args, path, text_encoder):
         'EBGCN_BiGCN_StateAuxSameDiff',
     ]:
         return TreeDataset(path, args.word_embedding, text_encoder, args=args)
-    if args.base_model in ['RAGCL_ResGCN', 'RAGCL_BiGCN', 'Plain_ResGCN', 'Plain_BiGCN']:
+    if args.base_model in ['RAGCL_ResGCN', 'RAGCL_BiGCN', 'Plain_ResGCN', 'Plain_BiGCN', 'Plain_GCN']:
         return ResGCNTreeDataset(path, args.word_embedding, text_encoder, args.undirected, args=args)
     raise ValueError('Unsupported base_model: {}'.format(args.base_model))
 
@@ -835,6 +845,23 @@ def EIN_RAGCL_BiGCN_supervisor(args):
     trainer = RAGCLTrainer(datasets, base_model, optimizer, args, device)
 
     print('Seed {} | Start training'.format(args.seed), flush=True)
+    return trainer.train_process()
+
+
+def EIN_Plain_GCN_supervisor(args):
+    init_seed(args.seed, need_deepfix=True)
+    device = resolve_device(args)
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
+    text_encoder = build_text_encoder(args, device, label_source_path)
+    print('Seed {} | Building experiment datasets'.format(args.seed), flush=True)
+    datasets = build_experiment_datasets(args, text_encoder)
+    print('Seed {} | Initializing plain GCN'.format(args.seed), flush=True)
+    base_model = GCN(
+        args.in_feats, args.hidden_dim, args.num_classes, args,
+    ).to(device)
+    optimizer = base_model.init_optimizer(args)
+    trainer = EINTrainer(datasets, base_model, optimizer, args, device)
     return trainer.train_process()
 
 
@@ -1648,6 +1675,27 @@ def EIN_SEEGraphMAE_supervisor(args):
     trainer = SEEGraphMAETrainer(datasets, base_model, optimizer, args, device)
 
     print('Seed {} | Start training'.format(args.seed), flush=True)
+    return trainer.train_process()
+
+
+def EIN_SHPA_supervisor(args):
+    init_seed(args.seed, need_deepfix=True)
+    device = resolve_device(args)
+    source_path, cache_path = dataset_paths(args, args.dataset)
+    # A ready graph cache already contains Word2Vec features. Do not even load
+    # the text encoder (or the LLM) on this path.
+    datasets = load_cached_experiment_datasets(args, None, cache_path)
+    if datasets is None:
+        text_encoder = build_text_encoder(args, device, source_path)
+        datasets = build_experiment_datasets(args, text_encoder)
+    elif str(getattr(args, 'early_test_root', '')).strip():
+        text_encoder = build_text_encoder(args, device, source_path)
+        datasets = replace_early_test_dataset(args, text_encoder, datasets)
+    base_model = SHPA(
+        args.in_feats, args.hidden_dim, args.num_classes, args, device,
+    ).to(device)
+    optimizer = base_model.init_optimizer(args)
+    trainer = EINTrainer(datasets, base_model, optimizer, args, device)
     return trainer.train_process()
 
 

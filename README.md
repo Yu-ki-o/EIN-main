@@ -6,6 +6,42 @@ This repository is the implementation of The Web Conference 2025 (WWW'25) paper:
 
 run main.py to train and test the model.
 
+## Plain GCN baseline
+
+`model/GCN.py` provides a plain GCN (`base_model: Plain_GCN`): two
+normalized GCNConv layers with self-loops, ReLU/dropout, mean pooling and a
+linear classifier. It uses only node text features and propagation edges,
+with no residual, stance, semantic-change, or auxiliary-loss branches.
+The three Word2Vec configs use undirected graphs, the existing dataset
+splits, and validation-loss checkpoint selection:
+
+```bash
+python main.py --config_filename configs/EIN/Pheme_GCN_word2vec.yaml
+python main.py --config_filename configs/EIN/Weibo_GCN_word2vec.yaml
+python main.py --config_filename configs/EIN/DRWeibo_GCN_word2vec.yaml
+```
+
+Each command runs seeds 0–4; add `--seed 0` for a single run or
+`--device cpu` to override the device. Results are saved under
+`experiments/EIN/<dataset>/plain_gcn_undirected_valloss_word2vec/`.
+
+## SHPA
+
+The repository includes the paper's stance-aware heterogeneous propagation
+and cross-sample alignment model. It reuses the existing Word2Vec graph caches
+and their offline Gemma support/deny edge labels:
+
+```bash
+python main.py --config_filename configs/EIN/Pheme_SHPA_word2vec.yaml --seed 0
+python main.py --config_filename configs/EIN/Weibo_SHPA_word2vec.yaml --seed 0
+python main.py --config_filename configs/EIN/DRWeibo_SHPA_word2vec.yaml --seed 0
+```
+
+See [docs/SHPA.md](docs/SHPA.md) for the equation-to-code mapping, cache
+behavior, model location, implementation choices, and validation commands.
+Set `shpa_backbone` in any SHPA config to `gcn`, `resgcn`, or `bigcn`; all
+three choices keep using the same processed graph cache.
+
 ## P2T3
 
 The repository includes an EIN-compatible implementation of **P2T3:
