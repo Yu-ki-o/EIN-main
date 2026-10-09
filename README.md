@@ -6,6 +6,25 @@ This repository is the implementation of The Web Conference 2025 (WWW'25) paper:
 
 run main.py to train and test the model.
 
+## Cross-dataset OOD experiments
+
+The six directed transfers among DRWeibo, Weibo and Pheme reuse the existing
+models through `experiment_mode: ood`. Each source has a fixed 80/20
+train/validation split; target data is used only for final evaluation. Repeated
+source posts are deduplicated before splitting, and source-overlapping target
+posts are excluded. The two targets share the same source split for each seed.
+
+```bash
+python scripts/prepare_ood_splits.py --all-pairs --output-dir dataset/ood_splits
+python main.py --config_filename configs/ood/DRWeibo_to_Weibo_BiGCN_e5.yaml --seed 0
+```
+
+Shared multilingual E5 features allow the same model architecture to transfer
+between Chinese and English. See [docs/OOD.md](docs/OOD.md) for all six configs,
+audit counts, source-only Word2Vec, and converting other model configurations.
+These are zero-shot cross-dataset protocols inspired by CSDA, not a reproduction
+of its COVID19 datasets or causal subgraph model.
+
 ## Plain GCN baseline
 
 `model/GCN.py` provides a plain GCN (`base_model: Plain_GCN`): two
@@ -24,6 +43,62 @@ python main.py --config_filename configs/EIN/DRWeibo_GCN_word2vec.yaml
 Each command runs seeds 0–4; add `--seed 0` for a single run or
 `--device cpu` to override the device. Results are saved under
 `experiments/EIN/<dataset>/plain_gcn_undirected_valloss_word2vec/`.
+
+## DIGNN-inspired rumor detection
+
+`model/DIGNN.py` separates a structure-only propagation encoder from a text
+MLP, fuses event representations with attention, and trains with view
+reconstruction and an HSIC independence penalty. This adapts the ICDM 2022
+DIGNN ideas to graph-level rumor detection; HSIC replaces the paper's
+variational mutual-information objective.
+
+```bash
+python main.py --config_filename configs/EIN/Pheme_DIGNN_word2vec.yaml --seed 0
+python main.py --config_filename configs/EIN/Weibo_DIGNN_word2vec.yaml --seed 0
+python main.py --config_filename configs/EIN/DRWeibo_DIGNN_word2vec.yaml --seed 0
+```
+
+The configs reuse existing Word2Vec features, graph caches and splits. Omit
+`--seed` to run seeds 0–4; add `--device cpu` for CPU execution.
+See [docs/DIGNN.md](docs/DIGNN.md) for the paper-to-code mapping, losses and ablations.
+
+## NodeIGM
+
+The graph-level NodeIGM model learns evidence edges and trains on multiple
+restored-edge environments. Nodes isolated after edge selection are excluded
+from graph pooling, including the source node. The three ID Word2Vec configs
+reuse the existing GCN data caches and select checkpoints by validation loss:
+
+```bash
+python main.py --config_filename configs/EIN/Pheme_NodeIGM_word2vec.yaml --seed 0
+python main.py --config_filename configs/EIN/Weibo_NodeIGM_word2vec.yaml --seed 0
+python main.py --config_filename configs/EIN/DRWeibo_NodeIGM_word2vec.yaml --seed 0
+```
+
+Omit `--seed` to run all five seeds, or add `--device cpu` for CPU execution.
+See [docs/NodeIGM.md](docs/NodeIGM.md) for the model interface and parameters.
+
+## GroupGain
+
+GroupGain forms deterministic reply groups before message passing, deduplicates
+group relations, and predicts conditional discriminative gain to gate messages
+and graph readout. The dedicated trainer selects and freezes an ungated teacher,
+pretrains the gain head, then jointly trains the student using classification and
+gain losses. All three configs reuse the existing fixed Word2Vec features and
+event splits, with validation-loss checkpoint selection and generic relations:
+
+```bash
+python main.py --config_filename configs/EIN/DRWeibo_GroupGain_word2vec.yaml --seed 0
+python main.py --config_filename configs/EIN/Weibo_GroupGain_word2vec.yaml --seed 0
+python main.py --config_filename configs/EIN/Pheme_GroupGain_word2vec.yaml --seed 0
+```
+
+Omit `--seed` to run seeds 0–4; add `--device cpu` for CPU execution.
+Teacher, gain-head and student training budgets are independently configurable.
+Results are saved under
+`experiments/EIN/<dataset>/group_gain_full_undirected_valloss_word2vec/seed_<seed>/`.
+The student checkpoint supports inference without the teacher or gain targets.
+See [docs/GroupGain.md](docs/GroupGain.md) for stages, ablations and limitations.
 
 ## SHPA
 

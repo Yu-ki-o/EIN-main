@@ -1,0 +1,40 @@
+# DRWeibo fixed-seed (0-4) test means: ACC 90.0831%, hard-label AUC 89.9660%, binary F1 89.3594%.
+# Single minimum-val_loss checkpoint per seed; no parameter averaging.
+# DIGNN.py unchanged; hidden_dim tuned from 128 to 64.
+# F1 is 0.1406 percentage points below 89.5%; see docs/DIGNN_DRWeibo_tuning.md.
+model_name: EIN
+base_model: DIGNN
+dataset: DRWeibo
+num_classes: 2
+language: ch
+word_embedding: word2vec
+result_name: dignn_tuning_c06
+experiment_mode: id
+ood_source_datasets: []
+ood_val_domain: source
+debug: false
+seed: 0
+device: cpu
+lr: 0.0003
+weight_decay: 0.003
+patience: 20
+n_epochs: 100
+selection_metric: val_loss
+split: '622'
+num_workers: 0
+batch_size: 64
+hidden_dim: 64
+in_feats: 200
+vector_size: 200
+tokenize_mode: jieba
+k: 10000
+n_layers_conv: 3
+dropout: 0.5
+undirected: true
+dignn_fusion: attention
+dignn_text_recon_weight: 0.01
+dignn_structure_recon_weight: 0.01
+dignn_edge_recon_weight: 0.01
+dignn_independence_weight: 0.001
+max_hop: 20
+lamda: 0.0

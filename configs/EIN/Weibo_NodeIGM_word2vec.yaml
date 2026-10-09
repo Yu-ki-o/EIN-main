@@ -1,0 +1,50 @@
+# model and data
+model_name: EIN
+base_model: NodeIGM
+dataset: Weibo
+num_classes: 2
+language: ch
+word_embedding: word2vec
+result_name: nodeigm_gcn_evidence_undirected_valloss_word2vec
+experiment_mode: id
+ood_source_datasets: []
+ood_val_domain: source
+debug: False
+
+# training parameters (main.py runs seeds 0-4 unless --seed is supplied)
+seed: 0
+device: cuda
+lr: 0.0005
+weight_decay: 0.00001
+patience: 10
+n_epochs: 100
+selection_metric: val_loss
+split: '622'
+num_workers: 0
+
+# NodeIGM GCN backbone; matched to the plain-GCN dataset settings
+batch_size: 128
+hidden_dim: 128
+in_feats: 200
+vector_size: 200
+tokenize_mode: jieba
+k: 10000
+n_layers_conv: 3
+dropout: 0.3
+global_pool: mean
+undirected: True
+
+# NodeIGM evidence selection and graph-level environment consistency
+# These are initial settings, not tuned dataset-specific results.
+nodeigm_edge_threshold: 0.5
+nodeigm_keep_ratio: 0.7
+nodeigm_degree_threshold: 0  # disable degree-based hub preservation
+nodeigm_mix_ratios: [0.0, 0.1, 1.0]
+nodeigm_env_weight: 0.1
+nodeigm_variance_weight: 1.0
+nodeigm_keep_weight: 0.01
+nodeigm_warmup_epochs: 10
+
+# Required by the shared data/trainer interface; NodeIGM does not model states.
+max_hop: 72
+lamda: 0.0

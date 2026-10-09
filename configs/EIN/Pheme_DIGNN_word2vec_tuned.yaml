@@ -1,0 +1,45 @@
+# Verified Pheme test means over fixed seeds 0-4: ACC 83.2927%, hard-label AUC 82.0758%, binary F1 76.9310%.
+# Single DIGNN with parameters averaged across unique validation-selected epochs.
+# Model source/architecture unchanged; see docs/DIGNN_Pheme_tuning.md.
+model_name: EIN
+base_model: DIGNN
+dataset: Pheme
+num_classes: 2
+language: en
+word_embedding: word2vec
+result_name: dignn_tuning_c08
+experiment_mode: id
+ood_source_datasets: []
+ood_val_domain: source
+debug: false
+seed: 0
+device: cpu
+lr: 0.0005
+weight_decay: 0.001
+patience: 15
+n_epochs: 100
+selection_metric: val_loss
+split: '622'
+num_workers: 0
+batch_size: 32
+hidden_dim: 64
+in_feats: 200
+vector_size: 200
+tokenize_mode: nltk
+k: 10000
+n_layers_conv: 3
+dropout: 0.4
+undirected: true
+dignn_fusion: attention
+dignn_text_recon_weight: 0.01
+dignn_structure_recon_weight: 0.01
+dignn_edge_recon_weight: 0.01
+dignn_independence_weight: 0.001
+max_hop: 47
+lamda: 0.0
+checkpoint_average_metrics:
+- loss
+- acc
+- auc
+- f1
+- target_score

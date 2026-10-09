@@ -6,6 +6,11 @@ import os
 import re
 from utils.word2vec import *
 from utils.dataloader import *
+from utils.ood_runtime import (
+    prepare_ood, ood_cache_token, ood_word2vec_path,
+    ood_training_sentences, write_ood_provenance,
+)
+from utils.ood_splits import materialize_ood_posts
 from model.EIN_ResGCN import ResGCN
 from model.EIN_ResGCN_Uncertainty import ResGCN_Uncertainty
 from model.EIN_BiGCN import BiGCN
@@ -45,6 +50,10 @@ from model.EBGCN_BiGCN_StateAuxSameDiff import (
 )
 from model.RAGCL_baselines import RAGCLBiGCN, RAGCLResGCN
 from model.GCN import GCN
+from model.DIGNN import DIGNN
+from model.NodeIGM import NodeIGM
+from model.GroupGain import GroupGain
+from trainer.GroupGain_trainer import GroupGainTrainer
 from trainer.EIN_trainer import EINTrainer
 from trainer.LIRS_trainer import LIRSTrainer
 from trainer.NEGT_trainer import NEGTTrainer
@@ -119,9 +128,14 @@ def resolve_device(args):
 
 
 def build_text_encoder(args, device, label_source_path):
+    is_ood = getattr(args, 'experiment_mode', 'id') == 'ood'
+    if is_ood:
+        prepare_ood(args)
     if args.word_embedding == 'word2vec':
         configured_model_path = getattr(args, 'word2vec_model_path', None)
-        if configured_model_path is not None and str(configured_model_path).strip():
+        if is_ood:
+            model_path = str(ood_word2vec_path(args))
+        elif configured_model_path is not None and str(configured_model_path).strip():
             model_path = os.path.expanduser(str(configured_model_path).strip())
         else:
             model_path = os.path.join(
@@ -133,7 +147,8 @@ def build_text_encoder(args, device, label_source_path):
             model_dir = os.path.dirname(model_path)
             if model_dir:
                 os.makedirs(model_dir, exist_ok=True)
-            sentences = collect_sentences(label_source_path, args.language, args.tokenize_mode)
+            sentences = (ood_training_sentences(args, word_tokenizer) if is_ood else
+                         collect_sentences(label_source_path, args.language, args.tokenize_mode))
             w2v_model = train_word2vec(sentences, args.vector_size, args.seed)
             w2v_model.save(model_path)
 
@@ -147,6 +162,8 @@ def build_text_encoder(args, device, label_source_path):
             local_files_only=getattr(args, 'e5_local_files_only', False)
         )
         args.in_feats = encoder.embedding_dim
+        if is_ood:
+            args._ood_embedding_dim = encoder.embedding_dim
     else:
         raise ValueError('Unsupported word_embedding: {}'.format(args.word_embedding))
 
@@ -256,6 +273,9 @@ def _graph_dataset_cache_part(args):
         'Plain_ResGCN',
         'Plain_BiGCN',
         'Plain_GCN',
+        'DIGNN',
+        'NodeIGM',
+        'GroupGain',
     }:
         return 'resgcn-tree'
     return base_model or 'unknown'
@@ -271,6 +291,8 @@ def _requires_ragcl_centrality(args):
 
 
 def get_dataset_cache_name(args):
+    if getattr(args, 'experiment_mode', 'id') == 'ood':
+        prepare_ood(args)
     word_embedding = str(getattr(args, 'word_embedding', 'unknown')).strip()
     parts = [
         'mode-{}'.format(getattr(args, 'experiment_mode', 'id')),
@@ -328,6 +350,9 @@ def get_dataset_cache_name(args):
                 'val-{}'.format(getattr(args, 'ood_val_domain', 'source')),
             ]
         )
+
+    if getattr(args, 'experiment_mode', 'id') == 'ood':
+        parts.append('manifest-{}'.format(ood_cache_token(args)))
 
     return '__'.join(_safe_cache_part(part) for part in parts)
 
@@ -543,6 +568,9 @@ def load_graph_dataset(args, path, text_encoder):
         'TCSR',
         'EBGCN_ResGCN',
         'EBGCN_ResGCN_StateAuxSameDiff',
+        'NodeIGM',
+        'GroupGain',
+        'DIGNN',
     ]:
         return ResGCNTreeDataset(path, args.word_embedding, text_encoder, args.undirected, args=args)
     if args.base_model in [
@@ -608,6 +636,18 @@ def replace_early_test_dataset(args, text_encoder, datasets):
 
 def build_experiment_datasets(args, text_encoder):
     experiment_mode = getattr(args, 'experiment_mode', 'id')
+    if experiment_mode == 'ood':
+        manifest = prepare_ood(args)
+        _, label_dataset_path = dataset_paths(args, args.dataset)
+        cached_datasets = load_cached_experiment_datasets(args, text_encoder, label_dataset_path)
+        if cached_datasets is not None:
+            return cached_datasets
+        paths = write_split_posts(
+            label_dataset_path,
+            *(materialize_ood_posts(manifest, split) for split in ('train', 'val', 'test'))
+        )
+        write_ood_provenance(args, label_dataset_path)
+        return tuple(load_graph_dataset(args, path, text_encoder) for path in paths)
     if experiment_mode == 'id':
         _, label_dataset_path = dataset_paths(args, args.dataset)
         cached_datasets = load_cached_experiment_datasets(
@@ -865,6 +905,58 @@ def EIN_Plain_GCN_supervisor(args):
     ).to(device)
     optimizer = base_model.init_optimizer(args)
     trainer = EINTrainer(datasets, base_model, optimizer, args, device)
+    return trainer.train_process()
+
+
+def EIN_DIGNN_supervisor(args):
+    """Train the disentangled topology/text event classifier with EINTrainer."""
+    init_seed(args.seed, need_deepfix=True)
+    device = resolve_device(args)
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
+    text_encoder = build_text_encoder(args, device, label_source_path)
+    print('Seed {} | Building experiment datasets'.format(args.seed), flush=True)
+    datasets = build_experiment_datasets(args, text_encoder)
+    print('Seed {} | Initializing DIGNN rumor classifier'.format(args.seed), flush=True)
+    base_model = DIGNN(
+        args.in_feats, args.hidden_dim, args.num_classes, args,
+    ).to(device)
+    optimizer = base_model.init_optimizer(args)
+    trainer = EINTrainer(datasets, base_model, optimizer, args, device)
+    return trainer.train_process()
+
+
+def EIN_NodeIGM_supervisor(args):
+    init_seed(args.seed, need_deepfix=True)
+    device = resolve_device(args)
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
+    text_encoder = build_text_encoder(args, device, label_source_path)
+    print('Seed {} | Building experiment datasets'.format(args.seed), flush=True)
+    datasets = build_experiment_datasets(args, text_encoder)
+    print('Seed {} | Initializing NodeIGM graph classifier'.format(args.seed), flush=True)
+    base_model = NodeIGM(
+        args.in_feats, args.hidden_dim, args.num_classes, args,
+    ).to(device)
+    optimizer = base_model.init_optimizer(args)
+    trainer = EINTrainer(datasets, base_model, optimizer, args, device)
+    return trainer.train_process()
+
+
+def EIN_GroupGain_supervisor(args):
+    """Reuse fixed features/splits and run the teacher/head/student stages."""
+    init_seed(args.seed, need_deepfix=True)
+    device = resolve_device(args)
+    label_source_path, _ = dataset_paths(args, args.dataset)
+    print('Seed {} | Building text encoder on {}'.format(args.seed, device), flush=True)
+    text_encoder = build_text_encoder(args, device, label_source_path)
+    print('Seed {} | Building experiment datasets'.format(args.seed), flush=True)
+    datasets = build_experiment_datasets(args, text_encoder)
+    print('Seed {} | Initializing GroupGain staged classifier'.format(args.seed), flush=True)
+    base_model = GroupGain(
+        args.in_feats, args.hidden_dim, args.num_classes, args,
+    ).to(device)
+    trainer = GroupGainTrainer(datasets, base_model, args, device)
     return trainer.train_process()
 
 
@@ -1705,6 +1797,8 @@ def EIN_SHPA_supervisor(args):
     elif str(getattr(args, 'early_test_root', '')).strip():
         text_encoder = build_text_encoder(args, device, source_path)
         datasets = replace_early_test_dataset(args, text_encoder, datasets)
+    if getattr(args, 'experiment_mode', 'id') == 'ood':
+        args.in_feats = datasets[0].num_features
     base_model = SHPA(
         args.in_feats, args.hidden_dim, args.num_classes, args, device,
     ).to(device)
@@ -1768,6 +1862,8 @@ def EIN_LIRS_supervisor(args):
         args,
         device
     ).to(device)
+    if getattr(args, 'experiment_mode', 'id') == 'ood':
+        base_model.num_domains = len(prepare_ood(args)['source_domains'])
 
     optimizer = base_model.init_optimizer(args)
     datasets = [train_dataset, val_dataset, test_dataset]
@@ -1825,6 +1921,11 @@ def EIN_TCSR_supervisor(args):
     datasets = build_experiment_datasets(args, text_encoder)
 
     print('Seed {} | Initializing TCSR'.format(args.seed), flush=True)
+    if getattr(args, 'experiment_mode', 'id') == 'ood':
+        args.checkpoint_dir = os.path.join(
+            'checkpoints', 'tcsr', args.dataset,
+            '{}_{}'.format(getattr(args, 'result_name', 'ood'), ood_cache_token(args)),
+        )
     result = run_tcsr_seed(args.seed, args, datasets, device)
     return {
         'acc': result['test_acc'],

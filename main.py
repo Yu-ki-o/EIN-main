@@ -3,6 +3,7 @@ import yaml
 import argparse
 import os
 import re
+import json
 import numpy as np
 from utils.dataloader import *
 from utils.tools import *
@@ -36,6 +37,9 @@ from supervisor import (
     EIN_RAGCL_ResGCN_supervisor,
     EIN_Plain_BiGCN_supervisor,
     EIN_Plain_GCN_supervisor,
+    EIN_DIGNN_supervisor,
+    EIN_NodeIGM_supervisor,
+    EIN_GroupGain_supervisor,
     EIN_Plain_ResGCN_supervisor,
     EIN_NEGT_supervisor,
     EIN_EBGCN_supervisor,
@@ -79,6 +83,12 @@ def _summary_model_parts(args):
 
     if base_model.startswith('Plain_'):
         return 'Base', base_model[len('Plain_'):]
+    if base_model == 'NodeIGM':
+        return 'NodeIGM', 'GCN'
+    if base_model == 'DIGNN':
+        return 'DIGNN', None
+    if base_model == 'GroupGain':
+        return 'GroupGain', 'RelationGNN'
     if base_model == 'BiGCN_BackboneOnly':
         return 'BackboneOnly', 'BiGCN'
     if base_model == 'ResGCN_BackboneOnly':
@@ -168,6 +178,8 @@ def normalize_device_arg(device):
 
 def summarize_results(results, args):
     metrics = ['acc', 'auc', 'f1']
+    metrics.extend(metric for metric in ['macro_f1', 'f1_class0', 'f1_class1']
+                   if all(metric in result for result in results))
     lines = []
 
     lines.append('Experiment setting:')
@@ -175,6 +187,10 @@ def summarize_results(results, args):
     lines.append('Mode: {}'.format(getattr(args, 'experiment_mode', 'id')))
     lines.append('OOD source datasets: {}'.format(getattr(args, 'ood_source_datasets', [])))
     lines.append('Validation domain: {}'.format(getattr(args, 'ood_val_domain', 'source')))
+    if getattr(args, 'experiment_mode', 'id') == 'ood':
+        lines.append('OOD protocol: {}'.format(args.ood_protocol))
+        lines.append('OOD manifest pattern: {}'.format(args.ood_manifest))
+        lines.extend('Seed {} manifest: {}'.format(r['seed'], r['ood_fingerprint']) for r in results)
     lines.append('Checkpoint selection metric: {}'.format(getattr(args, 'selection_metric', 'val_loss')))
     lines.append('')
 
@@ -242,6 +258,11 @@ def summarize_results(results, args):
     summary_path = os.path.join(summary_dir, summary_filename)
     with open(summary_path, 'w', encoding='utf-8') as file_obj:
         file_obj.write(summary + '\n')
+    if getattr(args, 'experiment_mode', 'id') == 'ood':
+        with open(os.path.join(summary_dir, 'ood_results.json'), 'w', encoding='utf-8') as file_obj:
+            json.dump({'protocol': args.ood_protocol, 'sources': args.ood_source_datasets,
+                       'target': args.dataset, 'manifest': args.ood_manifest,
+                       'results': results}, file_obj, ensure_ascii=False, indent=2)
     print('Summary saved to: {}'.format(summary_path))
 
 
@@ -272,10 +293,8 @@ if __name__ == '__main__':
 
     print(f'Starting experiment with configurations in {cli_args.config_filename}...')
     
-    configs = yaml.load(
-        open(cli_args.config_filename),
-        Loader=yaml.FullLoader
-    )
+    with open(cli_args.config_filename, encoding='utf-8') as config_file:
+        configs = yaml.load(config_file, Loader=yaml.FullLoader)
     if cli_args.device is not None:
         configs['device'] = normalize_device_arg(cli_args.device)
     if cli_args.eval_only:
@@ -325,6 +344,9 @@ if __name__ == '__main__':
         result = supervisor(args)
         if result is not None:
             result['seed'] = i
+            if getattr(args, 'experiment_mode', 'id') == 'ood':
+                result['ood_fingerprint'] = args.ood_fingerprint
+                result['ood_manifest'] = args.ood_resolved_manifest
             results.append(result)
 
     if results:

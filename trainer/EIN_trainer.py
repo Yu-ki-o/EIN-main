@@ -7,8 +7,10 @@ from torch_geometric.loader import DataLoader
 from utils.dataloader import *
 import time
 import os
+import json
 from utils.word2vec import *
 from sklearn.metrics import accuracy_score, roc_auc_score, f1_score
+from utils.checkpoint_average import average_checkpoints, AVERAGE_SELECTORS, DEFAULT_TARGETS
 
 from utils.logger import (
     get_logger, 
@@ -485,6 +487,51 @@ class EINTrainer(object):
             )
         return metric
 
+    def _average_selectors(self):
+        selectors = getattr(self.args, 'checkpoint_average_metrics', None)
+        if not selectors:
+            return []
+        if not isinstance(selectors, (list, tuple)) or any(
+                key not in AVERAGE_SELECTORS for key in selectors):
+            raise ValueError('checkpoint_average_metrics must be a list drawn from {}'.format(
+                AVERAGE_SELECTORS))
+        return list(dict.fromkeys(selectors))
+
+    def _record_average_candidates(self, val_metrics, epoch):
+        selectors = self._average_selectors()
+        if not selectors:
+            return
+        values = {key: float(val_metrics['val_' + key]) for key in ('loss', 'acc', 'auc', 'f1')}
+        values['target_score'] = min(values[key] / target for key, target in DEFAULT_TARGETS.items())
+        best = getattr(self, '_checkpoint_average_best', {})
+        directory = os.path.join(self.args.log_dir, 'average_candidates')
+        os.makedirs(directory, exist_ok=True)
+        for key in selectors:
+            if not np.isfinite(values[key]):
+                raise ValueError('Nonfinite checkpoint averaging metric: {}'.format(key))
+            previous = best.get(key)
+            improved = previous is None or (values[key] < previous['value'] if key == 'loss'
+                                           else values[key] > previous['value'])
+            if improved:
+                best[key] = {'epoch': epoch, 'value': values[key], 'validation': dict(values)}
+                torch.save(self.model.state_dict(), os.path.join(directory, 'best_val_{}.pth'.format(key)))
+        self._checkpoint_average_best = best
+        with open(os.path.join(directory, 'selection.json'), 'w', encoding='utf-8') as file_obj:
+            json.dump({'best': best, 'selectors': selectors}, file_obj, indent=2)
+
+    def _load_averaged_candidates(self):
+        selectors = self._average_selectors()
+        if not selectors:
+            return
+        directory = os.path.join(self.args.log_dir, 'average_candidates')
+        state, sources = average_checkpoints(
+            directory, {'best': self._checkpoint_average_best}, selectors, self.device)
+        self.model.load_state_dict(state, strict=True)
+        checkpoint = os.path.join(self.args.log_dir, 'best_averaged_model.pth.m')
+        torch.save(self.model.state_dict(), checkpoint)
+        self.logger.info('Testing single model with averaged parameters from epochs {}: {}'.format(
+            [source['epoch'] for source in sources], checkpoint))
+
     def train_epoch(self, epoch):
         self.model.train()
         if hasattr(self.model, 'set_epoch'):
@@ -495,6 +542,8 @@ class EINTrainer(object):
         train_auxiliary_loss = 0
         diagnostic_sums = defaultdict(float)
         diagnostic_counts = defaultdict(int)
+        train_args = getattr(self, 'args', getattr(self.model, 'args', None))
+        class_weights = getattr(train_args, 'class_weights', None)
         for batch_idx, data in enumerate(self.train_loader):
             self.optimizer.zero_grad(set_to_none=True)
             data = self._move_to_device(data)
@@ -502,7 +551,12 @@ class EINTrainer(object):
             
             p_loss = self.model.physics_loss(U, S, D, data.user_state)
 
-            if hasattr(self.model, 'classification_loss'):
+            if getattr(train_args, 'base_model', None) == 'DIGNN' and class_weights is not None:
+                classification_loss = F.nll_loss(
+                    out_labels, data.y.reshape(-1).long(),
+                    weight=out_labels.new_tensor(class_weights),
+                )
+            elif hasattr(self.model, 'classification_loss'):
                 classification_loss = self.model.classification_loss(
                     out_labels,
                     data.y,
@@ -548,6 +602,7 @@ class EINTrainer(object):
         val_losses = []
         y_true = []
         y_pred = []
+        y_score = []
         diagnostic_sums = defaultdict(float)
         diagnostic_counts = defaultdict(int)
         self.model.eval()
@@ -565,6 +620,7 @@ class EINTrainer(object):
                 val_losses.append(val_loss.item())
                 y_true += data.y.tolist()
                 y_pred += val_out.max(1).indices.tolist()
+                y_score += val_out.softmax(dim=-1)[:, 1].tolist()
                 self._accumulate_diagnostics(diagnostic_sums, diagnostic_counts)
 
         y_true = np.array(y_true)
@@ -572,7 +628,7 @@ class EINTrainer(object):
         val_loss = np.mean(val_losses)
         val_acc = accuracy_score(y_true, y_pred)
         try:
-            val_auc = roc_auc_score(y_true, y_pred)
+            val_auc = roc_auc_score(y_true, y_score)
         except ValueError:
             val_auc = np.nan
         val_f1 = f1_score(y_true, y_pred, zero_division=0)
@@ -599,6 +655,7 @@ class EINTrainer(object):
         # test
         y_true = []
         y_pred = []
+        y_score = []
         self.model.eval()
         with torch.no_grad():
             for batch_idx, data in enumerate(self.test_loader):
@@ -607,15 +664,19 @@ class EINTrainer(object):
 
                 y_true += data.y.tolist()
                 y_pred += test_out.max(1).indices.tolist()
+                y_score += test_out.softmax(dim=-1)[:, 1].tolist()
 
             y_true = np.array(y_true)
             y_pred = np.array(y_pred)
 
             acc = accuracy_score(y_true, y_pred)
-            auc = roc_auc_score(y_true, y_pred)
-            f1 = f1_score(y_true, y_pred)
+            auc = roc_auc_score(y_true, y_score) if len(np.unique(y_true)) > 1 else np.nan
+            f1 = f1_score(y_true, y_pred, zero_division=0)
 
             metrics = {'acc': acc, 'auc': auc, 'f1': f1}
+            metrics['macro_f1'] = f1_score(y_true, y_pred, labels=[0, 1], average='macro', zero_division=0)
+            class_f1 = f1_score(y_true, y_pred, labels=[0, 1], average=None, zero_division=0)
+            metrics.update(f1_class0=float(class_f1[0]), f1_class1=float(class_f1[1]))
             self.logger.info("Test Acc: {:.4f} | AUC: {:.4f} | F1 {:.4f}".format(acc, auc, f1))
             self._write_test_tensorboard(metrics)
             return metrics
@@ -684,6 +745,7 @@ class EINTrainer(object):
 
                 # validation
                 val_metrics = self.validate_epoch(epoch)
+                self._record_average_candidates(val_metrics, epoch)
                 
                 early_stopping(val_metrics[selection_metric], self.model, epoch, self.best_path)
                 self._tb_add_scalar(
@@ -717,6 +779,8 @@ class EINTrainer(object):
             if os.path.exists(best_model_path):
                 self.model.load_state_dict(torch.load(best_model_path, map_location=self.device))
                 self.logger.info("Loaded best checkpoint for testing: {}".format(best_model_path))
+
+            self._load_averaged_candidates()
 
             return self.test()
         finally:
