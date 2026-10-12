@@ -1,7 +1,8 @@
 """DIGNN-inspired, inductive graph classifier for rumor detection.
 
-Topology and text are encoded separately. Unlike the paper's transductive
-MLP(A), a structure-only GIN handles unseen, variable-size propagation trees.
+Topology and text are encoded separately. An anchored support/deny energy
+field supplies node descriptors to a GIN on variable-size propagation trees.
+The original six-dimensional structure-only input remains an ablation mode.
 Reconstruction retains each view; normalized RBF HSIC is an independence
 surrogate, NOT the variational mutual-information bound in paper Eq. (8).
 See docs/DIGNN.md for the adaptation and loss definitions.
@@ -10,6 +11,7 @@ See docs/DIGNN.md for the adaptation and loss definitions.
 from __future__ import annotations
 
 import math
+from collections import deque
 
 import torch
 from torch import nn
@@ -48,12 +50,124 @@ def normalized_hsic(topology, text):
     return ((ka * kx).sum() / denominator).clamp(0.0, 1.0)
 
 
-class StructureEncoder(nn.Module):
-    """Rooted GIN on structural descriptors, with no text input."""
+class StanceEnergyField(nn.Module):
+    """Unroll a fixed, strongly convex two-channel relation energy.
 
-    def __init__(self, hidden_dim, num_layers, dropout):
+    E(phi) = fidelity/2 * ||phi-source||^2
+           + tau/2 * sum_e ||A_parent[r] phi_parent
+                                - A_child[r] phi_child||^2.
+
+    Positive bounded diagonal maps are learned for support/deny/unknown and
+    parent/child roles. Denial never prescribes a sign flip or channel swap.
+    Each event has its own safe step size, so batching cannot change a field.
+    """
+
+    def __init__(self, scales=(0.25, 1.0, 4.0), num_steps=8,
+                 fidelity=1.0, map_bound=0.5, step_fraction=0.9):
         super().__init__()
-        self.projection = nn.Linear(6, hidden_dim)
+        if isinstance(scales, str):
+            scales = scales.split(",")
+        try:
+            scales = tuple(float(value) for value in scales)
+        except (TypeError, ValueError) as error:
+            raise ValueError("dignn_energy_scales must be a sequence of positive numbers") from error
+        if not scales or any(not math.isfinite(value) or value <= 0 for value in scales):
+            raise ValueError("dignn_energy_scales must be finite and positive")
+        if isinstance(num_steps, bool) or int(num_steps) != num_steps or num_steps < 1:
+            raise ValueError("dignn_energy_steps must be a positive integer")
+        if not math.isfinite(fidelity) or fidelity <= 0:
+            raise ValueError("dignn_energy_fidelity must be finite and positive")
+        if not math.isfinite(map_bound) or not 0 <= map_bound <= 2:
+            raise ValueError("dignn_energy_map_bound must be finite and in [0, 2]")
+        if not math.isfinite(step_fraction) or not 0 < step_fraction <= 1:
+            raise ValueError("dignn_energy_step_fraction must be in (0, 1]")
+        self.register_buffer("scales", torch.tensor(scales, dtype=torch.float32))
+        self.num_steps = int(num_steps)
+        self.fidelity = float(fidelity)
+        self.map_bound = float(map_bound)
+        self.step_fraction = float(step_fraction)
+        self.relation_log_scales = nn.Parameter(torch.zeros(3, 2, 2))
+
+    def relation_scales(self):
+        return torch.exp(self.map_bound * self.relation_log_scales.tanh())
+
+    def _energy(self, fields, source, edges, relation, parent_map, child_map, batch):
+        n, count = source.size(0), int(batch[-1]) + 1
+        scales = self.scales.to(fields).view(1, -1)
+        source_energy = 0.5 * self.fidelity * (fields - source[:, None]).square().sum(-1)
+        residual = (fields[edges[0]] * parent_map[:, None]
+                    - fields[edges[1]] * child_map[:, None])
+        edge_energy = 0.5 * scales * residual.square().sum(-1)
+        # Half of each edge's energy belongs to each endpoint. Keep relation
+        # type and endpoint role separate, including explicitly unknown edges.
+        local = fields.new_zeros(n * 6, self.scales.numel())
+        local = local.index_add(0, edges[0] * 6 + relation * 2, 0.5 * edge_energy)
+        local = local.index_add(0, edges[1] * 6 + relation * 2 + 1, 0.5 * edge_energy)
+        local = local.view(n, 3, 2, -1).permute(0, 3, 1, 2)
+        totals = fields.new_zeros(count, self.scales.numel()).index_add(
+            0, batch, source_energy + local.sum(dim=(-1, -2)))
+        return source_energy, local, totals
+
+    def forward(self, source, edges, stance, batch):
+        if (source.ndim != 2 or source.size(0) == 0 or source.size(1) != 2
+                or not source.is_floating_point()
+                or not bool(torch.isfinite(source).all()) or bool((source < 0).any())):
+            raise ValueError("energy source must be a finite nonnegative [N, 2] tensor")
+        n = source.size(0)
+        if (batch.dtype != torch.long or batch.shape != (n,)
+                or batch.device != source.device or int(batch[0]) != 0
+                or bool((batch[1:] < batch[:-1]).any())):
+            raise ValueError("energy batch must be sorted long [N] indices starting at zero")
+        count = int(batch[-1]) + 1
+        if bool((torch.bincount(batch, minlength=count) == 0).any()):
+            raise ValueError("energy batch cannot contain empty events")
+        if (edges.ndim != 2 or edges.size(0) != 2 or edges.dtype != torch.long
+                or edges.device != source.device):
+            raise ValueError("energy edges must be a long [2, E] tensor on the source device")
+        if edges.numel() and (int(edges.min()) < 0 or int(edges.max()) >= n):
+            raise ValueError("energy edge endpoint is outside source")
+        if bool((batch[edges[0]] != batch[edges[1]]).any()):
+            raise ValueError("energy edges cannot connect different events")
+        if (stance.dtype != torch.long or stance.shape != (edges.size(1),)
+                or stance.device != source.device
+                or not bool(((stance == -1) | (stance == 0) | (stance == 1)).all())):
+            raise ValueError("energy stance must be aligned long [E] labels in {-1, 0, 1}")
+        relation = torch.where(stance < 0, 2, stance)
+        maps = self.relation_scales().to(source)
+        parent_map, child_map = maps[relation, 0], maps[relation, 1]
+        scales = self.scales.to(source).view(1, -1, 1)
+        fields = source[:, None].expand(-1, self.scales.numel(), -1)
+        _, _, initial_energy = self._energy(
+            fields, source, edges, relation, parent_map, child_map, batch)
+
+        # Rayleigh bound: ||A_p phi_p-A_c phi_c||^2 <=
+        # 2||A_p||^2||phi_p||^2 + 2||A_c||^2||phi_c||^2.
+        incident = source.new_zeros(n).index_add(0, edges[0], parent_map.square().amax(-1))
+        incident = incident.index_add(0, edges[1], child_map.square().amax(-1))
+        event_bound = source.new_zeros(count).scatter_reduce(
+            0, batch, incident, reduce="amax", include_self=True)
+        bound = self.fidelity + 2 * scales * event_bound[batch, None, None]
+        step = self.step_fraction / bound
+        for _ in range(self.num_steps):
+            residual = (fields[edges[0]] * parent_map[:, None]
+                        - fields[edges[1]] * child_map[:, None])
+            gradient = self.fidelity * (fields - source[:, None])
+            gradient = gradient.index_add(0, edges[0], scales * parent_map[:, None] * residual)
+            gradient = gradient.index_add(0, edges[1], -scales * child_map[:, None] * residual)
+            fields = F.relu(fields - step * gradient)
+        source_energy, relation_energy, final_energy = self._energy(
+            fields, source, edges, relation, parent_map, child_map, batch)
+        return dict(fields=fields, residuals=fields - source[:, None],
+                    source_energy=source_energy, relation_energy=relation_energy,
+                    initial_energy=initial_energy, final_energy=final_energy)
+
+
+class StructureEncoder(nn.Module):
+    """Rooted GIN on structure/energy descriptors, with no text input."""
+
+    def __init__(self, hidden_dim, num_layers, dropout, input_dim=6):
+        super().__init__()
+        self.projection = nn.Linear(input_dim, hidden_dim)
         self.convs = nn.ModuleList([
             GINConv(nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
                                   nn.Linear(hidden_dim, hidden_dim)), train_eps=True)
@@ -75,8 +189,9 @@ class DIGNN(nn.Module):
 
     Inputs: x [N, in_feats], edge_index [2, E], optional directed_edge_index,
     PyG batch, and optional globally indexed root_index/rootindex [B]. In the
-    project's cache the source is the first node of each event. Labels,
-    stances, user_state and timestamps are never read by forward().
+    project's cache the source is the first node of each event. Energy mode
+    reads aligned parent-relative edge stances (0=support, 1=deny, -1=unknown).
+    Rumor labels, node/user states and timestamps never construct node inputs.
     """
 
     def __init__(self, in_feats, hidden_dim=128, num_classes=2, args=None):
@@ -88,6 +203,7 @@ class DIGNN(nn.Module):
         layers = int(getattr(args, "dignn_num_layers", getattr(args, "n_layers_conv", 3)))
         dropout = float(getattr(args, "dropout", 0.3))
         self.fusion = str(getattr(args, "dignn_fusion", "attention")).strip().lower()
+        self.topology_features = str(getattr(args, "dignn_topology_features", "energy")).strip().lower()
         self.loss_weights = {
             "text_reconstruction": float(getattr(args, "dignn_text_recon_weight", 0.1)),
             "structure_reconstruction": float(getattr(args, "dignn_structure_recon_weight", 0.1)),
@@ -100,10 +216,24 @@ class DIGNN(nn.Module):
             raise ValueError("dropout must be in [0, 1)")
         if self.fusion not in {"attention", "mean", "topology", "text"}:
             raise ValueError("dignn_fusion must be attention, mean, topology or text")
+        if self.topology_features not in {"energy", "structural"}:
+            raise ValueError("dignn_topology_features must be energy or structural")
         if any(not math.isfinite(w) or w < 0 for w in self.loss_weights.values()):
             raise ValueError("DIGNN loss weights must be finite and nonnegative")
 
-        self.topology_encoder = StructureEncoder(self.hidden_dim, layers, dropout)
+        self.energy_field = None
+        self.structure_input_dim = 6
+        if self.topology_features == "energy":
+            self.energy_field = StanceEnergyField(
+                scales=getattr(args, "dignn_energy_scales", (0.25, 1.0, 4.0)),
+                num_steps=getattr(args, "dignn_energy_steps", 8),
+                fidelity=float(getattr(args, "dignn_energy_fidelity", 1.0)),
+                map_bound=float(getattr(args, "dignn_energy_map_bound", 0.5)),
+                step_fraction=float(getattr(args, "dignn_energy_step_fraction", 0.9)))
+            self.structure_input_dim = 16
+        topology_dim = (self.structure_input_dim if self.energy_field is None else
+                        self.structure_input_dim + 11 * self.energy_field.scales.numel())
+        self.topology_encoder = StructureEncoder(self.hidden_dim, layers, dropout, topology_dim)
         self.text_encoder = nn.Sequential(
             nn.Linear(self.in_feats, self.hidden_dim), nn.GELU(),
             nn.Dropout(dropout), nn.Linear(self.hidden_dim, self.hidden_dim),
@@ -118,7 +248,8 @@ class DIGNN(nn.Module):
         )
         self.classifier = nn.Linear(self.hidden_dim, num_classes)
         self.text_decoder = nn.Linear(self.hidden_dim, self.in_feats)
-        self.structure_decoder = nn.Linear(self.hidden_dim, 6)
+        # Reconstruct only fixed observations, never the trainable field or maps.
+        self.structure_decoder = nn.Linear(self.hidden_dim, self.structure_input_dim)
         # Asymmetric decoder preserves parent -> reply direction when available.
         self.edge_source = nn.Linear(self.hidden_dim, self.hidden_dim, bias=False)
         self.edge_target = nn.Linear(self.hidden_dim, self.hidden_dim, bias=False)
@@ -129,6 +260,83 @@ class DIGNN(nn.Module):
     def _readout(self):
         return nn.Sequential(nn.Linear(2 * self.hidden_dim, self.hidden_dim),
                              nn.GELU(), nn.LayerNorm(self.hidden_dim))
+
+    @staticmethod
+    def _coalesce_stances(edges, stance, n):
+        """Deduplicate links with labels; unknown never overrides known evidence."""
+        keep = edges[0] != edges[1]
+        edges, stance = edges[:, keep], stance[keep]
+        keys, inverse = torch.unique(edges[0] * n + edges[1], sorted=True, return_inverse=True)
+        lower = torch.full_like(keys, 2).scatter_reduce(
+            0, inverse, torch.where(stance < 0, 2, stance), reduce="amin", include_self=True)
+        upper = torch.full_like(keys, -1).scatter_reduce(
+            0, inverse, stance, reduce="amax", include_self=True)
+        if bool(((lower < 2) & (lower != upper)).any()):
+            raise ValueError("Duplicate propagation edges have conflicting stance labels")
+        labels = torch.where(upper >= 0, upper, -1)
+        return torch.stack((keys // n, keys % n)), labels
+
+    @staticmethod
+    def _rooted_edges(edges, stance, roots, n, directed):
+        """Validate a forest, or recover an old undirected tree's root direction.
+
+        A single linear CPU traversal avoids one GPU synchronization per depth.
+        Isolates and directed components outside the event root are retained;
+        their root depth is explicitly unknown. Unrooted undirected components
+        with links cannot provide a trustworthy parent-relative orientation.
+        """
+        if not directed:
+            edges = torch.stack((edges.amin(0), edges.amax(0)))
+            edges, stance = DIGNN._coalesce_stances(edges, stance, n)
+        pairs = edges.detach().cpu().t().tolist()
+        root_ids = roots.detach().cpu().tolist()
+        adjacency = [[] for _ in range(n)]
+        indegree = [0] * n
+        for parent, child in pairs:
+            adjacency[parent].append(child)
+            if directed:
+                indegree[child] += 1
+            else:
+                adjacency[child].append(parent)
+        if directed:
+            if any(value > 1 for value in indegree) or any(indegree[root] for root in root_ids):
+                raise ValueError("Energy mode requires a parent-to-child forest with root indegree zero")
+            pending = deque(index for index, value in enumerate(indegree) if value == 0)
+            remaining = indegree[:]
+            visited = 0
+            while pending:
+                parent = pending.popleft()
+                visited += 1
+                for child in adjacency[parent]:
+                    remaining[child] -= 1
+                    if remaining[child] == 0:
+                        pending.append(child)
+            if visited != n:
+                raise ValueError("Energy propagation edges cannot contain directed cycles")
+        depth = [-1] * n
+        pending = deque(root_ids)
+        for root in root_ids:
+            depth[root] = 0
+        while pending:
+            parent = pending.popleft()
+            for child in adjacency[parent]:
+                if depth[child] < 0:
+                    depth[child] = depth[parent] + 1
+                    pending.append(child)
+        depth_tensor = torch.tensor(depth, device=edges.device, dtype=torch.long)
+        if not directed:
+            src_depth, dst_depth = depth_tensor[edges[0]], depth_tensor[edges[1]]
+            if bool(((src_depth < 0) | (dst_depth < 0)).any()):
+                raise ValueError("Cannot orient an unrooted old cache component; provide directed_edge_index")
+            if bool(((src_depth - dst_depth).abs() != 1).any()):
+                raise ValueError("Old energy cache must be a rooted tree, without same-depth links or cycles")
+            flip = src_depth > dst_depth
+            edges = torch.stack((torch.where(flip, edges[1], edges[0]),
+                                 torch.where(flip, edges[0], edges[1])))
+            if bool((torch.bincount(edges[1], minlength=n) > 1).any()):
+                raise ValueError("Old energy cache must have a unique parent for each reply")
+            edges, stance = DIGNN._coalesce_stances(edges, stance, n)
+        return edges, stance, depth_tensor
 
     def _inputs(self, data):
         x = data.x.float()
@@ -161,6 +369,17 @@ class DIGNN(nn.Module):
             raise ValueError("Each event must have one globally indexed root in that event")
 
         edges = getattr(data, "directed_edge_index", None)
+        directed = edges is not None
+        stance = None
+        if self.energy_field is not None:
+            stance = getattr(data, "directed_edge_stance", None) if directed else None
+            # Pair old edge_stance with its own edge_index, never with a
+            # differently ordered or differently sized directed edge tensor.
+            if stance is None and getattr(data, "edge_stance", None) is not None:
+                edges, stance = data.edge_index, data.edge_stance
+                directed = False
+            elif edges is None and getattr(data, "directed_edge_stance", None) is not None:
+                raise ValueError("directed_edge_stance requires its matching directed_edge_index")
         if edges is None:
             edges = data.edge_index
         if (edges.ndim != 2 or edges.size(0) != 2 or edges.dtype != torch.long
@@ -170,9 +389,21 @@ class DIGNN(nn.Module):
             raise ValueError("Edge endpoint is outside x")
         if bool((batch[edges[0]] != batch[edges[1]]).any()):
             raise ValueError("Edges cannot connect different events")
-        # Duplicate links and self-loops are not additional propagation evidence.
-        edges = coalesce(edges[:, edges[0] != edges[1]], num_nodes=x.size(0))
-        return x, edges, batch, roots, sizes
+        if self.energy_field is None:
+            # The structural ablation retains the original arbitrary-graph API.
+            edges = coalesce(edges[:, edges[0] != edges[1]], num_nodes=x.size(0))
+            return x, edges, batch, roots, sizes, None, None
+        if stance is None:
+            stance = edges.new_full((edges.size(1),), -1)
+        else:
+            stance = torch.as_tensor(stance, device=x.device).reshape(-1)
+            if stance.dtype != torch.long or stance.numel() != edges.size(1):
+                raise ValueError("Each propagation edge must have one aligned torch.long stance label")
+            if not bool(((stance == -1) | (stance == 0) | (stance == 1)).all()):
+                raise ValueError("Edge stance labels must be -1=unknown, 0=support or 1=deny")
+        edges, stance = self._coalesce_stances(edges, stance, x.size(0))
+        edges, stance, depth = self._rooted_edges(edges, stance, roots, x.size(0), directed)
+        return x, edges, batch, roots, sizes, stance, depth
 
     @staticmethod
     def _structural_features(edges, batch, roots, sizes, dtype):
@@ -185,11 +416,46 @@ class DIGNN(nn.Module):
                             (in_degree == 0).to(dtype), (out_degree == 0).to(dtype),
                             sizes[batch].to(dtype).log1p()), dim=-1)
 
+    @classmethod
+    def _energy_descriptors(cls, edges, stance, batch, roots, sizes, depth, dtype):
+        n = batch.numel()
+        outgoing = torch.bincount(edges[0], minlength=n).to(dtype)
+        support = torch.bincount(edges[0, stance == 0], minlength=n).to(dtype)
+        deny = torch.bincount(edges[0, stance == 1], minlength=n).to(dtype)
+        unknown = torch.bincount(edges[0, stance < 0], minlength=n).to(dtype)
+        source = torch.stack((support.log1p(), deny.log1p()), dim=-1)
+        role = torch.full((n,), 3, device=batch.device, dtype=torch.long)
+        role[edges[1]] = torch.where(stance >= 0, stance + 1, 3)
+        role[roots] = 0
+        coverage = (support + deny) / outgoing.clamp_min(1)
+        descriptors = torch.cat((
+            cls._structural_features(edges, batch, roots, sizes, dtype), source,
+            F.one_hot(role, num_classes=4).to(dtype),
+            coverage[:, None], unknown.log1p()[:, None],
+            depth.clamp_min(0).to(dtype).log1p()[:, None], (depth >= 0).to(dtype)[:, None]), dim=-1)
+        return descriptors, source
+
     def encode_views(self, data):
-        """Expose independent node/event representations for analysis."""
-        x, edges, batch, roots, sizes = self._inputs(data)
-        descriptors = self._structural_features(edges, batch, roots, sizes, x.dtype)
-        topology = self.topology_encoder(descriptors, to_undirected(edges, num_nodes=x.size(0)))
+        """Expose separate views, fixed descriptors, and differentiable fields."""
+        x, edges, batch, roots, sizes, stance, depth = self._inputs(data)
+        energy_views = {}
+        if self.energy_field is None:
+            descriptors = self._structural_features(edges, batch, roots, sizes, x.dtype)
+            topology_input = descriptors
+        else:
+            descriptors, source = self._energy_descriptors(
+                edges, stance, batch, roots, sizes, depth, x.dtype)
+            energy = self.energy_field(source, edges, stance, batch)
+            topology_input = torch.cat((descriptors, energy["fields"].flatten(1),
+                                        energy["residuals"].flatten(1), energy["source_energy"],
+                                        energy["relation_energy"].flatten(1)), dim=-1)
+            energy_views = {"energy_source": source, "energy_fields": energy["fields"],
+                            "energy_residuals": energy["residuals"],
+                            "energy_source_energy": energy["source_energy"],
+                            "energy_relation_energy": energy["relation_energy"],
+                            "energy_initial_energy": energy["initial_energy"],
+                            "energy_final_energy": energy["final_energy"]}
+        topology = self.topology_encoder(topology_input, to_undirected(edges, num_nodes=x.size(0)))
         text = self.text_encoder(x)
         count = sizes.numel()
         topology_graph = self.topology_readout(torch.cat(
@@ -199,7 +465,7 @@ class DIGNN(nn.Module):
         return dict(topology_nodes=topology, text_nodes=text,
                     topology_graph=topology_graph, text_graph=text_graph,
                     structure_features=descriptors, x=x, edge_index=edges,
-                    batch=batch, graph_count=count)
+                    edge_stance=stance, batch=batch, graph_count=count, **energy_views)
 
     @staticmethod
     def _event_mse(prediction, target, batch, count):
@@ -245,6 +511,15 @@ class DIGNN(nn.Module):
         representation = (stacked * attention.unsqueeze(-1)).sum(1)
         output = F.log_softmax(self.classifier(representation), dim=-1)
         self._diagnostics["view_attention"] = attention.detach()
+        if self.energy_field is not None:
+            event_edges = torch.bincount(views["batch"][views["edge_index"][0]], minlength=views["graph_count"])
+            known_edges = torch.bincount(
+                views["batch"][views["edge_index"][0, views["edge_stance"] >= 0]],
+                minlength=views["graph_count"])
+            self._diagnostics.update(
+                energy_initial_energy=views["energy_initial_energy"].detach(),
+                energy_final_energy=views["energy_final_energy"].detach(),
+                energy_label_coverage=(known_edges.to(output.dtype) / event_edges.clamp_min(1)).detach())
 
         if self.training:
             zero = representation.sum() * 0.0

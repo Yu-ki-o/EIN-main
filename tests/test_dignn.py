@@ -20,7 +20,8 @@ def graph(nodes, edges, label=0):
 
 
 def make_model(**kwargs):
-    settings = dict(n_layers_conv=2, dropout=0.0, max_hop=3)
+    settings = dict(n_layers_conv=2, dropout=0.0, max_hop=3,
+                    dignn_topology_features="structural")
     settings.update(kwargs)
     return DIGNN(4, 8, 2, SimpleNamespace(**settings))
 
