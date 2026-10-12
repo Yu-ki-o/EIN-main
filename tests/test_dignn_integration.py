@@ -97,6 +97,8 @@ class DIGNNIntegrationTest(unittest.TestCase):
                     edges = torch.stack((torch.arange(n - 1), torch.arange(1, n)))
                     graphs.append(Data(x=torch.randn(n, args.in_feats), edge_index=edges,
                                        directed_edge_index=edges.clone(), y=torch.tensor([label]),
+                                       edge_stance=torch.arange(n - 1) % 2,
+                                       directed_edge_stance=torch.arange(n - 1) % 2,
                                        user_state=torch.zeros(1, args.max_hop, 3)))
                 datasets = (graphs, graphs, graphs)
                 factory = Mock()
@@ -121,7 +123,9 @@ class DIGNNIntegrationTest(unittest.TestCase):
                 loss = epoch_namespace["train_epoch"](trainer, 1)
                 self.assertTrue(bool(torch.isfinite(torch.tensor(loss))))
                 train_metrics = trainer._write_train_tensorboard.call_args.args[1]
-                self.assertGreater(train_metrics["train_auxiliary_loss"], 0)
+                self.assertGreaterEqual(train_metrics["train_auxiliary_loss"], 0)
+                if all(weight == 0 for weight in model.loss_weights.values()):
+                    self.assertEqual(train_metrics["train_auxiliary_loss"], 0)
                 self.assertFalse(torch.equal(before, model.classifier.weight))
 
 

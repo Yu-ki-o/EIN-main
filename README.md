@@ -46,11 +46,14 @@ Each command runs seeds 0–4; add `--seed 0` for a single run or
 
 ## DIGNN-inspired rumor detection
 
-`model/DIGNN.py` separates a structure-only propagation encoder from a text
-MLP, fuses event representations with attention, and trains with view
+`model/DIGNN.py` encodes support/deny relations with an anchored, multiscale
+energy field followed by GIN, separately from a text MLP. It fuses event
+representations with attention and supports view
 reconstruction and an HSIC independence penalty. This adapts the ICDM 2022
 DIGNN ideas to graph-level rumor detection; HSIC replaces the paper's
 variational mutual-information objective.
+Set `dignn_topology_features: structural` for the original six-feature baseline
+or its checkpoints; the default energy mode uses aligned offline edge stances.
 
 ```bash
 python main.py --config_filename configs/EIN/Pheme_DIGNN_word2vec.yaml --seed 0
