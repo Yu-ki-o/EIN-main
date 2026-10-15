@@ -4,6 +4,7 @@
 # F1 is 0.1406 percentage points below 89.5%; see docs/DIGNN_DRWeibo_tuning.md.
 model_name: EIN
 base_model: DIGNN
+dignn_topology_features: energy # Pin the previous default; not WL-tuned settings.
 dataset: DRWeibo
 num_classes: 2
 language: ch

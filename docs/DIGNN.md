@@ -1,5 +1,8 @@
 # DIGNN：支持反对能量场与文本双分支谣言检测
 
+当前默认已更新为 `dignn_topology_features: wl`，第一版实现与配置见
+[DIGNN_WL.md](DIGNN_WL.md)。下文保留为旧 energy/structural 模式的说明。
+
 参考论文：Zhixun Li 等，*The Devil is in the Conflict: Disentangled
 Information Graph Neural Networks for Fraud Detection*，ICDM 2022，
 DOI: 10.1109/ICDM54844.2022.00131。实现位于 `model/DIGNN.py`。
@@ -8,7 +11,7 @@ DOI: 10.1109/ICDM54844.2022.00131。实现位于 `model/DIGNN.py`。
 依赖程度，同时保留各视图的信息并约束跨视图依赖。本实现将该思想迁移到
 当前项目的事件级谣言检测，并不是原论文节点级欺诈检测实验的严格复现。
 
-当前默认 `dignn_topology_features: energy`。设置为 `structural` 可回到原六维
+设置 `dignn_topology_features: energy` 可使用下述能量场模式；设置为 `structural` 可回到原六维
 结构基线；它保留原参数形状，可用于加载旧 DIGNN 检查点。能量版的投影层和
 结构解码器形状发生变化，需要重新训练，不能直接加载六维版的完整检查点。
 

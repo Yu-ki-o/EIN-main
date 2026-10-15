@@ -1,17 +1,17 @@
 """DIGNN-inspired, inductive graph classifier for rumor detection.
 
-Topology and text are encoded separately. An anchored support/deny energy
-field supplies node descriptors to a GIN on variable-size propagation trees.
-The original six-dimensional structure-only input remains an ablation mode.
-Reconstruction retains each view; normalized RBF HSIC is an independence
-surrogate, NOT the variational mutual-information bound in paper Eq. (8).
-See docs/DIGNN.md for the adaptation and loss definitions.
+The default topology branch uses fixed directed stance-WL patterns, graph-local
+self-attention and differentiable hierarchical soft combinations. Version one
+trains with classification alone, without contrastive or information losses.
+The older energy/structural encoders remain explicit legacy modes.
+See docs/DIGNN_WL.md for the representation, configuration and limitations.
 """
 
 from __future__ import annotations
 
 import math
-from collections import deque
+import hashlib
+from collections import Counter, OrderedDict, deque
 
 import torch
 from torch import nn
@@ -184,12 +184,188 @@ class StructureEncoder(nn.Module):
         return hidden
 
 
+class StanceWLTokenizer:
+    """Fixed, inductive WL features; never build a vocabulary from a batch.
+
+    Full 128-bit digests identify types before embedding lookup. Two halves
+    address separate embedding tables, so a single bucket collision does not
+    merge types. This is feature hashing, not an exact learned WL dictionary.
+    Incoming and outgoing labeled multisets are hashed separately. Only roots,
+    edges and parent-relative stance enter the signatures; node IDs do not.
+    """
+
+    def __init__(self, rounds=2, buckets=8192, cache_size=256):
+        if rounds < 1 or buckets < 2 or cache_size < 0:
+            raise ValueError("WL requires rounds >= 1, buckets >= 2 and cache_size >= 0")
+        self.rounds, self.buckets, self.cache_size = rounds, buckets, cache_size
+        self._cache = OrderedDict()
+
+    @staticmethod
+    def _digest(value):
+        return hashlib.blake2b(repr(value).encode("ascii"), digest_size=16).digest()
+
+    def _patterns(self, n, root, pairs):
+        key = (n, root, tuple(sorted(pairs)))
+        if key in self._cache:
+            self._cache.move_to_end(key)
+            return self._cache[key]
+        incoming, outgoing = [[] for _ in range(n)], [[] for _ in range(n)]
+        for parent, child, relation in key[2]:
+            incoming[child].append((relation, parent))
+            outgoing[parent].append((relation, child))
+        labels = [self._digest(("root" if v == root else "node",)) for v in range(n)]
+        patterns = []
+        for radius in range(self.rounds + 1):
+            for signature, count in sorted(Counter(labels).items()):
+                patterns.append((int.from_bytes(signature[:8], "big") % self.buckets,
+                                 int.from_bytes(signature[8:], "big") % self.buckets,
+                                 radius, count))
+            if radius < self.rounds:
+                labels = [self._digest((
+                    labels[v],
+                    tuple(sorted((r, labels[u]) for r, u in incoming[v])),
+                    tuple(sorted((r, labels[w]) for r, w in outgoing[v]))))
+                    for v in range(n)]
+        if self.cache_size:
+            self._cache[key] = patterns
+            if len(self._cache) > self.cache_size:
+                self._cache.popitem(last=False)
+        return patterns
+
+    def __call__(self, edges, stance, batch, roots):
+        # One host transfer per tensor, rather than synchronization per node.
+        event_ids = batch.detach().cpu().tolist()
+        sizes = torch.bincount(batch).cpu().tolist()
+        root_ids = roots.detach().cpu().tolist()
+        edge_list = edges.detach().cpu().t().tolist()
+        relations = stance.detach().cpu().tolist()
+        offsets, offset = [], 0
+        for size in sizes:
+            offsets.append(offset)
+            offset += size
+        grouped = [[] for _ in sizes]
+        for (parent, child), relation in zip(edge_list, relations):
+            event = event_ids[parent]
+            start = offsets[event]
+            grouped[event].append((parent - start, child - start, relation))
+        patterns = [self._patterns(size, root - start, pairs)
+                    for size, root, start, pairs in zip(sizes, root_ids, offsets, grouped)]
+        width = max(map(len, patterns))
+        packed = torch.zeros(len(sizes), width, 4, dtype=torch.long)
+        for i, rows in enumerate(patterns):
+            packed[i, :len(rows)] = torch.tensor(rows, dtype=torch.long)
+        packed = packed.to(batch.device)
+        return dict(ids=packed[..., :2], scales=packed[..., 2],
+                    counts=packed[..., 3], valid=packed[..., 3] > 0)
+
+
+class SubstructureCombination(nn.Module):
+    """Within-graph attention followed by mass-preserving soft clustering."""
+
+    def __init__(self, hidden_dim, heads, clusters, dropout):
+        super().__init__()
+        self.norm1 = nn.LayerNorm(hidden_dim)
+        self.attention = nn.MultiheadAttention(hidden_dim, heads, dropout=dropout, batch_first=True)
+        self.norm2 = nn.LayerNorm(hidden_dim)
+        self.ffn = nn.Sequential(nn.Linear(hidden_dim, 2 * hidden_dim), nn.GELU(),
+                                 nn.Dropout(dropout), nn.Linear(2 * hidden_dim, hidden_dim))
+        self.assignment = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.GELU(),
+                                        nn.Linear(hidden_dim, clusters))
+        self.mass_projection = nn.Linear(2, hidden_dim)
+        self.output_norm = nn.LayerNorm(hidden_dim)
+        self.dropout = nn.Dropout(dropout)
+        self.clusters = clusters
+
+    def forward(self, hidden, mass, valid, log_attention=False):
+        normalized = self.norm1(hidden)
+        update, attention = self.attention(
+            normalized, normalized, normalized, key_padding_mask=~valid,
+            need_weights=log_attention, average_attn_weights=True)
+        hidden = hidden + self.dropout(update)
+        hidden = hidden + self.dropout(self.ffn(self.norm2(hidden)))
+        hidden = hidden.masked_fill(~valid[..., None], 0.0)
+        # Each graph may use fewer slots; padding and other events cannot
+        # increase its number of composite structures.
+        capacity = valid.sum(-1).clamp_max(self.clusters)
+        next_valid = torch.arange(self.clusters, device=hidden.device)[None] < capacity[:, None]
+        logits = self.assignment(hidden).masked_fill(~next_valid[:, None], float("-inf"))
+        assignment = logits.softmax(-1) * valid[..., None]
+        weighted = assignment * mass[..., None]
+        next_mass = weighted.sum(1)
+        combined = weighted.transpose(1, 2) @ hidden
+        combined = combined / next_mass.clamp_min(1e-8)[..., None]
+        statistics = torch.stack((next_mass.log1p(),
+                                  next_mass / next_mass.sum(-1, keepdim=True).clamp_min(1)), -1)
+        combined = self.output_norm(combined + self.mass_projection(statistics))
+        combined = combined.masked_fill(~next_valid[..., None], 0.0)
+        if attention is not None:
+            attention = attention.masked_fill(~valid[..., None], 0.0)
+        return combined, next_mass, next_valid, assignment, attention
+
+
+class WLTopologyEncoder(nn.Module):
+    """Inductive substructure encoder with no text or cross-graph attention."""
+
+    def __init__(self, hidden_dim, layers, dropout, args):
+        super().__init__()
+        rounds = int(getattr(args, "dignn_wl_rounds", 2))
+        buckets = int(getattr(args, "dignn_wl_buckets", 8192))
+        heads = int(getattr(args, "dignn_wl_heads", 4))
+        if heads < 1 or hidden_dim % heads:
+            raise ValueError("dignn_wl_heads must be positive and divide hidden_dim")
+        clusters = getattr(args, "dignn_wl_clusters", None)
+        if clusters is None:
+            clusters = [max(1, 64 // (2 ** i)) for i in range(layers)]
+        if isinstance(clusters, str):
+            clusters = clusters.split(",")
+        clusters = tuple(int(value) for value in clusters)
+        if not clusters or any(value < 1 for value in clusters):
+            raise ValueError("dignn_wl_clusters must contain positive slot counts")
+        if any(b > a for a, b in zip(clusters, clusters[1:])):
+            raise ValueError("dignn_wl_clusters must be nonincreasing")
+        self.tokenizer = StanceWLTokenizer(rounds, buckets, int(getattr(args, "dignn_wl_cache_size", 256)))
+        self.type_embeddings = nn.ModuleList([nn.Embedding(buckets, hidden_dim) for _ in range(2)])
+        self.scale_embedding = nn.Embedding(rounds + 1, hidden_dim)
+        self.count_projection = nn.Linear(2, hidden_dim)
+        self.input_norm = nn.LayerNorm(hidden_dim)
+        self.blocks = nn.ModuleList([
+            SubstructureCombination(hidden_dim, heads, count, dropout) for count in clusters])
+        self.readout_score = nn.Linear(hidden_dim, 1)
+        self.readout = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.GELU(), nn.LayerNorm(hidden_dim))
+        self.log_attention = bool(getattr(args, "dignn_wl_log_attention", False))
+
+    def forward(self, edges, stance, batch, roots):
+        tokens = self.tokenizer(edges, stance, batch, roots)
+        mass = tokens["counts"].to(self.count_projection.weight.dtype)
+        valid = tokens["valid"]
+        statistics = torch.stack((mass.log1p(), mass / mass.sum(-1, keepdim=True)), -1)
+        hidden = (self.type_embeddings[0](tokens["ids"][..., 0])
+                  + self.type_embeddings[1](tokens["ids"][..., 1])
+                  + self.scale_embedding(tokens["scales"]) + self.count_projection(statistics))
+        hidden = self.input_norm(hidden).masked_fill(~valid[..., None], 0.0)
+        diagnostics = {"wl_token_count": valid.sum(-1).detach()}
+        for level, block in enumerate(self.blocks):
+            hidden, mass, valid, assignment, attention = block(hidden, mass, valid, self.log_attention)
+            diagnostics[f"wl_level_{level}_token_count"] = valid.sum(-1).detach()
+            if self.log_attention:
+                diagnostics[f"wl_level_{level}_assignment"] = assignment.detach()
+                diagnostics[f"wl_level_{level}_attention"] = attention.detach()
+        scores = self.readout_score(hidden).squeeze(-1) + mass.clamp_min(1e-8).log()
+        weights = scores.masked_fill(~valid, float("-inf")).softmax(-1)
+        graph = self.readout((hidden * weights[..., None]).sum(1))
+        if self.log_attention:
+            diagnostics["wl_readout_attention"] = weights.detach()
+        return dict(topology_graph=graph, topology_tokens=hidden,
+                    topology_token_mass=mass, topology_token_mask=valid,
+                    wl_tokens=tokens, wl_diagnostics=diagnostics)
+
+
 class DIGNN(nn.Module):
     """Return (log_probs, U, S, D) for EINTrainer.
 
     Inputs: x [N, in_feats], edge_index [2, E], optional directed_edge_index,
     PyG batch, and optional globally indexed root_index/rootindex [B]. In the
-    project's cache the source is the first node of each event. Energy mode
+    project's cache the source is the first node of each event. WL/energy mode
     reads aligned parent-relative edge stances (0=support, 1=deny, -1=unknown).
     Rumor labels, node/user states and timestamps never construct node inputs.
     """
@@ -203,21 +379,25 @@ class DIGNN(nn.Module):
         layers = int(getattr(args, "dignn_num_layers", getattr(args, "n_layers_conv", 3)))
         dropout = float(getattr(args, "dropout", 0.3))
         self.fusion = str(getattr(args, "dignn_fusion", "attention")).strip().lower()
-        self.topology_features = str(getattr(args, "dignn_topology_features", "energy")).strip().lower()
+        self.topology_features = str(getattr(args, "dignn_topology_features", "wl")).strip().lower()
         self.loss_weights = {
             "text_reconstruction": float(getattr(args, "dignn_text_recon_weight", 0.1)),
             "structure_reconstruction": float(getattr(args, "dignn_structure_recon_weight", 0.1)),
             "edge_reconstruction": float(getattr(args, "dignn_edge_recon_weight", 0.1)),
             "independence": float(getattr(args, "dignn_independence_weight", 0.01)),
         }
+        # Version one is classification-only, even when old YAML files contain
+        # reconstruction/HSIC weights. Legacy modes still honor those options.
+        if self.topology_features == "wl":
+            self.loss_weights = {name: 0.0 for name in self.loss_weights}
         if min(self.in_feats, self.hidden_dim, num_classes, self.max_hop, layers) < 1:
             raise ValueError("dimensions, classes, max_hop and layers must be positive")
         if not 0 <= dropout < 1:
             raise ValueError("dropout must be in [0, 1)")
         if self.fusion not in {"attention", "mean", "topology", "text"}:
             raise ValueError("dignn_fusion must be attention, mean, topology or text")
-        if self.topology_features not in {"energy", "structural"}:
-            raise ValueError("dignn_topology_features must be energy or structural")
+        if self.topology_features not in {"wl", "energy", "structural"}:
+            raise ValueError("dignn_topology_features must be wl, energy or structural")
         if any(not math.isfinite(w) or w < 0 for w in self.loss_weights.values()):
             raise ValueError("DIGNN loss weights must be finite and nonnegative")
 
@@ -233,20 +413,28 @@ class DIGNN(nn.Module):
             self.structure_input_dim = 16
         topology_dim = (self.structure_input_dim if self.energy_field is None else
                         self.structure_input_dim + 11 * self.energy_field.scales.numel())
-        self.topology_encoder = StructureEncoder(self.hidden_dim, layers, dropout, topology_dim)
+        self.topology_encoder = (WLTopologyEncoder(self.hidden_dim, layers, dropout, args)
+                                 if self.topology_features == "wl" else
+                                 StructureEncoder(self.hidden_dim, layers, dropout, topology_dim))
         self.text_encoder = nn.Sequential(
             nn.Linear(self.in_feats, self.hidden_dim), nn.GELU(),
             nn.Dropout(dropout), nn.Linear(self.hidden_dim, self.hidden_dim),
             nn.LayerNorm(self.hidden_dim),
         )
         # Root semantics and whole-event content are retained within each view.
-        self.topology_readout = self._readout()
+        self.topology_readout = None if self.topology_features == "wl" else self._readout()
         self.text_readout = self._readout()
         self.view_attention = nn.Sequential(
             nn.Linear(self.hidden_dim, self.hidden_dim), nn.Tanh(),
             nn.Linear(self.hidden_dim, 1, bias=False),
         )
         self.classifier = nn.Linear(self.hidden_dim, num_classes)
+        if self.topology_features != "wl":
+            self._init_legacy_decoders()
+        self._auxiliary = None
+        self._diagnostics = {}
+
+    def _init_legacy_decoders(self):
         self.text_decoder = nn.Linear(self.hidden_dim, self.in_feats)
         # Reconstruct only fixed observations, never the trainable field or maps.
         self.structure_decoder = nn.Linear(self.hidden_dim, self.structure_input_dim)
@@ -254,8 +442,6 @@ class DIGNN(nn.Module):
         self.edge_source = nn.Linear(self.hidden_dim, self.hidden_dim, bias=False)
         self.edge_target = nn.Linear(self.hidden_dim, self.hidden_dim, bias=False)
         self.edge_bias = nn.Parameter(torch.zeros(()))
-        self._auxiliary = None
-        self._diagnostics = {}
 
     def _readout(self):
         return nn.Sequential(nn.Linear(2 * self.hidden_dim, self.hidden_dim),
@@ -371,7 +557,7 @@ class DIGNN(nn.Module):
         edges = getattr(data, "directed_edge_index", None)
         directed = edges is not None
         stance = None
-        if self.energy_field is not None:
+        if self.topology_features != "structural":
             stance = getattr(data, "directed_edge_stance", None) if directed else None
             # Pair old edge_stance with its own edge_index, never with a
             # differently ordered or differently sized directed edge tensor.
@@ -389,7 +575,7 @@ class DIGNN(nn.Module):
             raise ValueError("Edge endpoint is outside x")
         if bool((batch[edges[0]] != batch[edges[1]]).any()):
             raise ValueError("Edges cannot connect different events")
-        if self.energy_field is None:
+        if self.topology_features == "structural":
             # The structural ablation retains the original arbitrary-graph API.
             edges = coalesce(edges[:, edges[0] != edges[1]], num_nodes=x.size(0))
             return x, edges, batch, roots, sizes, None, None
@@ -438,6 +624,13 @@ class DIGNN(nn.Module):
     def encode_views(self, data):
         """Expose separate views, fixed descriptors, and differentiable fields."""
         x, edges, batch, roots, sizes, stance, depth = self._inputs(data)
+        if self.topology_features == "wl":
+            views = self.topology_encoder(edges, stance, batch, roots)
+            text = self.text_encoder(x)
+            text_graph = self.text_readout(torch.cat(
+                (text[roots], global_mean_pool(text, batch, size=sizes.numel())), dim=-1))
+            return dict(text_nodes=text, text_graph=text_graph, x=x, edge_index=edges,
+                        edge_stance=stance, batch=batch, graph_count=sizes.numel(), **views)
         energy_views = {}
         if self.energy_field is None:
             descriptors = self._structural_features(edges, batch, roots, sizes, x.dtype)
@@ -511,6 +704,8 @@ class DIGNN(nn.Module):
         representation = (stacked * attention.unsqueeze(-1)).sum(1)
         output = F.log_softmax(self.classifier(representation), dim=-1)
         self._diagnostics["view_attention"] = attention.detach()
+        if self.topology_features == "wl":
+            self._diagnostics.update(views["wl_diagnostics"])
         if self.energy_field is not None:
             event_edges = torch.bincount(views["batch"][views["edge_index"][0]], minlength=views["graph_count"])
             known_edges = torch.bincount(

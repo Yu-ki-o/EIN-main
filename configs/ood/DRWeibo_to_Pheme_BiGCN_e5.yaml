@@ -1,4 +1,4 @@
-# Single-source cross-dataset zero-shot OOD; see docs/OOD.md.
+# Source-only OOD; prepare ood_manifest before running main.py.
 model_name: EIN
 dataset: Pheme
 num_classes: 2
@@ -7,7 +7,7 @@ word_embedding: multilingual-e5-base
 e5_model_name: intfloat/multilingual-e5-base
 e5_max_length: 128
 e5_batch_size: 64
-result_name: ood_drweibo_to_pheme_bigcn_e5
+result_name: ood_drweibo_to_pheme_Plain_BiGCN_e5_e7c429df
 experiment_mode: ood
 ood_source_datasets:
 - DRWeibo
@@ -36,12 +36,12 @@ res_branch: BNConvReLU
 dropout: 0.3
 edge_norm: true
 global_pool: sum
-undirected: false
-base_model: BiGCN
+undirected: true
+base_model: Plain_BiGCN
 max_hop: 72
-init_alpha: 0.0
-init_beta: 0.0
-lamda: 1
+use_unsup_loss: false
+ragcl_lamda: 0.001
+centrality: PageRank
 ood_manifest: dataset/ood_splits/drweibo_to_pheme/seed_{seed}.json
 selection_metric: val_loss
 e5_local_files_only: true

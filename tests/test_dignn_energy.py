@@ -24,7 +24,8 @@ def graph(nodes, edges, stance=None, directed=True):
 
 
 def model(**options):
-    settings = dict(dropout=0.0, dignn_num_layers=2, max_hop=3)
+    settings = dict(dropout=0.0, dignn_num_layers=2, max_hop=3,
+                    dignn_topology_features="energy")
     settings.update(options)
     return DIGNN(4, 8, 2, SimpleNamespace(**settings))
 
