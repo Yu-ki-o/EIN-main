@@ -1,6 +1,6 @@
 # DIGNN：支持反对能量场与文本双分支谣言检测
 
-当前默认已更新为 `dignn_topology_features: wl`，第一版与第二版信息瓶颈实现及配置见
+当前默认已更新为 `dignn_topology_features: wl`，第一版实现与配置见
 [DIGNN_WL.md](DIGNN_WL.md)。下文保留为旧 energy/structural 模式的说明。
 
 参考论文：Zhixun Li 等，*The Devil is in the Conflict: Disentangled

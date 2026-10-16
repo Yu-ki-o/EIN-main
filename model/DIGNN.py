@@ -1,9 +1,8 @@
 """DIGNN-inspired, inductive graph classifier for rumor detection.
 
 The default topology branch uses fixed directed stance-WL patterns, graph-local
-self-attention and differentiable hierarchical soft combinations. Version two
-optionally adds a variational topology information bottleneck (KL plus a
-topology-only classifier). Disabling it restores version one exactly.
+self-attention and differentiable hierarchical soft combinations. Version one
+trains with classification alone, without contrastive or information losses.
 The older energy/structural encoders remain explicit legacy modes.
 See docs/DIGNN_WL.md for the representation, configuration and limitations.
 """
@@ -361,37 +360,6 @@ class WLTopologyEncoder(nn.Module):
                     wl_tokens=tokens, wl_diagnostics=diagnostics)
 
 
-class TopologyInformationBottleneck(nn.Module):
-    """Diagonal Gaussian q(z|T), with a standard-normal prior.
-
-    KL is summed over latent dimensions and averaged over events, in nats.
-    It upper-bounds I(Z;T) in expectation, rather than estimating MI directly.
-    Training uses reparameterized samples; evaluation uses the posterior mean.
-    """
-
-    def __init__(self, hidden_dim):
-        super().__init__()
-        self.mean = nn.Linear(hidden_dim, hidden_dim)
-        self.log_variance = nn.Linear(hidden_dim, hidden_dim)
-        nn.init.eye_(self.mean.weight)
-        nn.init.zeros_(self.mean.bias)
-        nn.init.zeros_(self.log_variance.weight)
-        nn.init.constant_(self.log_variance.bias, -2.0)
-
-    @staticmethod
-    def prior_kl(mean, log_variance):
-        # expm1 is more accurate than exp(x)-1 near the prior (x=0).
-        return 0.5 * (mean.square() + log_variance.expm1() - log_variance).sum(-1).mean()
-
-    def forward(self, hidden):
-        mean = self.mean(hidden)
-        log_variance = self.log_variance(hidden).clamp(-10.0, 6.0)
-        std = (0.5 * log_variance).exp()
-        sample = mean + std * torch.randn_like(std) if self.training else mean
-        return dict(sample=sample, mean=mean, log_variance=log_variance,
-                    kl=self.prior_kl(mean, log_variance))
-
-
 class DIGNN(nn.Module):
     """Return (log_probs, U, S, D) for EINTrainer.
 
@@ -418,8 +386,8 @@ class DIGNN(nn.Module):
             "edge_reconstruction": float(getattr(args, "dignn_edge_recon_weight", 0.1)),
             "independence": float(getattr(args, "dignn_independence_weight", 0.01)),
         }
-        # WL never uses legacy reconstruction/HSIC losses. IB is configured
-        # independently so disabling it restores the classification-only v1.
+        # Version one is classification-only, even when old YAML files contain
+        # reconstruction/HSIC weights. Legacy modes still honor those options.
         if self.topology_features == "wl":
             self.loss_weights = {name: 0.0 for name in self.loss_weights}
         if min(self.in_feats, self.hidden_dim, num_classes, self.max_hop, layers) < 1:
@@ -461,44 +429,10 @@ class DIGNN(nn.Module):
             nn.Linear(self.hidden_dim, 1, bias=False),
         )
         self.classifier = nn.Linear(self.hidden_dim, num_classes)
-        self.ib_enabled = getattr(args, "dignn_ib_enabled", False)
-        if not isinstance(self.ib_enabled, bool):
-            raise ValueError("dignn_ib_enabled must be a boolean")
-        self.topology_bottleneck = None
-        self.topology_classifier = None
-        if self.ib_enabled:
-            if self.topology_features != "wl":
-                raise ValueError("The topology information bottleneck requires wl mode")
-            self.ib_beta = float(getattr(args, "dignn_ib_beta", 0.001))
-            self.ib_classification_weight = float(getattr(args, "dignn_ib_classification_weight", 0.1))
-            self.ib_warmup_epochs = getattr(args, "dignn_ib_warmup_epochs", 10)
-            if any(not math.isfinite(w) or w < 0 for w in (self.ib_beta, self.ib_classification_weight)):
-                raise ValueError("IB loss weights must be finite and nonnegative")
-            if (isinstance(self.ib_warmup_epochs, bool)
-                    or not isinstance(self.ib_warmup_epochs, int) or self.ib_warmup_epochs < 0):
-                raise ValueError("dignn_ib_warmup_epochs must be a nonnegative integer")
-            self.topology_bottleneck = TopologyInformationBottleneck(self.hidden_dim)
-            self.topology_classifier = nn.Linear(self.hidden_dim, num_classes)
-            class_weights = getattr(args, "class_weights", None)
-            class_weights = (torch.empty(0) if class_weights is None else
-                             torch.as_tensor(class_weights, dtype=torch.float32))
-            if class_weights.numel() and (class_weights.shape != (num_classes,)
-                    or not bool(torch.isfinite(class_weights).all()) or bool((class_weights <= 0).any())):
-                raise ValueError("IB class_weights must contain one finite positive weight per class")
-            self.register_buffer("ib_class_weights", class_weights)
-            self.loss_weights["ib_classification"] = self.ib_classification_weight
-            self.set_epoch(1)
         if self.topology_features != "wl":
             self._init_legacy_decoders()
         self._auxiliary = None
         self._diagnostics = {}
-
-    def set_epoch(self, epoch):
-        """EINTrainer calls this before each epoch; ramp KL from beta/W to beta."""
-        if self.ib_enabled:
-            fraction = (1.0 if self.ib_warmup_epochs == 0 else
-                        min(1.0, max(0.0, float(epoch)) / self.ib_warmup_epochs))
-            self.loss_weights["ib_kl"] = self.ib_beta * fraction
 
     def _init_legacy_decoders(self):
         self.text_decoder = nn.Linear(self.hidden_dim, self.in_feats)
@@ -692,14 +626,6 @@ class DIGNN(nn.Module):
         x, edges, batch, roots, sizes, stance, depth = self._inputs(data)
         if self.topology_features == "wl":
             views = self.topology_encoder(edges, stance, batch, roots)
-            if self.ib_enabled:
-                posterior = self.topology_bottleneck(views["topology_graph"])
-                views["topology_graph_pre_ib"] = views["topology_graph"]
-                views["topology_graph"] = posterior["sample"]
-                views["ib_mean"] = posterior["mean"]
-                views["ib_log_variance"] = posterior["log_variance"]
-                views["ib_kl"] = posterior["kl"]
-                views["ib_logits"] = self.topology_classifier(posterior["sample"])
             text = self.text_encoder(x)
             text_graph = self.text_readout(torch.cat(
                 (text[roots], global_mean_pool(text, batch, size=sizes.numel())), dim=-1))
@@ -780,11 +706,6 @@ class DIGNN(nn.Module):
         self._diagnostics["view_attention"] = attention.detach()
         if self.topology_features == "wl":
             self._diagnostics.update(views["wl_diagnostics"])
-        if self.ib_enabled:
-            self._diagnostics.update(
-                ib_kl=views["ib_kl"].detach(),
-                ib_kl_weight=output.new_tensor(self.loss_weights["ib_kl"]),
-                ib_posterior_std=(0.5 * views["ib_log_variance"].detach()).exp().mean())
         if self.energy_field is not None:
             event_edges = torch.bincount(views["batch"][views["edge_index"][0]], minlength=views["graph_count"])
             known_edges = torch.bincount(
@@ -810,17 +731,6 @@ class DIGNN(nn.Module):
                     views["topology_nodes"], views["edge_index"], batch, count)
             if self.loss_weights["independence"] > 0:
                 losses["independence"] = normalized_hsic(topology, text)
-            if self.ib_enabled:
-                losses["ib_kl"] = views["ib_kl"]
-                if self.loss_weights["ib_classification"] > 0:
-                    target = getattr(data, "y", None)
-                    if target is None or target.numel() != count:
-                        raise ValueError("IB training requires one graph label in data.y per event")
-                    # Labels are read only for the auxiliary objective, after
-                    # both encoders and the fused prediction have been computed.
-                    losses["ib_classification"] = F.cross_entropy(
-                        views["ib_logits"], target.reshape(-1).long(),
-                        weight=self.ib_class_weights if self.ib_class_weights.numel() else None)
             self._auxiliary = sum(self.loss_weights[name] * value for name, value in losses.items())
             self._diagnostics.update({name: value.detach() for name, value in losses.items()})
         dummy = output.new_zeros(output.size(0), self.max_hop, 1)

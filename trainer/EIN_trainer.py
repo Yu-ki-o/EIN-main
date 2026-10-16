@@ -174,14 +174,6 @@ class EINTrainer(object):
     def _model_diagnostics(self):
         diagnostics = {}
 
-        # Log scalar topology-bottleneck terms independently of fused CE.
-        if callable(getattr(self.model, 'get_diagnostics', None)):
-            model_diagnostics = self.model.get_diagnostics()
-            for name in ('ib_kl', 'ib_classification', 'ib_kl_weight', 'ib_posterior_std'):
-                value = self._tensor_mean(model_diagnostics.get(name))
-                if value is not None:
-                    diagnostics[name] = value
-
         edge_unknown = self._tensor_mean(
             getattr(self.model, '_last_edge_unknown_mass', None)
         )
