@@ -636,7 +636,7 @@ class EINTrainer(object):
         val_loss = np.mean(val_losses)
         val_acc = accuracy_score(y_true, y_pred)
         try:
-            val_auc = roc_auc_score(y_true, y_score)
+            val_auc = roc_auc_score(y_true, y_pred)
         except ValueError:
             val_auc = np.nan
         val_f1 = f1_score(y_true, y_pred, zero_division=0)
@@ -678,7 +678,7 @@ class EINTrainer(object):
             y_pred = np.array(y_pred)
 
             acc = accuracy_score(y_true, y_pred)
-            auc = roc_auc_score(y_true, y_score) if len(np.unique(y_true)) > 1 else np.nan
+            auc = roc_auc_score(y_true, y_pred) if len(np.unique(y_true)) > 1 else np.nan
             f1 = f1_score(y_true, y_pred, zero_division=0)
 
             metrics = {'acc': acc, 'auc': auc, 'f1': f1}
