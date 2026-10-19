@@ -23,7 +23,7 @@ def graph(n, edges, stance=None, label=0):
 
 def model(**options):
     settings = dict(dropout=0.0, dignn_wl_clusters=[6, 3], dignn_wl_buckets=128,
-                    dignn_wl_rounds=2, max_hop=3)
+                    dignn_wl_rounds=2, max_hop=3, dignn_text_mode="mean")
     settings.update(options)
     return DIGNN(4, 8, 2, SimpleNamespace(**settings))
 

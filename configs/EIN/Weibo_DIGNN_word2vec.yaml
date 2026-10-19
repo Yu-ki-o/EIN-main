@@ -1,11 +1,11 @@
-# WL v1 architecture; inherited optimization settings are not retuned for WL.
+# WL + soft topics v1; inherited optimization settings are not retuned.
 model_name: EIN
 base_model: DIGNN
 dataset: Weibo
 num_classes: 2
 language: ch
 word_embedding: word2vec
-result_name: dignn_weibo_wl_v1
+result_name: dignn_weibo_wl_topics_v1
 experiment_mode: id
 ood_source_datasets: []
 ood_val_domain: source
@@ -30,6 +30,17 @@ dropout: 0.5
 undirected: true
 dignn_fusion: attention
 dignn_topology_features: wl
+dignn_text_mode: topics # mean restores the previous WL text branch
+# Initial topic settings; tune on validation data only.
+dignn_topic_clusters: 4
+dignn_topic_steps: 3
+dignn_topic_temperature: 0.5
+dignn_topic_semantic_relations: true
+dignn_topic_propagation: true
+dignn_topic_semantic_weight: 0.05
+dignn_topic_diversity_weight: 0.01
+dignn_topic_pair_budget: 256
+dignn_topic_log_assignments: false
 dignn_wl_rounds: 2
 dignn_wl_buckets: 8192
 dignn_wl_heads: 4

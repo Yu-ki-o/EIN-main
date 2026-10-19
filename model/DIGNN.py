@@ -1,10 +1,10 @@
 """DIGNN-inspired, inductive graph classifier for rumor detection.
 
 The default topology branch uses fixed directed stance-WL patterns, graph-local
-self-attention and differentiable hierarchical soft combinations. Version one
-trains with classification alone, without contrastive or information losses.
+self-attention and differentiable hierarchical soft combinations. The default
+WL model adds source-conditioned soft topics and typed topic propagation.
 The older energy/structural encoders remain explicit legacy modes.
-See docs/DIGNN_WL.md for the representation, configuration and limitations.
+See docs/DIGNN_TOPICS.md for configuration, ablations and limitations.
 """
 
 from __future__ import annotations
@@ -360,6 +360,208 @@ class WLTopologyEncoder(nn.Module):
                     wl_tokens=tokens, wl_diagnostics=diagnostics)
 
 
+class SoftTopicEncoder(nn.Module):
+    """Event-local soft topics; semantic grouping precedes typed propagation.
+
+    Root rows have zero topic membership and a separate anchor in the coarse
+    graph. Slots are capacity, not supervised topic labels. Only propagation
+    interaction consumes edges/stances; assignment and text_graph use text only.
+    """
+
+    def __init__(self, hidden_dim, dropout, args):
+        super().__init__()
+        self.clusters = int(getattr(args, "dignn_topic_clusters", 4))
+        self.steps = int(getattr(args, "dignn_topic_steps", 3))
+        self.temperature = float(getattr(args, "dignn_topic_temperature", 0.5))
+        self.pair_budget = int(getattr(args, "dignn_topic_pair_budget", 256))
+        if min(self.clusters, self.steps, self.pair_budget) < 1:
+            raise ValueError("topic clusters, steps and pair budget must be positive")
+        if not math.isfinite(self.temperature) or self.temperature <= 0:
+            raise ValueError("dignn_topic_temperature must be finite and positive")
+        self.use_semantic = bool(getattr(args, "dignn_topic_semantic_relations", True))
+        self.use_propagation = bool(getattr(args, "dignn_topic_propagation", True))
+        self.log_assignments = bool(getattr(args, "dignn_topic_log_assignments", False))
+        self.slots = nn.Parameter(torch.randn(self.clusters, hidden_dim) * 0.2)
+        self.condition = nn.Linear(2 * hidden_dim, hidden_dim)
+        self.key = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        self.query = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        self.slot_update = nn.GRUCell(hidden_dim, hidden_dim)
+        self.slot_norm = nn.LayerNorm(hidden_dim)
+        if self.use_semantic:
+            self.semantic_q = nn.Linear(hidden_dim, hidden_dim, bias=False)
+            self.semantic_k = nn.Linear(hidden_dim, hidden_dim, bias=False)
+            self.semantic_v = nn.Linear(hidden_dim, hidden_dim, bias=False)
+            self.semantic_norm = nn.LayerNorm(hidden_dim)
+        if self.use_propagation:
+            # Parent -> reply and reply -> parent remain separate for each type.
+            self.messages = nn.ModuleList([nn.Linear(hidden_dim, hidden_dim, bias=False)
+                                           for _ in range(6)])
+            self.edge_statistics = nn.Linear(6, hidden_dim)
+            self.propagation_norm = nn.LayerNorm(hidden_dim)
+        self.root_relation = nn.Sequential(nn.Linear(4 * hidden_dim, hidden_dim),
+                                           nn.GELU(), nn.LayerNorm(hidden_dim))
+        self.readout_score = nn.Linear(hidden_dim, 1)
+        self.mass_projection = nn.Linear(2, hidden_dim)
+        self.readout = nn.Sequential(nn.Linear(2 * hidden_dim, hidden_dim),
+                                     nn.GELU(), nn.LayerNorm(hidden_dim))
+        self.dropout = nn.Dropout(dropout)
+
+    @staticmethod
+    def coarse_edges(assignment, edges, stance):
+        """Compute Sbar.T A_type Sbar without an N*N or E*K*K tensor.
+
+        assignment includes an explicit source column; each row sums to one.
+        Output [3, K+1, K+1] is support/deny/unknown, parent x reply.
+        """
+        outputs = []
+        relation = torch.where(stance < 0, 2, stance)
+        for kind in range(3):
+            parent, child = edges[:, relation == kind]
+            outgoing = torch.zeros_like(assignment).index_add(0, parent, assignment[child])
+            outputs.append(assignment.transpose(0, 1) @ outgoing)
+        return torch.stack(outputs)
+
+    def _readout(self, nodes, mass):
+        root = nodes[:1].expand(nodes.size(0) - 1, -1)
+        topics = nodes[1:]
+        relation = self.root_relation(torch.cat(
+            (root, topics, (root - topics).abs(), root * topics), -1))
+        statistics = torch.stack((mass.log1p(), mass / mass.sum().clamp_min(1e-8)), -1)
+        relation = relation + self.mass_projection(statistics)
+        # Small clusters remain eligible; mass is a feature, not a hard filter.
+        weights = self.readout_score(relation).squeeze(-1).softmax(0)
+        pooled = (weights[:, None] * relation).sum(0)
+        return self.readout(torch.cat((nodes[0], pooled))), weights
+
+    def _regularizers(self, assignment, raw):
+        zero = assignment.sum() * 0.0
+        n, k = assignment.shape
+        if n < 2 or k < 2:
+            return zero, zero
+        # Fixed input vectors anchor topic meaning; labels never construct pairs.
+        # Use every unordered pair on small events, bounded samples otherwise.
+        if n * (n - 1) // 2 <= self.pair_budget:
+            left, right = torch.triu_indices(n, n, offset=1, device=raw.device)
+        else:
+            left = torch.randint(n, (self.pair_budget,), device=raw.device)
+            right = (left + torch.randint(1, n, (self.pair_budget,), device=raw.device)) % n
+        teacher = F.cosine_similarity(raw[left].detach(), raw[right].detach(), dim=-1)
+        valid = (raw[left].detach().norm(dim=-1) > 1e-8) & (raw[right].detach().norm(dim=-1) > 1e-8)
+        positive, negative = valid & (teacher >= 0.7), valid & (teacher <= 0.2)
+        affinity = (assignment[left] * assignment[right]).sum(-1).clamp(1e-6, 1 - 1e-6)
+        # Balance available positive/negative groups within each event.
+        terms = []
+        if bool(positive.any()):
+            terms.append(-affinity[positive].log().mean())
+        if bool(negative.any()):
+            terms.append(-torch.log1p(-affinity[negative]).mean())
+        semantic = torch.stack(terms).mean() if terms else zero
+        # Penalize duplicate nonempty assignment profiles, not equal cluster mass.
+        profiles = F.normalize(assignment, dim=0, eps=1e-8)
+        overlap = profiles.transpose(0, 1) @ profiles
+        upper = torch.triu(torch.ones_like(overlap, dtype=torch.bool), diagonal=1)
+        mass = assignment.sum(0)
+        weight = (mass[:, None] * mass[None, :]) / float(n * n)
+        diversity = (weight[upper] * overlap[upper].square()).sum()
+        return semantic, diversity
+
+    def forward(self, hidden, raw, edges, stance, batch, roots, regularize=False):
+        text_graphs, topic_graphs, assignments = [], [], []
+        masses, masks, relations, attention, entropies, regularizers = [], [], [], [], [], []
+        # Slices keep cost linear in N for grouping and quadratic only in K.
+        sizes = torch.bincount(batch).detach().cpu().tolist()
+        root_ids = roots.detach().cpu().tolist()
+        offset = 0
+        for event, (size, root_id) in enumerate(zip(sizes, root_ids)):
+            local = hidden[offset:offset + size]
+            root = root_id - offset
+            comments = torch.arange(size, device=hidden.device) != root
+            h = local[comments]
+            k = min(self.clusters, h.size(0))
+            if not k:
+                graph = self.readout(torch.cat((local[root], local[root])))
+                text_graphs.append(graph)
+                topic_graphs.append(graph)
+                assignments.append(hidden.new_zeros(size, self.clusters))
+                masses.append(hidden.new_zeros(self.clusters))
+                masks.append(torch.zeros(self.clusters, dtype=torch.bool, device=hidden.device))
+                relations.append(hidden.new_zeros(3, self.clusters + 1, self.clusters + 1))
+                attention.append(hidden.new_zeros(self.clusters))
+                entropies.append(hidden.new_zeros(()))
+                regularizers.append((graph.sum() * 0, graph.sum() * 0))
+                offset += size
+                continue
+            slots = self.slots[:k] + self.condition(torch.cat((local[root], h.mean(0))))
+            keys = F.normalize(self.key(h), dim=-1)
+            for step in range(self.steps):
+                queries = F.normalize(self.query(slots), dim=-1)
+                s = (keys @ queries.transpose(0, 1) / self.temperature).softmax(-1)
+                mass = s.sum(0)
+                z = (s.transpose(0, 1) @ h) / mass.clamp_min(1e-8)[:, None]
+                if step + 1 < self.steps:
+                    slots = self.slot_norm(self.slot_update(z, slots))
+            # Exact root anchor, including nonzero root positions after permutation.
+            membership = hidden.new_zeros(size, k).index_copy(
+                0, comments.nonzero(as_tuple=True)[0], s)
+            root_column = (~comments).to(hidden.dtype)[:, None]
+            extended = torch.cat((root_column, membership), -1)
+            local_edge_mask = batch[edges[0]] == event
+            local_edges = edges[:, local_edge_mask] - offset
+            coarse = self.coarse_edges(extended, local_edges, stance[local_edge_mask])
+            nodes = torch.cat((local[root:root + 1], z), 0)
+            node_mass = torch.cat((mass.new_ones(1), mass))
+            if self.use_semantic:
+                logits = self.semantic_q(nodes) @ self.semantic_k(nodes).transpose(0, 1)
+                logits = logits / math.sqrt(nodes.size(-1)) + node_mass.clamp_min(1e-8).log()[None]
+                nodes = self.semantic_norm(nodes + self.dropout(logits.softmax(-1) @ self.semantic_v(nodes)))
+            text_graph, weights = self._readout(nodes, mass)
+            if self.use_propagation:
+                update = torch.zeros_like(nodes)
+                statistics = []
+                for kind in range(3):
+                    forward = coarse[kind]
+                    reverse = forward.transpose(0, 1)
+                    for direction, matrix in enumerate((forward, reverse)):
+                        degree = matrix.sum(-1)
+                        normalized = matrix / degree.clamp_min(1e-8)[:, None]
+                        update = update + normalized @ self.messages[2 * kind + direction](nodes)
+                        statistics.append(degree.log1p())
+                update = update + self.edge_statistics(torch.stack(statistics, -1))
+                interacted = self.propagation_norm(nodes + self.dropout(update))
+                topic_graph, weights = self._readout(interacted, mass)
+            else:
+                topic_graph = text_graph
+            text_graphs.append(text_graph)
+            topic_graphs.append(topic_graph)
+            assignments.append(F.pad(membership, (0, self.clusters - k)))
+            masses.append(F.pad(mass, (0, self.clusters - k)))
+            masks.append(torch.arange(self.clusters, device=hidden.device) < k)
+            relations.append(F.pad(coarse, (0, self.clusters - k, 0, self.clusters - k)))
+            attention.append(F.pad(weights, (0, self.clusters - k)))
+            entropies.append(-(s * s.clamp_min(1e-8).log()).sum(-1).mean())
+            regularizers.append(self._regularizers(s, raw[offset:offset + size][comments])
+                                if regularize else (s.sum() * 0, s.sum() * 0))
+            offset += size
+        topic_mass = torch.stack(masses)
+        topic_mask = torch.stack(masks)
+        fraction = topic_mass / topic_mass.sum(-1, keepdim=True).clamp_min(1e-8)
+        effective = torch.exp(-(fraction * fraction.clamp_min(1e-8).log()).sum(-1))
+        effective = effective * topic_mask.any(-1)
+        diagnostics = dict(topic_mass=topic_mass.detach(), topic_mask=topic_mask.detach(),
+                           topic_effective_count=effective.detach(),
+                           topic_assignment_entropy=torch.stack(entropies).detach(),
+                           topic_readout_attention=torch.stack(attention).detach())
+        assignment = torch.cat(assignments)
+        coarse = torch.stack(relations)
+        if self.log_assignments:
+            diagnostics.update(topic_assignment=assignment.detach(), topic_edges=coarse.detach())
+        return dict(text_graph=torch.stack(text_graphs), topic_graph=torch.stack(topic_graphs),
+                    topic_assignment=assignment, topic_edges=coarse, topic_mass=topic_mass,
+                    topic_mask=topic_mask, topic_diagnostics=diagnostics,
+                    topic_semantic_loss=torch.stack([r[0] for r in regularizers]).mean(),
+                    topic_diversity_loss=torch.stack([r[1] for r in regularizers]).mean())
+
+
 class DIGNN(nn.Module):
     """Return (log_probs, U, S, D) for EINTrainer.
 
@@ -386,8 +588,8 @@ class DIGNN(nn.Module):
             "edge_reconstruction": float(getattr(args, "dignn_edge_recon_weight", 0.1)),
             "independence": float(getattr(args, "dignn_independence_weight", 0.01)),
         }
-        # Version one is classification-only, even when old YAML files contain
-        # reconstruction/HSIC weights. Legacy modes still honor those options.
+        # WL disables legacy reconstruction/HSIC; topic losses are added below.
+        # The energy/structural modes still honor their original weights.
         if self.topology_features == "wl":
             self.loss_weights = {name: 0.0 for name in self.loss_weights}
         if min(self.in_feats, self.hidden_dim, num_classes, self.max_hop, layers) < 1:
@@ -423,7 +625,24 @@ class DIGNN(nn.Module):
         )
         # Root semantics and whole-event content are retained within each view.
         self.topology_readout = None if self.topology_features == "wl" else self._readout()
-        self.text_readout = self._readout()
+        self.text_mode = str(getattr(args, "dignn_text_mode",
+                                     "topics" if self.topology_features == "wl" else "mean")).lower()
+        if self.text_mode not in {"mean", "topics"}:
+            raise ValueError("dignn_text_mode must be mean or topics")
+        if self.text_mode == "topics" and self.topology_features != "wl":
+            raise ValueError("Topic v1 requires dignn_topology_features=wl; legacy modes use mean")
+        self.topic_encoder = (SoftTopicEncoder(self.hidden_dim, dropout, args)
+                              if self.text_mode == "topics" else None)
+        self.text_readout = self._readout() if self.topic_encoder is None else None
+        if self.topic_encoder is not None:
+            for key, config, default in (
+                ("topic_semantic", "dignn_topic_semantic_weight", 0.05),
+                ("topic_diversity", "dignn_topic_diversity_weight", 0.01),
+            ):
+                weight = float(getattr(args, config, default))
+                if not math.isfinite(weight) or weight < 0:
+                    raise ValueError(config + " must be finite and nonnegative")
+                self.loss_weights[key] = 0.0 if self.fusion == "topology" else weight
         self.view_attention = nn.Sequential(
             nn.Linear(self.hidden_dim, self.hidden_dim), nn.Tanh(),
             nn.Linear(self.hidden_dim, 1, bias=False),
@@ -627,10 +846,16 @@ class DIGNN(nn.Module):
         if self.topology_features == "wl":
             views = self.topology_encoder(edges, stance, batch, roots)
             text = self.text_encoder(x)
-            text_graph = self.text_readout(torch.cat(
-                (text[roots], global_mean_pool(text, batch, size=sizes.numel())), dim=-1))
-            return dict(text_nodes=text, text_graph=text_graph, x=x, edge_index=edges,
-                        edge_stance=stance, batch=batch, graph_count=sizes.numel(), **views)
+            if self.topic_encoder is None:
+                text_views = dict(text_graph=self.text_readout(torch.cat(
+                    (text[roots], global_mean_pool(text, batch, size=sizes.numel())), dim=-1)))
+            else:
+                regularize = self.training and any(
+                    self.loss_weights[key] > 0 for key in ("topic_semantic", "topic_diversity"))
+                text_views = self.topic_encoder(text, x, edges, stance, batch, roots, regularize)
+            return dict(text_nodes=text, x=x, edge_index=edges,
+                        edge_stance=stance, batch=batch, graph_count=sizes.numel(),
+                        **text_views, **views)
         energy_views = {}
         if self.energy_field is None:
             descriptors = self._structural_features(edges, batch, roots, sizes, x.dtype)
@@ -694,7 +919,8 @@ class DIGNN(nn.Module):
         self._auxiliary = None
         self._diagnostics = {}
         views = self.encode_views(data)
-        topology, text = views["topology_graph"], views["text_graph"]
+        topology = views["topology_graph"]
+        text = views["topic_graph"] if self.topic_encoder is not None else views["text_graph"]
         stacked = torch.stack((topology, text), dim=1)
         if self.fusion == "attention":
             attention = self.view_attention(stacked).squeeze(-1).softmax(-1)
@@ -706,6 +932,8 @@ class DIGNN(nn.Module):
         self._diagnostics["view_attention"] = attention.detach()
         if self.topology_features == "wl":
             self._diagnostics.update(views["wl_diagnostics"])
+        if self.topic_encoder is not None:
+            self._diagnostics.update(views["topic_diagnostics"])
         if self.energy_field is not None:
             event_edges = torch.bincount(views["batch"][views["edge_index"][0]], minlength=views["graph_count"])
             known_edges = torch.bincount(
@@ -731,6 +959,9 @@ class DIGNN(nn.Module):
                     views["topology_nodes"], views["edge_index"], batch, count)
             if self.loss_weights["independence"] > 0:
                 losses["independence"] = normalized_hsic(topology, text)
+            if self.topic_encoder is not None:
+                losses["topic_semantic"] = views["topic_semantic_loss"]
+                losses["topic_diversity"] = views["topic_diversity_loss"]
             self._auxiliary = sum(self.loss_weights[name] * value for name, value in losses.items())
             self._diagnostics.update({name: value.detach() for name, value in losses.items()})
         dummy = output.new_zeros(output.size(0), self.max_hop, 1)
