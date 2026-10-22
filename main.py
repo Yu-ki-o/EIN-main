@@ -40,6 +40,7 @@ from supervisor import (
     EIN_DIGNN_supervisor,
     EIN_NodeIGM_supervisor,
     EIN_GroupGain_supervisor,
+    EIN_StancePath_supervisor,
     EIN_Plain_ResGCN_supervisor,
     EIN_NEGT_supervisor,
     EIN_EBGCN_supervisor,
@@ -89,6 +90,8 @@ def _summary_model_parts(args):
         return 'DIGNN', None
     if base_model == 'GroupGain':
         return 'GroupGain', 'RelationGNN'
+    if base_model == 'StancePath':
+        return 'StancePath', None
     if base_model == 'BiGCN_BackboneOnly':
         return 'BackboneOnly', 'BiGCN'
     if base_model == 'ResGCN_BackboneOnly':

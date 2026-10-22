@@ -1,0 +1,59 @@
+# Stance-response trajectories + sufficiency-constrained stochastic path compression.
+# Initial research settings; tune only on validation data.
+model_name: EIN
+base_model: StancePath
+dataset: DRWeibo
+num_classes: 2
+language: ch
+word_embedding: word2vec
+tokenize_mode: jieba
+vector_size: 200
+in_feats: 200
+result_name: stance_path_sufficiency_valloss_word2vec
+experiment_mode: id
+debug: false
+seed: 0
+device: cuda
+split: '622'
+k: 10000
+max_hop: 20
+# Reuse the directed ResGCN/SHPA cache; the model always reads original reply edges.
+undirected: false
+reuse_dataset_cache: true
+rebuild_dataset_cache: false
+num_workers: 0
+
+batch_size: 16
+hidden_dim: 128
+lr: 0.0005
+weight_decay: 0.0001
+dropout: 0.2
+n_epochs: 100
+patience: 20
+selection_metric: val_loss
+
+stance_path_use_stance: true
+stance_path_heads: 4
+stance_path_interaction_layers: 1
+stance_path_structural_bias: true
+stance_path_depth_clip: 16
+# Binary Concrete during training, deterministic threshold at evaluation.
+# There is no top-k/minimum-path fallback; an empty selection uses the source.
+stance_path_use_selection: true
+stance_path_temperature: 0.67
+stance_path_threshold: 0.5
+stance_path_prior: 0.2
+stance_path_kl_weight: 0.001
+stance_path_kl_reduction: sum
+stance_path_sufficiency_weight: 1.0
+stance_path_sufficiency_margin: 0.05
+
+# Independent validation-selected stages; teacher is frozen before student training.
+stance_path_teacher_epochs: 100
+stance_path_teacher_patience: 20
+stance_path_teacher_lr: 0.0005
+stance_path_student_epochs: 100
+stance_path_student_patience: 20
+stance_path_student_lr: 0.0005
+stance_path_micro_batch_size: 1
+stance_path_grad_clip: 5.0

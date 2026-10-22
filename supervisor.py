@@ -54,6 +54,8 @@ from model.DIGNN import DIGNN
 from model.NodeIGM import NodeIGM
 from model.GroupGain import GroupGain
 from trainer.GroupGain_trainer import GroupGainTrainer
+from model.StancePath import StancePath
+from trainer.StancePath_trainer import StancePathTrainer
 from trainer.EIN_trainer import EINTrainer
 from trainer.LIRS_trainer import LIRSTrainer
 from trainer.NEGT_trainer import NEGTTrainer
@@ -276,6 +278,7 @@ def _graph_dataset_cache_part(args):
         'DIGNN',
         'NodeIGM',
         'GroupGain',
+        'StancePath',
     }:
         return 'resgcn-tree'
     return base_model or 'unknown'
@@ -570,6 +573,7 @@ def load_graph_dataset(args, path, text_encoder):
         'EBGCN_ResGCN_StateAuxSameDiff',
         'NodeIGM',
         'GroupGain',
+        'StancePath',
         'DIGNN',
     ]:
         return ResGCNTreeDataset(path, args.word_embedding, text_encoder, args.undirected, args=args)
@@ -940,6 +944,25 @@ def EIN_NodeIGM_supervisor(args):
     ).to(device)
     optimizer = base_model.init_optimizer(args)
     trainer = EINTrainer(datasets, base_model, optimizer, args, device)
+    return trainer.train_process()
+
+
+def EIN_StancePath_supervisor(args):
+    """Reuse fixed text features and train a full teacher then a sparse student."""
+    init_seed(args.seed, need_deepfix=True)
+    device = resolve_device(args)
+    source_path, cache_path = dataset_paths(args, args.dataset)
+    datasets = load_cached_experiment_datasets(args, None, cache_path)
+    if datasets is None:
+        text_encoder = build_text_encoder(args, device, source_path)
+        datasets = build_experiment_datasets(args, text_encoder)
+    elif str(getattr(args, 'early_test_root', '')).strip():
+        text_encoder = build_text_encoder(args, device, source_path)
+        datasets = replace_early_test_dataset(args, text_encoder, datasets)
+    if getattr(args, 'experiment_mode', 'id') == 'ood':
+        args.in_feats = datasets[0].num_features
+    model = StancePath(args.in_feats, args.hidden_dim, args.num_classes, args).to(device)
+    trainer = StancePathTrainer(datasets, model, args, device)
     return trainer.train_process()
 
 

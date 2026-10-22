@@ -149,6 +149,23 @@ The classifier is intentionally reinitialized during EIN fine-tuning.
 `p2t3_unsup_weight` can additionally apply the MI objective during supervised
 fine-tuning; it defaults to `0.0`, matching the released fine-tuning script.
 
+## StancePath
+
+`model/StancePath.py` implements stance-conditioned reply trajectories,
+stochastic path compression under a prediction-sufficiency constraint, and
+attention over the deduplicated selected node union. A dedicated trainer first
+selects a full-path teacher, then freezes it while training the sparse student.
+
+```bash
+python main.py --config_filename configs/EIN/Pheme_StancePath_word2vec.yaml --seed 0
+python main.py --config_filename configs/EIN/Weibo_StancePath_word2vec.yaml --seed 0
+python main.py --config_filename configs/EIN/DRWeibo_StancePath_word2vec.yaml --seed 0
+```
+
+These configs reuse fixed Word2Vec features and local support/deny edge labels.
+See [docs/StancePath.md](docs/StancePath.md) for equations, the two-stage lifecycle,
+compression diagnostics, assumptions, and ablations.
+
 ## Requirements:
 - python==3.12
 - pytorch==2.3.1
