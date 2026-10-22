@@ -111,6 +111,10 @@ experiments/EIN/<dataset>/stance_path_sufficiency_valloss_word2vec/seed_<seed>/
 
 - `x: [N, in_feats]`：预计算固定文本特征，模型内部 detach，投影层仍可训练。
 - `directed_edge_index: [2,E]`：原始父→子关系；对应 `directed_edge_stance: [E]`。
+  兼容只有 `directed_edge_index`、`edge_index` 和 `edge_stance` 的旧缓存：
+  按 `edge_index` 的有向端点 `(父节点, 子节点)` 查找标签，重新对齐到原始回复边。
+  两套边的顺序、数量可以不同；不会直接按位置拼接标签，也不会改变回复树。
+  已存在的 `directed_edge_stance` 优先使用；它长度错误或标签非法时会明确报错。
   若没有 directed 字段，也接受已经是有向树的 `edge_index`/`edge_stance`。
 - 源帖默认是节点 0，可用单个本地索引 `root_index` 或 `rootindex` 指定。
 - 缺失 stance、冲突标签、多父节点、环或断连均报错；不静默补边或猜测 stance。
@@ -140,3 +144,5 @@ python -m pytest tests/test_stance_path.py -q
 节点重编号不变性、批处理、随机门控梯度、逐事件充分性铰链、教师无梯度、
 Bernoulli KL、三个数据集配置及缓存、两阶段训练与学生 checkpoint 独立恢复。
 未安装 PyG 时仅 PyG Batch 测试跳过，其余测试仍运行实际 PyTorch 模型和训练器。
+旧缓存回归测试覆盖边重排、无向边副本、标签缺失/冲突、错误长度，以及旧缓存的
+两阶段训练与 checkpoint 恢复。

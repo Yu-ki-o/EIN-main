@@ -42,12 +42,77 @@ class ReplyTree:
         return ReplyTree(**values)
 
 
+def _checked_stance_labels(labels, count, field):
+    if labels is None:
+        raise ValueError(
+            "{} is missing: each original reply edge needs a local stance label. "
+            "Use a cache containing directed_edge_index/directed_edge_stance or "
+            "edge_index/edge_stance built from annotated stance_label values.".format(field))
+    if not torch.is_tensor(labels) or labels.numel() != count:
+        actual = labels.numel() if torch.is_tensor(labels) else "not a tensor"
+        raise ValueError("{} has {} labels for {} matching edges; rebuild the inconsistent "
+                         "cache from annotated raw data.".format(field, actual, count))
+    labels = labels.detach().cpu().reshape(-1)
+    if not ((labels == 0) | (labels == 1)).all():
+        raise ValueError("{} requires complete local stance labels: 0=support, 1=deny; "
+                         "annotate missing stance_label values before rebuilding the cache.".format(field))
+    return labels.long()
+
+
+def _aligned_reply_stances(data, edges, num_nodes):
+    """Keep original reply edges and recover legacy labels by ordered endpoints.
+
+    Older EIN caches store directed_edge_index but only edge_stance aligned to
+    edge_index. Those edge lists may differ in both order and size. Never zip
+    the two unrelated tensors, or reverse a parent-relative stance relation.
+    An explicitly present directed_edge_stance remains authoritative.
+    """
+    directed = getattr(data, "directed_edge_index", None) is not None
+    field = "directed_edge_stance" if directed else "edge_stance"
+    labels = getattr(data, field, None)
+    if labels is not None or not directed:
+        return _checked_stance_labels(labels, edges.size(1), field)
+
+    legacy_edges = getattr(data, "edge_index", None)
+    legacy_labels = getattr(data, "edge_stance", None)
+    if legacy_edges is None or legacy_labels is None:
+        raise ValueError(
+            "directed_edge_stance is missing and legacy edge_index/edge_stance is incomplete "
+            "(edge_index={}, edge_stance={}). Rebuild the cache from raw data with "
+            "parent-relative stance_label annotations.".format(
+                "missing" if legacy_edges is None else "present",
+                "missing" if legacy_labels is None else "present"))
+    if (not torch.is_tensor(legacy_edges) or legacy_edges.ndim != 2
+            or legacy_edges.size(0) != 2 or legacy_edges.dtype != torch.long):
+        raise ValueError("Legacy edge_index for edge_stance alignment must be a long [2,E] tensor")
+    legacy_edges = legacy_edges.detach().cpu()
+    if legacy_edges.numel() and (legacy_edges.min() < 0 or legacy_edges.max() >= num_nodes):
+        raise ValueError("Legacy edge_index for edge_stance alignment contains an invalid node index")
+    legacy_labels = _checked_stance_labels(legacy_labels, legacy_edges.size(1), "edge_stance")
+    by_edge = {}
+    for endpoints, label in zip(legacy_edges.t().tolist(), legacy_labels.tolist()):
+        edge = tuple(endpoints)
+        if edge in by_edge and by_edge[edge] != label:
+            raise ValueError("Conflicting legacy edge_stance labels for reply edge {}".format(edge))
+        by_edge[edge] = label
+    reply_edges = [tuple(pair) for pair in edges.t().tolist()]
+    missing = [edge for edge in reply_edges if edge not in by_edge]
+    if missing:
+        raise ValueError(
+            "Legacy edge_index/edge_stance lacks labels for {} original directed reply edges "
+            "(examples: {}); rebuild an aligned cache. Reverse-edge labels are not substituted.".format(
+                len(missing), missing[:3]))
+    return torch.tensor([by_edge[edge] for edge in reply_edges], dtype=torch.long)
+
+
 def prepare_reply_tree(data, use_stance=True):
     """Validate a rooted reply tree, without inventing edges or stance labels.
 
     EIN caches put the source at node zero and store directed_edge_index plus
-    aligned directed_edge_stance. Plain edge_index is accepted only if it is
-    already a directed rooted tree. Invalid/missing parent relations fail fast.
+    aligned directed_edge_stance. Legacy edge_index/edge_stance can supply
+    labels by matching endpoints while retaining the original directed tree.
+    Plain edge_index alone is accepted only if it is already a directed rooted
+    tree. Invalid/missing parent relations fail fast.
     """
     if isinstance(data, ReplyTree):
         return data
@@ -65,10 +130,8 @@ def prepare_reply_tree(data, use_stance=True):
     if not 0 <= root < n:
         raise ValueError("root_index is outside the graph")
     edges = getattr(data, "directed_edge_index", None)
-    stance = getattr(data, "directed_edge_stance", None)
     if edges is None:
         edges = getattr(data, "edge_index", None)
-        stance = getattr(data, "edge_stance", None)
     if edges is None and n == 1:
         edges = torch.empty((2, 0), dtype=torch.long)
     if edges is None or edges.ndim != 2 or edges.size(0) != 2:
@@ -79,11 +142,7 @@ def prepare_reply_tree(data, use_stance=True):
     if edges.numel() and (edges.min() < 0 or edges.max() >= n):
         raise ValueError("Reply edge contains an invalid node index")
     if use_stance and edges.size(1):
-        if stance is None or stance.numel() != edges.size(1):
-            raise ValueError("Each original reply edge needs an aligned stance label")
-        stance = stance.detach().cpu().reshape(-1)
-        if not ((stance == 0) | (stance == 1)).all():
-            raise ValueError("Complete local stance labels required: 0=support, 1=deny")
+        stance = _aligned_reply_stances(data, edges, n)
     else:
         stance = torch.zeros(edges.size(1), dtype=torch.long)
     parent, relation = [-1] * n, [2] * n  # 2 is the START marker, root only.

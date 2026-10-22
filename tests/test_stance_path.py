@@ -188,6 +188,66 @@ def test_without_stance_ablation_does_not_require_or_use_labels():
     torch.testing.assert_close(before, net(raw))
 
 
+@pytest.mark.parametrize("undirected", [False, True])
+def test_legacy_stances_align_by_endpoints_not_edge_position(undirected):
+    original = graph()
+    legacy = deepcopy(original)
+    # Legacy edges deliberately have a different order. The undirected cache
+    # also has twice as many entries as the original parent-to-child tree.
+    order = torch.tensor([2, 3, 0, 1])
+    legacy.edge_index = original.directed_edge_index[:, order]
+    legacy.edge_stance = original.directed_edge_stance[order]
+    if undirected:
+        legacy.edge_index = torch.cat((legacy.edge_index, legacy.edge_index.flip(0)), 1)
+        legacy.edge_stance = legacy.edge_stance.repeat(2)
+    del legacy.directed_edge_stance
+    expected, restored = prepare_reply_tree(original), prepare_reply_tree(legacy)
+    torch.testing.assert_close(restored.parent, expected.parent)
+    torch.testing.assert_close(restored.relation, expected.relation)
+    net = model().eval()
+    torch.testing.assert_close(net(original), net(legacy), atol=0, rtol=0)
+
+
+@pytest.mark.parametrize("problem", ["missing_edge", "reverse_only", "conflict", "wrong_length", "unknown"])
+def test_legacy_stances_reject_missing_or_ambiguous_labels(problem):
+    legacy = graph()
+    legacy.edge_index = legacy.directed_edge_index.clone()
+    legacy.edge_stance = legacy.directed_edge_stance.clone()
+    del legacy.directed_edge_stance
+    if problem == "missing_edge":
+        legacy.edge_index = legacy.edge_index[:, :-1]
+        legacy.edge_stance = legacy.edge_stance[:-1]
+    elif problem == "reverse_only":
+        legacy.edge_index[:, 0] = legacy.edge_index[:, 0].flip(0)
+    elif problem == "conflict":
+        legacy.edge_index = torch.cat((legacy.edge_index, legacy.edge_index[:, :1]), 1)
+        legacy.edge_stance = torch.cat((legacy.edge_stance, 1 - legacy.edge_stance[:1]))
+    elif problem == "wrong_length":
+        legacy.edge_stance = legacy.edge_stance[:-1]
+    else:
+        legacy.edge_stance[0] = -1
+    with pytest.raises(ValueError, match="stance|label"):
+        prepare_reply_tree(legacy)
+
+
+def test_existing_directed_stances_remain_authoritative():
+    data = graph()
+    expected = prepare_reply_tree(data).relation
+    data.edge_index = data.directed_edge_index.clone()
+    data.edge_stance = 1 - data.directed_edge_stance
+    torch.testing.assert_close(prepare_reply_tree(data).relation, expected)
+    data.directed_edge_stance = data.directed_edge_stance[:-1]
+    with pytest.raises(ValueError, match="directed_edge_stance"):
+        prepare_reply_tree(data)
+
+
+def test_missing_stance_error_names_the_cache_fields():
+    data = graph()
+    del data.directed_edge_stance
+    with pytest.raises(ValueError, match="directed_edge_stance.*edge_stance"):
+        prepare_reply_tree(data)
+
+
 def load_functions(filename, names, namespace):
     tree = ast.parse((ROOT / filename).read_text(encoding="utf-8"))
     selected = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names]
@@ -230,13 +290,20 @@ def test_supervisor_reuses_ready_cache_without_loading_text_encoder():
     encoder.assert_not_called()
 
 
-def test_two_stage_training_freezes_teacher_and_checkpoint_is_student_only(tmp_path, monkeypatch):
+@pytest.mark.parametrize("legacy_cache", [False, True])
+def test_two_stage_training_freezes_teacher_and_checkpoint_is_student_only(tmp_path, monkeypatch, legacy_cache):
     import trainer.StancePath_trainer as implementation
     monkeypatch.setattr(implementation, "get_log_dir", lambda _: str(tmp_path))
     args = config(in_feats=4, hidden_dim=8, dropout=0., batch_size=2, device="cpu",
                   stance_path_teacher_epochs=1, stance_path_student_epochs=2,
                   stance_path_student_patience=2, stance_path_threshold=.6)
     datasets = tuple([graph(0), graph(1)] for _ in range(3))
+    if legacy_cache:
+        for split in datasets:
+            for data in split:
+                data.edge_index = data.directed_edge_index.flip(1)
+                data.edge_stance = data.directed_edge_stance.flip(0)
+                del data.directed_edge_stance
 
     class AuditedTrainer(StancePathTrainer):
         def _train_stage(self, net, stage, path, teacher=None):
