@@ -46,14 +46,13 @@ Each command runs seeds 0–4; add `--seed 0` for a single run or
 
 ## DIGNN-inspired rumor detection
 
-`model/DIGNN.py` encodes support/deny relations with an anchored, multiscale
-energy field followed by GIN, separately from a text MLP. It fuses event
-representations with attention and supports view
-reconstruction and an HSIC independence penalty. This adapts the ICDM 2022
-DIGNN ideas to graph-level rumor detection; HSIC replaces the paper's
-variational mutual-information objective.
-Set `dignn_topology_features: structural` for the original six-feature baseline
-or its checkpoints; the default energy mode uses aligned offline edge stances.
+`model/DIGNN.py` now probes directed support/deny relations with root impulses,
+multiscale diffusion and order-sensitive switching responses. A nonlinear
+distribution readout feeds the existing view fusion and classifier. The default
+text/topic branch is retained; use `dignn_text_mode: mean` for a text-only branch.
+The topology probe never reads node text or rumor labels.
+Set `dignn_topology_features` to `wl`, `energy` or `structural` for previous
+encoders and their checkpoints. The default `probe` branch needs retraining.
 
 ```bash
 python main.py --config_filename configs/EIN/Pheme_DIGNN_word2vec.yaml --seed 0
@@ -63,7 +62,8 @@ python main.py --config_filename configs/EIN/DRWeibo_DIGNN_word2vec.yaml --seed 
 
 The configs reuse existing Word2Vec features, graph caches and splits. Omit
 `--seed` to run seeds 0–4; add `--device cpu` for CPU execution.
-See [docs/DIGNN.md](docs/DIGNN.md) for the paper-to-code mapping, losses and ablations.
+See [docs/DIGNN_PROBE.md](docs/DIGNN_PROBE.md) for operators, ablations,
+CPU sparse-solver costs and validation; [docs/DIGNN.md](docs/DIGNN.md) covers legacy modes.
 
 ## NodeIGM
 

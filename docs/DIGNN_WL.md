@@ -3,7 +3,8 @@
 当前默认属性分支已升级为[可微软话题版本](DIGNN_TOPICS.md)。下文记录原 WL + mean 版本；
 设置 `dignn_text_mode: mean` 可恢复此版本的前向路径和参数结构。
 
-实现位于 `model/DIGNN.py`，默认 `dignn_topology_features: wl`。
+实现位于 `model/DIGNN.py`，需显式设置 `dignn_topology_features: wl`；当前默认拓扑为
+[结构探测系统](DIGNN_PROBE.md)。
 
 ## 编码流程
 

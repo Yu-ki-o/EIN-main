@@ -1,10 +1,11 @@
 """DIGNN-inspired, inductive graph classifier for rumor detection.
 
-The default topology branch uses fixed directed stance-WL patterns, graph-local
-self-attention and differentiable hierarchical soft combinations. The default
-WL model adds source-conditioned soft topics and typed topic propagation.
-The older energy/structural encoders remain explicit legacy modes.
-See docs/DIGNN_TOPICS.md for configuration, ablations and limitations.
+The default topology branch probes directed stance relations with root impulses
+and multiscale diffusion/switching responses. A nonlinear distribution readout
+encodes these responses without using text or degree-based node attributes.
+The text/topic branch and view fusion are shared with the previous WL model.
+WL, energy and structural encoders remain explicit comparison modes.
+See docs/DIGNN_PROBE.md for configuration, ablations and limitations.
 """
 
 from __future__ import annotations
@@ -13,6 +14,9 @@ import math
 import hashlib
 from collections import Counter, OrderedDict, deque
 
+import numpy as np
+from scipy.sparse import coo_matrix, diags
+from scipy.sparse.linalg import expm_multiply
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -48,6 +52,141 @@ def normalized_hsic(topology, text):
     ka, kx = centered_kernel(topology), centered_kernel(text)
     denominator = (ka.square().sum() * kx.square().sum()).clamp_min(1e-12).sqrt()
     return ((ka * kx).sum() / denominator).clamp(0.0, 1.0)
+
+
+class StanceStructureProbe(nn.Module):
+    """Root-impulse responses to fixed parent-relative relation operators.
+
+    For parent -> child edges, Q = A.T - diag(A @ 1). We evaluate exp(t Q) p
+    with SciPy's sparse exponential action in float64 on CPU; neither a dense
+    adjacency nor a dense matrix exponential is materialized. Probes are fixed
+    graph observations. Only the nonlinear encoder/readout needs gradients.
+
+    Each scale stores [all, support, deny, support_then_deny,
+    deny_then_support, order_difference]. Unknown edges belong only to `all`.
+    Input tensors must already have passed DIGNN._inputs validation.
+    """
+
+    MODES = {
+        "untyped": ("all",),
+        "typed": ("all", "support", "deny"),
+        "ordered": ("all", "support", "deny", "support_then_deny",
+                    "deny_then_support", "order_difference"),
+    }
+
+    def __init__(self, hidden_dim, dropout, args):
+        super().__init__()
+        values = getattr(args, "dignn_probe_scales", (0.25, 1.0, 4.0))
+        if isinstance(values, str):
+            values = values.split(",")
+        try:
+            scales = tuple(float(value) for value in values)
+        except (TypeError, ValueError) as error:
+            raise ValueError("dignn_probe_scales must be positive finite numbers") from error
+        if not scales or any(not math.isfinite(t) or t <= 0 for t in scales):
+            raise ValueError("dignn_probe_scales must be positive finite numbers")
+        self.mode = str(getattr(args, "dignn_probe_mode", "ordered")).lower()
+        if self.mode not in self.MODES:
+            raise ValueError("dignn_probe_mode must be untyped, typed or ordered")
+        cache_size = getattr(args, "dignn_probe_cache_size", 256)
+        if isinstance(cache_size, bool) or int(cache_size) != cache_size or cache_size < 0:
+            raise ValueError("dignn_probe_cache_size must be a nonnegative integer")
+        self.cache_size = int(cache_size)
+        self._cache = OrderedDict()
+        self.register_buffer("scales", torch.tensor(scales, dtype=torch.float64))
+        self.channels = self.MODES[self.mode]
+        width = len(scales) * len(self.channels)
+        self.node_encoder = nn.Sequential(
+            nn.Linear(1 + width, hidden_dim), nn.GELU(), nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim), nn.GELU())
+        # Sum of squared responses retains distribution information: summing
+        # raw conserved responses would give constants (1, or 0 for difference).
+        self.readout = nn.Sequential(
+            nn.Linear(2 * hidden_dim + width, hidden_dim), nn.GELU(),
+            nn.LayerNorm(hidden_dim))
+
+    @staticmethod
+    def _generator(n, pairs):
+        parents = np.asarray([pair[0] for pair in pairs], dtype=np.int64)
+        children = np.asarray([pair[1] for pair in pairs], dtype=np.int64)
+        outgoing = np.bincount(parents, minlength=n).astype(np.float64)
+        adjacency_t = coo_matrix((np.ones(len(pairs)), (children, parents)),
+                                 shape=(n, n)).tocsr()
+        return adjacency_t - diags(outgoing, format="csr"), -outgoing.sum()
+
+    def _event_responses(self, n, root, pairs, scales):
+        key = (n, root, tuple(sorted(pairs)), scales, self.mode)
+        if key in self._cache:
+            self._cache.move_to_end(key)
+            return self._cache[key]
+        operators = [self._generator(n, pairs)]
+        if self.mode != "untyped":
+            operators += [self._generator(n, [p for p in pairs if p[2] == r])
+                          for r in (0, 1)]
+        source = np.zeros(n, dtype=np.float64)
+        source[root] = 1.0
+
+        def propagate(operator, signal, time):
+            generator, trace = operator
+            if generator.nnz == 0:
+                return signal.copy()
+            return expm_multiply(time * generator, signal, traceA=time * trace)
+
+        responses = []
+        for time in scales:
+            channels = [propagate(operator, source, time) for operator in operators]
+            if self.mode == "ordered":
+                support_then_deny = propagate(operators[2], channels[1], time)
+                deny_then_support = propagate(operators[1], channels[2], time)
+                channels += [support_then_deny, deny_then_support,
+                             support_then_deny - deny_then_support]
+            responses.append(np.stack(channels, axis=-1))
+        result = np.stack(responses, axis=1)  # [N, scales, channels]
+        if self.cache_size:
+            self._cache[key] = result
+            if len(self._cache) > self.cache_size:
+                self._cache.popitem(last=False)
+        return result
+
+    def probe_responses(self, edges, stance, batch, roots):
+        """Compute each event separately so neighbors in a batch cannot affect it."""
+        sizes = torch.bincount(batch).detach().cpu().tolist()
+        offsets = np.cumsum([0] + sizes[:-1]).tolist()
+        event_ids = batch.detach().cpu().tolist()
+        root_ids = roots.detach().cpu().tolist()
+        pairs = edges.detach().cpu().t().tolist()
+        labels = stance.detach().cpu().tolist()
+        scales = tuple(self.scales.detach().cpu().tolist())
+        grouped = [[] for _ in sizes]
+        for (parent, child), label in zip(pairs, labels):
+            event = event_ids[parent]
+            offset = offsets[event]
+            grouped[event].append((parent - offset, child - offset, label))
+        responses = np.concatenate([
+            self._event_responses(n, root - offset, local, scales)
+            for n, root, offset, local in zip(sizes, root_ids, offsets, grouped)], axis=0)
+        return torch.as_tensor(responses, device=batch.device,
+                               dtype=self.node_encoder[0].weight.dtype)
+
+    def forward(self, edges, stance, batch, roots):
+        responses = self.probe_responses(edges, stance, batch, roots)
+        flat = responses.flatten(1)
+        source = flat.new_zeros(batch.numel(), 1)
+        source[roots] = 1.0
+        hidden = self.node_encoder(torch.cat((source, flat), dim=-1))
+        count = roots.numel()
+        moments = flat.new_zeros(count, flat.size(1)).index_add(0, batch, flat.square())
+        topology = self.readout(torch.cat((
+            hidden[roots], global_mean_pool(hidden, batch, size=count), moments), dim=-1))
+        mass = flat.new_zeros(count, flat.size(1)).index_add(0, batch, flat)
+        total_edges = torch.bincount(batch[edges[0]], minlength=count)
+        known_edges = torch.bincount(batch[edges[0, stance >= 0]], minlength=count)
+        diagnostics = dict(
+            probe_mass=mass.reshape(count, *responses.shape[1:]).detach(),
+            probe_second_moment=moments.reshape(count, *responses.shape[1:]).detach(),
+            probe_label_coverage=(known_edges.to(flat.dtype) / total_edges.clamp_min(1)).detach())
+        return dict(topology_nodes=hidden, topology_graph=topology,
+                    probe_responses=responses, probe_diagnostics=diagnostics)
 
 
 class StanceEnergyField(nn.Module):
@@ -567,7 +706,7 @@ class DIGNN(nn.Module):
 
     Inputs: x [N, in_feats], edge_index [2, E], optional directed_edge_index,
     PyG batch, and optional globally indexed root_index/rootindex [B]. In the
-    project's cache the source is the first node of each event. WL/energy mode
+    project's cache the source is the first node of each event. Probe/WL/energy
     reads aligned parent-relative edge stances (0=support, 1=deny, -1=unknown).
     Rumor labels, node/user states and timestamps never construct node inputs.
     """
@@ -581,16 +720,16 @@ class DIGNN(nn.Module):
         layers = int(getattr(args, "dignn_num_layers", getattr(args, "n_layers_conv", 3)))
         dropout = float(getattr(args, "dropout", 0.3))
         self.fusion = str(getattr(args, "dignn_fusion", "attention")).strip().lower()
-        self.topology_features = str(getattr(args, "dignn_topology_features", "wl")).strip().lower()
+        self.topology_features = str(getattr(args, "dignn_topology_features", "probe")).strip().lower()
         self.loss_weights = {
             "text_reconstruction": float(getattr(args, "dignn_text_recon_weight", 0.1)),
             "structure_reconstruction": float(getattr(args, "dignn_structure_recon_weight", 0.1)),
             "edge_reconstruction": float(getattr(args, "dignn_edge_recon_weight", 0.1)),
             "independence": float(getattr(args, "dignn_independence_weight", 0.01)),
         }
-        # WL disables legacy reconstruction/HSIC; topic losses are added below.
+        # Probe/WL disable legacy reconstruction/HSIC; topic losses follow.
         # The energy/structural modes still honor their original weights.
-        if self.topology_features == "wl":
+        if self.topology_features in {"probe", "wl"}:
             self.loss_weights = {name: 0.0 for name in self.loss_weights}
         if min(self.in_feats, self.hidden_dim, num_classes, self.max_hop, layers) < 1:
             raise ValueError("dimensions, classes, max_hop and layers must be positive")
@@ -598,8 +737,8 @@ class DIGNN(nn.Module):
             raise ValueError("dropout must be in [0, 1)")
         if self.fusion not in {"attention", "mean", "topology", "text"}:
             raise ValueError("dignn_fusion must be attention, mean, topology or text")
-        if self.topology_features not in {"wl", "energy", "structural"}:
-            raise ValueError("dignn_topology_features must be wl, energy or structural")
+        if self.topology_features not in {"probe", "wl", "energy", "structural"}:
+            raise ValueError("dignn_topology_features must be probe, wl, energy or structural")
         if any(not math.isfinite(w) or w < 0 for w in self.loss_weights.values()):
             raise ValueError("DIGNN loss weights must be finite and nonnegative")
 
@@ -615,22 +754,27 @@ class DIGNN(nn.Module):
             self.structure_input_dim = 16
         topology_dim = (self.structure_input_dim if self.energy_field is None else
                         self.structure_input_dim + 11 * self.energy_field.scales.numel())
-        self.topology_encoder = (WLTopologyEncoder(self.hidden_dim, layers, dropout, args)
-                                 if self.topology_features == "wl" else
-                                 StructureEncoder(self.hidden_dim, layers, dropout, topology_dim))
+        if self.topology_features == "probe":
+            self.topology_encoder = StanceStructureProbe(self.hidden_dim, dropout, args)
+        elif self.topology_features == "wl":
+            self.topology_encoder = WLTopologyEncoder(self.hidden_dim, layers, dropout, args)
+        else:
+            self.topology_encoder = StructureEncoder(self.hidden_dim, layers, dropout, topology_dim)
         self.text_encoder = nn.Sequential(
             nn.Linear(self.in_feats, self.hidden_dim), nn.GELU(),
             nn.Dropout(dropout), nn.Linear(self.hidden_dim, self.hidden_dim),
             nn.LayerNorm(self.hidden_dim),
         )
         # Root semantics and whole-event content are retained within each view.
-        self.topology_readout = None if self.topology_features == "wl" else self._readout()
+        self.topology_readout = (None if self.topology_features in {"probe", "wl"}
+                                 else self._readout())
         self.text_mode = str(getattr(args, "dignn_text_mode",
-                                     "topics" if self.topology_features == "wl" else "mean")).lower()
+                                     "topics" if self.topology_features in {"probe", "wl"}
+                                     else "mean")).lower()
         if self.text_mode not in {"mean", "topics"}:
             raise ValueError("dignn_text_mode must be mean or topics")
-        if self.text_mode == "topics" and self.topology_features != "wl":
-            raise ValueError("Topic v1 requires dignn_topology_features=wl; legacy modes use mean")
+        if self.text_mode == "topics" and self.topology_features not in {"probe", "wl"}:
+            raise ValueError("Topics require dignn_topology_features=probe or wl; legacy modes use mean")
         self.topic_encoder = (SoftTopicEncoder(self.hidden_dim, dropout, args)
                               if self.text_mode == "topics" else None)
         self.text_readout = self._readout() if self.topic_encoder is None else None
@@ -648,7 +792,7 @@ class DIGNN(nn.Module):
             nn.Linear(self.hidden_dim, 1, bias=False),
         )
         self.classifier = nn.Linear(self.hidden_dim, num_classes)
-        if self.topology_features != "wl":
+        if self.topology_features not in {"probe", "wl"}:
             self._init_legacy_decoders()
         self._auxiliary = None
         self._diagnostics = {}
@@ -705,7 +849,7 @@ class DIGNN(nn.Module):
                 adjacency[child].append(parent)
         if directed:
             if any(value > 1 for value in indegree) or any(indegree[root] for root in root_ids):
-                raise ValueError("Energy mode requires a parent-to-child forest with root indegree zero")
+                raise ValueError("Stance topology requires a parent-to-child forest with root indegree zero")
             pending = deque(index for index, value in enumerate(indegree) if value == 0)
             remaining = indegree[:]
             visited = 0
@@ -717,7 +861,7 @@ class DIGNN(nn.Module):
                     if remaining[child] == 0:
                         pending.append(child)
             if visited != n:
-                raise ValueError("Energy propagation edges cannot contain directed cycles")
+                raise ValueError("Stance propagation edges cannot contain directed cycles")
         depth = [-1] * n
         pending = deque(root_ids)
         for root in root_ids:
@@ -734,12 +878,12 @@ class DIGNN(nn.Module):
             if bool(((src_depth < 0) | (dst_depth < 0)).any()):
                 raise ValueError("Cannot orient an unrooted old cache component; provide directed_edge_index")
             if bool(((src_depth - dst_depth).abs() != 1).any()):
-                raise ValueError("Old energy cache must be a rooted tree, without same-depth links or cycles")
+                raise ValueError("Old stance cache must be a rooted tree, without same-depth links or cycles")
             flip = src_depth > dst_depth
             edges = torch.stack((torch.where(flip, edges[1], edges[0]),
                                  torch.where(flip, edges[0], edges[1])))
             if bool((torch.bincount(edges[1], minlength=n) > 1).any()):
-                raise ValueError("Old energy cache must have a unique parent for each reply")
+                raise ValueError("Old stance cache must have a unique parent for each reply")
             edges, stance = DIGNN._coalesce_stances(edges, stance, n)
         return edges, stance, depth_tensor
 
@@ -843,7 +987,7 @@ class DIGNN(nn.Module):
     def encode_views(self, data):
         """Expose separate views, fixed descriptors, and differentiable fields."""
         x, edges, batch, roots, sizes, stance, depth = self._inputs(data)
-        if self.topology_features == "wl":
+        if self.topology_features in {"probe", "wl"}:
             views = self.topology_encoder(edges, stance, batch, roots)
             text = self.text_encoder(x)
             if self.topic_encoder is None:
@@ -932,6 +1076,8 @@ class DIGNN(nn.Module):
         self._diagnostics["view_attention"] = attention.detach()
         if self.topology_features == "wl":
             self._diagnostics.update(views["wl_diagnostics"])
+        if self.topology_features == "probe":
+            self._diagnostics.update(views["probe_diagnostics"])
         if self.topic_encoder is not None:
             self._diagnostics.update(views["topic_diagnostics"])
         if self.energy_field is not None:

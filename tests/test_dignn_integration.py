@@ -65,6 +65,8 @@ class DIGNNIntegrationTest(unittest.TestCase):
             with self.subTest(dataset=dataset):
                 args, baseline = load_config(dataset), load_config(dataset, "GCN")
                 self.assertEqual(args.base_model, "DIGNN")
+                self.assertEqual(args.dignn_topology_features, "probe")
+                self.assertEqual(args.dignn_text_mode, "topics")
                 self.assertEqual(args.dataset, dataset)
                 self.assertNotEqual(args.result_name, baseline.result_name)
                 # Tuned optimization/model settings need not match the GCN.

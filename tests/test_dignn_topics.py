@@ -18,7 +18,8 @@ def graph(n=6, label=0):
 
 
 def model(**options):
-    args = dict(dropout=0.0, dignn_wl_clusters=[5, 3], dignn_wl_buckets=128,
+    args = dict(dignn_topology_features="wl", dropout=0.0,
+                dignn_wl_clusters=[5, 3], dignn_wl_buckets=128,
                 dignn_wl_rounds=1, dignn_topic_clusters=4, max_hop=2)
     args.update(options)
     return DIGNN(4, 8, 2, SimpleNamespace(**args))

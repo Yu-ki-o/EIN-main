@@ -1,7 +1,7 @@
 # DIGNN：支持反对能量场与文本双分支谣言检测
 
-当前默认是 WL 拓扑 + [可微软话题属性分支](DIGNN_TOPICS.md)。
-`dignn_text_mode: mean` 可恢复旧文本分支。WL 拓扑第一版实现与配置见
+当前默认是[结构探测系统](DIGNN_PROBE.md) + [可微软话题属性分支](DIGNN_TOPICS.md)。
+`dignn_text_mode: mean` 可使用仅依赖文本的属性分支。WL 拓扑第一版实现与配置见
 [DIGNN_WL.md](DIGNN_WL.md)。下文保留为旧 energy/structural 模式的说明。
 
 参考论文：Zhixun Li 等，*The Devil is in the Conflict: Disentangled

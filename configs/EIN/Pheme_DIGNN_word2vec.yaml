@@ -1,11 +1,11 @@
-# Stance-WL topology + source-conditioned soft topics (v1).
+# Multiscale structural probes + existing source-conditioned soft topics.
 model_name: EIN
 base_model: DIGNN
 dataset: Pheme
 num_classes: 2
 language: en
 word_embedding: word2vec
-result_name: dignn_pheme_wl_topics_v1
+result_name: dignn_pheme_probe_topics_v1
 experiment_mode: id
 ood_source_datasets: []
 ood_val_domain: source
@@ -33,8 +33,11 @@ undirected: True
 
 # Initial settings, not empirically tuned. Attention order: topology, text.
 dignn_fusion: attention
-dignn_topology_features: wl
-dignn_text_mode: topics # mean restores the previous WL text branch
+dignn_topology_features: probe
+dignn_probe_scales: [0.25, 1.0, 4.0]
+dignn_probe_mode: ordered # untyped / typed / ordered
+dignn_probe_cache_size: 256 # CPU event-response LRU; 0 disables caching
+dignn_text_mode: topics # mean uses the text-only MLP/readout
 # Initial topic settings; tune on validation data only.
 dignn_topic_clusters: 4
 dignn_topic_steps: 3
@@ -45,12 +48,6 @@ dignn_topic_semantic_weight: 0.05
 dignn_topic_diversity_weight: 0.01
 dignn_topic_pair_budget: 256
 dignn_topic_log_assignments: false
-dignn_wl_rounds: 2
-dignn_wl_buckets: 8192
-dignn_wl_heads: 4
-dignn_wl_clusters: [64, 32, 16]
-dignn_wl_cache_size: 256
-dignn_wl_log_attention: false
 dignn_text_recon_weight: 0 #0.01
 dignn_structure_recon_weight: 0 #0.01
 dignn_edge_recon_weight: 0 #0.01

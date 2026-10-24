@@ -22,7 +22,8 @@ def graph(n, edges, stance=None, label=0):
 
 
 def model(**options):
-    settings = dict(dropout=0.0, dignn_wl_clusters=[6, 3], dignn_wl_buckets=128,
+    settings = dict(dignn_topology_features="wl", dropout=0.0,
+                    dignn_wl_clusters=[6, 3], dignn_wl_buckets=128,
                     dignn_wl_rounds=2, max_hop=3, dignn_text_mode="mean")
     settings.update(options)
     return DIGNN(4, 8, 2, SimpleNamespace(**settings))
@@ -52,7 +53,7 @@ class StanceWLTest(unittest.TestCase):
         reverse = tokenizer(chain, torch.tensor([1, 0]), batch, roots)
         self.assertFalse(torch.equal(forward['ids'], reverse['ids']))
 
-    def test_default_classification_only_and_finite_training_gradients(self):
+    def test_wl_classification_only_and_finite_training_gradients(self):
         network = model(dropout=0.1, dignn_text_recon_weight=1,
                         dignn_structure_recon_weight=1, dignn_edge_recon_weight=1,
                         dignn_independence_weight=1).train()
