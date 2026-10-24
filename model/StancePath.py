@@ -217,6 +217,21 @@ def depth_encoding(depth, width, dtype):
     return result.to(dtype)
 
 
+def path_node_weights(mask, tree):
+    """Noisy-OR path union, preserving gradients under strict CUDA determinism."""
+    device = mask.device
+    # CUDA scatter_reduce(prod) has no deterministic implementation. Only move
+    # the small mask reduction to CPU; .to() keeps the selector's autograd path.
+    if mask.is_cuda and torch.are_deterministic_algorithms_enabled():
+        mask = mask.cpu()
+    nodes = tree.path_nodes.to(mask.device)
+    paths = tree.path_index.to(mask.device)
+    excluded = mask.new_ones(tree.x.size(0)).scatter_reduce(
+        0, nodes, 1 - mask[paths], reduce="prod", include_self=True)
+    weights = (1 - excluded).index_fill(0, tree.levels[0].to(mask.device), 1.0)
+    return weights.to(device)
+
+
 class TrajectoryAttention(nn.Module):
     def __init__(self, width, heads, dropout, structural_bias, depth_clip):
         super().__init__()
@@ -389,10 +404,7 @@ class StancePath(nn.Module):
                 mask = self.sample_paths(q)
             # Noisy-OR is exact set union for binary masks and a differentiable
             # relaxation for Concrete masks. Shared nodes occur exactly once.
-            excluded = tokens.new_ones(tokens.size(0)).scatter_reduce(
-                0, tree.path_nodes, 1 - mask[tree.path_index], reduce="prod", include_self=True)
-            node_weights = 1 - excluded
-            node_weights = node_weights.index_fill(0, tree.levels[0], 1.0)
+            node_weights = path_node_weights(mask, raw_tree)
             node_ids = (node_weights.detach() > 0).nonzero(as_tuple=False).flatten()
             selected, weights = tokens[node_ids], node_weights[node_ids]
             for attention in self.attention:

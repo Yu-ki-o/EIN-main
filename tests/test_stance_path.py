@@ -12,7 +12,9 @@ import torch
 import torch.nn.functional as F
 import yaml
 
-from model.StancePath import StancePath, prepare_reply_tree, compute_stance_path_loss
+from model.StancePath import (
+    StancePath, prepare_reply_tree, compute_stance_path_loss, path_node_weights,
+)
 from trainer.StancePath_trainer import StancePathTrainer, load_stance_path_checkpoint
 
 
@@ -130,6 +132,64 @@ def test_concrete_sampling_is_random_and_classification_trains_the_selector():
     assert net.selector[-1].weight.grad.abs().sum() > 0
     assert net.field[0].weight.grad.abs().sum() > 0
     assert data.x.grad is None  # fixed text embeddings
+
+
+@pytest.fixture
+def strict_determinism(monkeypatch):
+    previous = torch.are_deterministic_algorithms_enabled()
+    warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+    monkeypatch.setenv("CUBLAS_WORKSPACE_CONFIG", ":16:8")
+    torch.use_deterministic_algorithms(True)
+    try:
+        yield
+    finally:
+        torch.use_deterministic_algorithms(previous, warn_only=warn_only)
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+@pytest.mark.parametrize("values", [[.2, .4, .7], [0., 1., 1.], [1., 1., 0.], [0., 0., 0.]])
+def test_path_union_preserves_values_and_gradients_with_determinism(device, values, strict_determinism):
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA is unavailable")
+    tree = prepare_reply_tree(graph())
+    mask = torch.tensor(values, device=device, dtype=torch.float64, requires_grad=True)
+    actual = path_node_weights(mask, tree)
+    reference_mask = torch.tensor(values, dtype=torch.float64, requires_grad=True)
+    # Independent per-node product, including shared prefixes and exact zeros.
+    expected = torch.stack([
+        reference_mask.new_tensor(1.) if node == tree.root else
+        1 - (1 - reference_mask[[i for i, path in enumerate(tree.paths)
+                                if node in path.tolist()]]).prod()
+        for node in range(tree.x.size(0))
+    ])
+    torch.testing.assert_close(actual.cpu(), expected)
+    actual.sum().backward()
+    expected.sum().backward()
+    torch.testing.assert_close(mask.grad.cpu(), reference_mask.grad)
+    assert actual.device == mask.device
+    assert torch.are_deterministic_algorithms_enabled()
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+@pytest.mark.parametrize("mode", ["teacher", "student", "source_only", "singleton"])
+def test_deterministic_forward_and_backward(device, mode, strict_determinism):
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA is unavailable")
+    net = model().to(device).train()
+    data = graph()
+    if mode == "singleton":
+        data = SimpleNamespace(x=data.x[:1], y=data.y)
+    logits, details = net(data, full_paths=mode == "teacher",
+                          source_only=mode == "source_only", return_details=True)
+    F.cross_entropy(logits, data.y.to(device)).backward()
+    assert torch.isfinite(logits).all()
+    assert all(torch.isfinite(p.grad).all() for p in net.parameters() if p.grad is not None)
+    assert net.classifier[-1].weight.grad.abs().sum() > 0
+    if mode == "student":
+        assert net.selector[-1].weight.grad.abs().sum() > 0
+    if mode in {"source_only", "singleton"}:
+        assert details[0]["selected_node_ids"].tolist() == [0]
+    assert torch.are_deterministic_algorithms_enabled()
 
 
 def test_sufficiency_is_per_event_hinge_and_teacher_receives_no_gradient():

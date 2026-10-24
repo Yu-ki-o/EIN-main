@@ -29,7 +29,7 @@ lr: 0.0005
 weight_decay: 0.0001
 dropout: 0.2
 n_epochs: 100
-patience: 20
+patience: 10
 selection_metric: val_loss
 
 stance_path_use_stance: true
@@ -50,10 +50,10 @@ stance_path_sufficiency_margin: 0.05
 
 # Independent validation-selected stages; teacher is frozen before student training.
 stance_path_teacher_epochs: 100
-stance_path_teacher_patience: 20
+stance_path_teacher_patience: 10
 stance_path_teacher_lr: 0.0005
 stance_path_student_epochs: 100
-stance_path_student_patience: 20
+stance_path_student_patience: 10
 stance_path_student_lr: 0.0005
 stance_path_micro_batch_size: 1
 stance_path_grad_clip: 5.0
